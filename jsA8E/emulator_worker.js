@@ -94,6 +94,13 @@
     return new Uint8Array(0);
   }
 
+  function normalizeVideoStandard(value) {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim().toLowerCase();
+    if (text === "pal" || text === "ntsc") return text;
+    return null;
+  }
+
   function notifyError(err) {
     const message =
       err && err.message ? String(err.message) : String(err || "unknown error");
@@ -421,6 +428,10 @@
           app && typeof app.getKeyboardMappingMode === "function"
             ? app.getKeyboardMappingMode()
             : "translated",
+        videoStandard:
+          app && typeof app.getVideoStandard === "function"
+            ? app.getVideoStandard()
+            : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.videoStandard) || "pal",
       },
       debug:
         app && typeof app.getDebugState === "function" ? app.getDebugState() : null,
@@ -437,6 +448,16 @@
   }
 
   async function initApp(msg) {
+    self.A8E_BOOT_OPTIONS = Object.assign(
+      {},
+      self.A8E_BOOT_OPTIONS && typeof self.A8E_BOOT_OPTIONS === "object"
+        ? self.A8E_BOOT_OPTIONS
+        : {},
+      {
+        videoStandard: normalizeVideoStandard(msg.videoStandard) || "pal",
+      },
+    );
+
     ensureCoreLoaded();
 
     setupAudioBridgePort(msg.audioPort || null);
@@ -503,6 +524,7 @@
         turbo: !!msg.turbo,
         sioTurbo: msg.sioTurbo !== false,
         optionOnStart: !!msg.optionOnStart,
+        videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
           queueDebugState(state, force);
@@ -523,6 +545,7 @@
         turbo: !!msg.turbo,
         sioTurbo: msg.sioTurbo !== false,
         optionOnStart: !!msg.optionOnStart,
+        videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
           queueDebugState(state, force);

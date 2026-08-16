@@ -82,6 +82,13 @@
     return null;
   }
 
+  function normalizeVideoStandard(value) {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim().toLowerCase();
+    if (text === "pal" || text === "ntsc") return text;
+    return null;
+  }
+
   function getQueryWorkerPreference() {
     if (
       !window.location ||
@@ -810,6 +817,8 @@
       opts && opts.keyboardMappingMode === "original"
         ? "original"
         : "translated";
+    const videoStandard =
+      normalizeVideoStandard(opts && opts.videoStandard) || "pal";
 
     const state = {
       running: false,
@@ -823,6 +832,7 @@
       sioTurbo: false,
       audioEnabled: false,
       optionOnStart: false,
+      videoStandard: videoStandard,
     };
 
     function applyWorkerStateSnapshot(snapshot) {
@@ -851,6 +861,8 @@
           {state.optionOnStart = !!snapshot.config.optionOnStart;}
         if (typeof snapshot.config.keyboardMappingMode === "string")
           {keyboardMappingMode = snapshot.config.keyboardMappingMode === "original" ? "original" : "translated";}
+        if (typeof snapshot.config.videoStandard === "string")
+          {state.videoStandard = normalizeVideoStandard(snapshot.config.videoStandard) || state.videoStandard;}
       }
       if (snapshot.debug) emitDebugState(snapshot.debug);
       syncReadyFlag();
@@ -1143,6 +1155,7 @@
         turbo: !!opts.turbo,
         sioTurbo: opts.sioTurbo !== false,
         optionOnStart: !!opts.optionOnStart,
+        videoStandard: videoStandard,
         keyboardMappingMode: keyboardMappingMode,
       },
       [offscreen, audioChannel.port2],
@@ -1196,6 +1209,9 @@
       },
       getOptionOnStart: function () {
         return state.optionOnStart;
+      },
+      getVideoStandard: function () {
+        return state.videoStandard;
       },
       setKeyboardMappingMode: function (mode) {
         keyboardMappingMode = mode === "original" ? "original" : "translated";
@@ -1466,6 +1482,8 @@
       {app.setRenderSize = function () {};}
     if (app && typeof app.setKeyboardMappingMode !== "function")
       {app.setKeyboardMappingMode = function () {};}
+    if (app && typeof app.getVideoStandard !== "function")
+      {app.getVideoStandard = function () { return normalizeVideoStandard(legacyOpts.videoStandard) || "pal"; };}
     if (app && typeof app.setBreakpoints !== "function")
       {app.setBreakpoints = function () {};}
     if (app && typeof app.stepInstruction !== "function")

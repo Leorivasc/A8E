@@ -256,6 +256,40 @@ body {
   padding: 0;
 }
 
+.toolbarSelectWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(25, 34, 52, 0.94), rgba(16, 23, 36, 0.94));
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.toolbarSelectWrap span {
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.toolbarSelect {
+  min-width: 84px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(8, 12, 20, 0.92);
+  color: var(--text);
+  font: inherit;
+  padding: 8px 10px;
+}
+
+.toolbarSelect:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .iconControlsPrimary {
   gap: 6px;
 }

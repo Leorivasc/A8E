@@ -1205,6 +1205,10 @@
         {setKeysKeyboardMappingMode(keyboardMappingMode);}
     }
 
+    function getVideoStandard() {
+      return hwApi.VIDEO_STANDARD || "pal";
+    }
+
     function dispose() {
       debugRuntime.removeStepOverHook();
       pauseInternal("dispose");
@@ -1238,6 +1242,7 @@
       getOptionOnStart: function () { return optionOnStart; },
       setKeyboardMappingMode: setKeyboardMappingMode,
       getKeyboardMappingMode: function () { return keyboardMappingMode; },
+      getVideoStandard: getVideoStandard,
       setBreakpoints: setBreakpoints,
       stepInstruction: stepInstruction,
       stepInstructionAsync: stepInstructionAsync,

@@ -3,15 +3,65 @@
 
   let api = null;
 
-  function createApi() {
+  function normalizeVideoStandard(value) {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim().toLowerCase();
+    if (text === "pal" || text === "ntsc") return text;
+    return null;
+  }
+
+  function resolveVideoStandard(options) {
+    const direct =
+      options && Object.prototype.hasOwnProperty.call(options, "videoStandard")
+        ? normalizeVideoStandard(options.videoStandard)
+        : null;
+    if (direct) return direct;
+
+    const boot =
+      typeof window !== "undefined" &&
+      window.A8E_BOOT_OPTIONS &&
+      typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    const bootStandard = boot ? normalizeVideoStandard(boot.videoStandard) : null;
+    if (bootStandard) return bootStandard;
+
+    if (
+      typeof window !== "undefined" &&
+      window.location &&
+      typeof window.location.search === "string" &&
+      typeof window.URLSearchParams === "function"
+    ) {
+      try {
+        const params = new window.URLSearchParams(window.location.search);
+        const queryStandard = normalizeVideoStandard(
+          params.get("a8e_video_standard") || params.get("videoStandard"),
+        );
+        if (queryStandard) return queryStandard;
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+
+    return "pal";
+  }
+
+  function createApi(options) {
     if (api) return api;
 
     // --- Constants (from AtariIo.h / Antic.h / Gtia.h / Pokey.h / Pia.h) ---
     const PIXELS_PER_LINE = 456;
-    const LINES_PER_SCREEN_PAL = 312;
+    // Keep the video-standard selection here so it can be removed or reverted
+    // without touching the rest of the hardware constants.
+    const VIDEO_STANDARD = resolveVideoStandard(options);
+    const VIDEO_STANDARD_IS_NTSC = VIDEO_STANDARD === "ntsc";
+    const VIDEO_STANDARD_IS_PAL = !VIDEO_STANDARD_IS_NTSC;
+    const LINES_PER_SCREEN_PAL = VIDEO_STANDARD_IS_NTSC ? 262 : 312;
     const COLOR_CLOCKS_PER_LINE = PIXELS_PER_LINE / 2;
     const CYCLES_PER_LINE = COLOR_CLOCKS_PER_LINE / 2; // 114
-    const ATARI_CPU_HZ_PAL = 1773447;
+    const ATARI_CPU_HZ_PAL = VIDEO_STANDARD_IS_NTSC
+      ? Math.round(1789772.5)
+      : 1773447;
     const CYCLE_NEVER = Infinity;
 
     const FIRST_VISIBLE_LINE = 8;
@@ -201,7 +251,13 @@
       { addr: IO_GRAFM_TRIG1, write: 0x00, read: 0x01 },
       { addr: IO_COLPM0_TRIG2, write: 0x00, read: 0x01 },
       { addr: IO_COLPM1_TRIG3, write: 0x00, read: 0x01 },
-      { addr: IO_COLPM2_PAL, write: 0x00, read: 0x01 },
+      {
+        addr: IO_COLPM2_PAL,
+        write: 0x00,
+        // $D014 is the GTIA PAL/NTSC detect register. AHRM says PAL/SECAM
+        // reads as $01, while NTSC reads as $0F.
+        read: VIDEO_STANDARD_IS_NTSC ? 0x0f : 0x01,
+      },
       { addr: IO_COLPM3, write: 0x00, read: 0x0f },
       { addr: IO_COLPF0, write: 0x00, read: 0x0f },
       { addr: IO_COLPF1, write: 0x00, read: 0x0f },
@@ -256,10 +312,15 @@
 
     api = {
       PIXELS_PER_LINE: PIXELS_PER_LINE,
+      VIDEO_STANDARD: VIDEO_STANDARD,
+      VIDEO_STANDARD_IS_NTSC: VIDEO_STANDARD_IS_NTSC,
+      VIDEO_STANDARD_IS_PAL: VIDEO_STANDARD_IS_PAL,
       LINES_PER_SCREEN_PAL: LINES_PER_SCREEN_PAL,
+      LINES_PER_SCREEN: LINES_PER_SCREEN_PAL,
       COLOR_CLOCKS_PER_LINE: COLOR_CLOCKS_PER_LINE,
       CYCLES_PER_LINE: CYCLES_PER_LINE,
       ATARI_CPU_HZ_PAL: ATARI_CPU_HZ_PAL,
+      ATARI_CPU_HZ: ATARI_CPU_HZ_PAL,
       CYCLE_NEVER: CYCLE_NEVER,
       FIRST_VISIBLE_LINE: FIRST_VISIBLE_LINE,
       LAST_VISIBLE_LINE: LAST_VISIBLE_LINE,

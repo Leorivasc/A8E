@@ -27,6 +27,70 @@
     return null;
   }
 
+  function normalizeVideoStandard(value) {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim().toLowerCase();
+    if (text === "pal" || text === "ntsc") return text;
+    return null;
+  }
+
+  function resolveVideoStandardPreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    const bootStandard = boot ? normalizeVideoStandard(boot.videoStandard) : null;
+    if (bootStandard) return bootStandard;
+
+    try {
+      if (window.localStorage) {
+        const stored = normalizeVideoStandard(
+          window.localStorage.getItem("a8e_video_standard"),
+        );
+        if (stored) return stored;
+      }
+    } catch {
+      // ignore storage failures
+    }
+
+    if (
+      window.location &&
+      typeof window.location.search === "string" &&
+      typeof window.URLSearchParams === "function"
+    ) {
+      try {
+        const params = new window.URLSearchParams(window.location.search);
+        const queryStandard = normalizeVideoStandard(
+          params.get("a8e_video_standard") || params.get("videoStandard"),
+        );
+        if (queryStandard) return queryStandard;
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+
+    return "pal";
+  }
+
+  function persistVideoStandardPreference(videoStandard) {
+    const normalized = normalizeVideoStandard(videoStandard) || "pal";
+    try {
+      if (window.localStorage) {
+        window.localStorage.setItem("a8e_video_standard", normalized);
+      }
+    } catch {
+      // ignore storage failures
+    }
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : {};
+    window.A8E_BOOT_OPTIONS = Object.assign({}, boot, {
+      videoStandard: normalized,
+    });
+    return normalized;
+  }
+
   function resolveWorkerPreference() {
     const boot =
       window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
@@ -74,6 +138,10 @@
     canvas.tabIndex = 0;
     const nativeScreenW = canvas.width | 0;
     const nativeScreenH = canvas.height | 0;
+    const workerPreference = resolveWorkerPreference();
+    const videoStandardPreference = persistVideoStandardPreference(
+      resolveVideoStandardPreference(),
+    );
     let screenViewport = canvas.parentElement;
     let layoutRoot =
       screenViewport && screenViewport.closest
@@ -82,7 +150,6 @@
     const keyboardPanel = document.getElementById("keyboardPanel");
     const joystickPanel = document.getElementById("joystickPanel");
     let app = null;
-    const workerPreference = resolveWorkerPreference();
     const useWorkerApp =
       window.A8EApp &&
       ((typeof window.A8EApp.shouldUseWorker === "function" &&
@@ -358,6 +425,7 @@
     const btnHostFs = document.getElementById("btnHostFs");
     const btnAssembler = document.getElementById("btnAssembler");
     const btnSnapshots = document.getElementById("btnSnapshots");
+    const videoStandardSelect = document.getElementById("videoStandardSelect");
     const secondaryControls = document.getElementById("secondaryControls");
 
     function getKeyboardMappingModeFromUi() {
@@ -365,6 +433,16 @@
       return btnKeyboardMap.classList.contains("active")
         ? "translated"
         : "original";
+    }
+
+    function syncVideoStandardUi() {
+      if (!videoStandardSelect) return;
+      const next = normalizeVideoStandard(
+        app && typeof app.getVideoStandard === "function"
+          ? app.getVideoStandard()
+          : videoStandardPreference,
+      ) || "pal";
+      if (videoStandardSelect.value !== next) videoStandardSelect.value = next;
     }
 
     const romOs = document.getElementById("romOs");
@@ -576,6 +654,17 @@
 
     onPostLayoutResize = queueKeyboardScaleConsistencyCheck;
 
+    if (videoStandardSelect) {
+      videoStandardSelect.value = videoStandardPreference;
+      videoStandardSelect.addEventListener("change", function () {
+        const next = persistVideoStandardPreference(videoStandardSelect.value);
+        videoStandardSelect.value = next;
+        // Reload so the hardware tables and $D014 readback are recreated from
+        // the new standard at startup, not patched in place.
+        window.location.reload();
+      });
+    }
+
     if (
       !useWorkerApp &&
       gl &&
@@ -600,6 +689,7 @@
         sioTurbo: btnSioTurbo.classList.contains("active"),
         optionOnStart: btnOptionOnStart.classList.contains("active"),
         keyboardMappingMode: getKeyboardMappingModeFromUi(),
+        videoStandard: videoStandardPreference,
       }, workerPreference));
       resizeCrtCanvas();
     } else {
@@ -614,6 +704,7 @@
           sioTurbo: btnSioTurbo.classList.contains("active"),
           optionOnStart: btnOptionOnStart.classList.contains("active"),
           keyboardMappingMode: getKeyboardMappingModeFromUi(),
+          videoStandard: videoStandardPreference,
         }, workerPreference));
       } catch (e) {
         // If WebGL init succeeded but shader/program setup failed, fall back to 2D by replacing the canvas.
@@ -645,6 +736,7 @@
               sioTurbo: btnSioTurbo.classList.contains("active"),
               optionOnStart: btnOptionOnStart.classList.contains("active"),
               keyboardMappingMode: getKeyboardMappingModeFromUi(),
+              videoStandard: videoStandardPreference,
             }, workerPreference));
             resizeCrtCanvas();
           } else {
@@ -720,6 +812,8 @@
         setButtons(!!state.running);
       });
     }
+
+    syncVideoStandardUi();
 
     function focusCanvas(preventScroll) {
       if (!canvas || typeof canvas.focus !== "function") return;
@@ -1955,6 +2049,11 @@
     }
 
     currentApp = app;
+    // Tiny console helper for ad-hoc memory checks while debugging.
+    window.peek = function (address) {
+      if (!currentApp || typeof currentApp.readMemory !== "function") return 0;
+      return currentApp.readMemory(address | 0) & 0xff;
+    };
     if (
       window.A8EAutomation &&
       typeof window.A8EAutomation.attach === "function"
