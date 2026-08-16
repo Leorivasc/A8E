@@ -69,6 +69,7 @@ Additional browser-only triggers:
 ## UI Toggles / Features
 
 - Start/Pause, Reset, Fullscreen
+- PAL/NTSC selector for video standard selection at boot
 - CPU Turbo (`~4x` speed multiplier)
 - SIO Turbo (accelerates SIO transfer timing only)
 - Audio On/Off
@@ -78,6 +79,8 @@ Additional browser-only triggers:
 - Option-on-Start toggle (hold OPTION during boot, BASIC-off style boot behavior)
 
 On smaller/mobile layouts, the virtual keyboard starts hidden by default.
+
+For quick hardware checks from the browser console, `window.peek(address)` is available after boot. A useful example is `peek(53268)`, which reads the GTIA PAL/NTSC detect register and now returns `1` in PAL and `15` in NTSC.
 
 ## HostFS (H: Device)
 

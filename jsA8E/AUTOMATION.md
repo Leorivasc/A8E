@@ -75,9 +75,12 @@ Many methods accept duration arguments (`ms`, `holdMs`, `afterMs`, `interKeyDela
 - `waitPrimitives`, `snapshots`, `groupedApi`, `events`, `faultReporting`, `resetPortBOverride`
 - `memoryWrite`, `memoryWait`
 
+The browser bootstrap also exposes the selected video standard through `window.A8E_BOOT_OPTIONS.videoStandard`, and the console helper `window.peek(address)` remains available after UI boot for ad hoc memory checks such as `window.peek(53268)`.
+
 `getSystemState({ timeoutMs })` returns:
 
 - runtime status: `ready`, `running`, `worker`, `rendererBackend`
+- video standard: `videoStandard`
 - ROM state: `roms.osLoaded`, `roms.basicLoaded`
 - media state: `media.deviceSlots`
 - HostFS summary: `hostfs.available`, `hostfs.fileCount`
