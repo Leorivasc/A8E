@@ -10,6 +10,7 @@
   if (!hwApi) throw new Error("A8EHw is not loaded");
 
   const PIXELS_PER_LINE = hwApi.PIXELS_PER_LINE;
+  const VIDEO_STANDARD = hwApi.VIDEO_STANDARD;
   const LINES_PER_SCREEN_PAL = hwApi.LINES_PER_SCREEN_PAL;
   const CYCLES_PER_LINE = hwApi.CYCLES_PER_LINE;
   const CYCLES_PER_FRAME = LINES_PER_SCREEN_PAL * CYCLES_PER_LINE;
@@ -188,6 +189,7 @@
           Palette: Palette,
           PIXELS_PER_LINE: PIXELS_PER_LINE,
           LINES_PER_SCREEN_PAL: LINES_PER_SCREEN_PAL,
+          VIDEO_STANDARD: VIDEO_STANDARD,
           VIEW_W: VIEW_W,
           VIEW_H: VIEW_H,
           VIEW_X: VIEW_X,

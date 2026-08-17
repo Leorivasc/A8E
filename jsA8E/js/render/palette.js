@@ -7,26 +7,24 @@
     return x | 0;
   };
 
-  // Returns Uint8Array length 256*3 (RGB triplets) matching the C palette logic.
-  function createAtariPaletteRgb() {
-    const palette = new Uint8Array(256 * 3);
-    const hueAngle = [
-      0.0, 163.0, 150.0, 109.0, 42.0, 17.0, -3.0, -14.0, -26.0, -53.0, -80.0,
-      -107.0, -134.0, -161.0, -188.0, -197.0,
-    ];
+  function normalizeVideoStandard(value) {
+    if (value === undefined || value === null) return "pal";
+    const text = String(value).trim().toLowerCase();
+    return text === "ntsc" ? "ntsc" : "pal";
+  }
 
-    const CONTRAST = 1.0;
-    const BRIGHTNESS = 0.9;
+  function buildPalette(hueAngle, contrast, brightness) {
+    const palette = new Uint8Array(256 * 3);
 
     for (let lum = 0; lum < 16; lum++) {
       for (let hue = 0; hue < 16; hue++) {
         let dS, dY;
         if (hue === 0) {
           dS = 0.0;
-          dY = (lum / 15.0) * CONTRAST;
+          dY = (lum / 15.0) * contrast;
         } else {
           dS = 0.5;
-          dY = ((lum + BRIGHTNESS) / (15.0 + BRIGHTNESS)) * CONTRAST;
+          dY = ((lum + brightness) / (15.0 + brightness)) * contrast;
         }
 
         const angle = (hueAngle[hue] / 180.0) * Math.PI;
@@ -49,6 +47,54 @@
     }
 
     return palette;
+  }
+
+  const PAL_HUE_ANGLES = [
+    0.0,
+    163.0,
+    150.0,
+    109.0,
+    42.0,
+    17.0,
+    -3.0,
+    -14.0,
+    -26.0,
+    -53.0,
+    -80.0,
+    -107.0,
+    -134.0,
+    -161.0,
+    -188.0,
+    -197.0,
+  ];
+
+  const NTSC_HUE_ANGLES = [
+    0.0,
+    163.0,
+    139.0,
+    115.0,
+    91.0,
+    67.0,
+    43.0,
+    19.0,
+    -5.0,
+    -29.0,
+    -53.0,
+    -77.0,
+    -101.0,
+    -125.0,
+    -149.0,
+    -173.0,
+  ];
+
+  // Keep NTSC and PAL palettes separate so the renderer can mirror the
+  // standard-specific chroma math more closely.
+  function createAtariPaletteRgb(videoStandard) {
+    const standard = normalizeVideoStandard(videoStandard);
+    if (standard === "ntsc") {
+      return buildPalette(NTSC_HUE_ANGLES, 1.0, 0.9);
+    }
+    return buildPalette(PAL_HUE_ANGLES, 1.0, 0.9);
   }
 
   window.A8EPalette = {
