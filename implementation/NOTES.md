@@ -122,3 +122,10 @@ Process rule: review this file before planning any improvement, and update it af
 - 2026-08-16: `jsA8E/{index.html,style.css,js/app/ui.js,js/core/{hw,atari,app_proxy}.js,emulator_worker.js}`: wired a minimal PAL/NTSC selector into the browser UI and boot path. The selected standard now persists through `window.A8E_BOOT_OPTIONS` / `localStorage`, reaches both the main-thread and worker backends before hardware setup, and rebuilds the timing tables on reload. `hw.js` now selects PAL vs NTSC line count and CPU clock from the boot standard, and `$D014` reads back `01` for PAL / `0F` for NTSC per AHRM so `peek(53268)` can distinguish the machine type again.
 
 - 2026-08-17: `jsA8E/{index.html,style.css,js/app/ui.js,js/core/{state,io,memory,atari,app_proxy}.js,emulator_worker.js}`: reworked the browser memory-expansion path on top of the clean PAL/NTSC base. The UI now exposes a profile selector, `PORTB` writes preserve the raw banking bits, and the runtime carries the active extended-RAM profile through main-thread and worker boot/reset flows while restoring the banked window on `PORTB` changes. Snapshot state now includes the memory profile so COMPY and larger RAMBO variants can keep CPU/ANTIC views separate.
+
+- 2026-08-17: project checkpoint.
+  - Confirmed: PAL/NTSC selector is wired through the browser boot path.
+  - Confirmed: `peek(53268)` distinguishes PAL and NTSC again.
+  - Confirmed: PAL and NTSC now use separate browser palette tables.
+  - Confirmed: the BASIC color-bar test shows a visible PAL/NTSC difference.
+  - Pending: memory-expansion compatibility still needs a clean verification pass.
