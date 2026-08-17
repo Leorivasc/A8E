@@ -93,7 +93,7 @@
       const ram = ctx.ram;
       const sram = ctx.sram;
       const oldV = sram[IO_PORTB] & 0xff;
-      const v = ((value & 0x83) | 0x7c) & 0xff;
+      const v = value & 0xff;
 
       function traceCopy(startAddr, source) {
         if (!ctx || typeof ctx.memoryWriteHook !== "function") return;
@@ -375,7 +375,17 @@
               io.valuePortB = v;
               return io.valuePortB & 0xff;
             }
-            piaPortBWrite(ctx, v);
+            {
+              const oldV = sram[IO_PORTB] & 0xff;
+              piaPortBWrite(ctx, v);
+              if (io && typeof io.memoryExpansionSync === "function") {
+                try {
+                  io.memoryExpansionSync(ctx, oldV, v);
+                } catch {
+                  // ignore memory expansion sync errors
+                }
+              }
+            }
             break;
 
           case IO_PACTL:

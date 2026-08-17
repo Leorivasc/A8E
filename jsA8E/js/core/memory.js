@@ -70,7 +70,196 @@
   const ATR_DATA_OFFSET = ATR_HEADER_SIZE + ATR_BOOT_LOADER_SIZE;
 
   function sanitizePortB(value) {
-    return ((value & 0x83) | 0x7c) & 0xff;
+    return value & 0xff;
+  }
+
+  const MEMORY_EXPANSION_SPECS = {
+    none: {
+      key: "none",
+      label: "64K",
+      enabled: false,
+    },
+    "130xe-128k": {
+      key: "130xe-128k",
+      label: "128K (130XE)",
+      enabled: true,
+      extendedBytes: 0x10000,
+      bankBits: [2, 3],
+      cpuEnableBit: 4,
+      anticEnableBit: 5,
+      sharedWindow: false,
+      forceBasicOffWhenExpanded: false,
+      forceSelfTestOffWhenExpanded: false,
+    },
+    "rambo-192k": {
+      key: "rambo-192k",
+      label: "192K (RAMBO)",
+      enabled: true,
+      extendedBytes: 0x20000,
+      bankBits: [2, 3, 6],
+      cpuEnableBit: 4,
+      anticEnableBit: 4,
+      sharedWindow: true,
+      forceBasicOffWhenExpanded: false,
+      forceSelfTestOffWhenExpanded: false,
+    },
+    "rambo-320k": {
+      key: "rambo-320k",
+      label: "320K (RAMBO)",
+      enabled: true,
+      extendedBytes: 0x40000,
+      bankBits: [2, 3, 5, 6],
+      cpuEnableBit: 4,
+      anticEnableBit: 4,
+      sharedWindow: true,
+      forceBasicOffWhenExpanded: false,
+      forceSelfTestOffWhenExpanded: false,
+    },
+    "compy-320k": {
+      key: "compy-320k",
+      label: "320K (COMPY)",
+      enabled: true,
+      extendedBytes: 0x40000,
+      bankBits: [2, 3, 6, 7],
+      cpuEnableBit: 4,
+      anticEnableBit: 5,
+      sharedWindow: false,
+      forceBasicOffWhenExpanded: false,
+      forceSelfTestOffWhenExpanded: true,
+    },
+    "rambo-576k": {
+      key: "rambo-576k",
+      label: "576K (RAMBO)",
+      enabled: true,
+      extendedBytes: 0x80000,
+      bankBits: [1, 2, 3, 5, 6],
+      cpuEnableBit: 4,
+      anticEnableBit: 4,
+      sharedWindow: true,
+      forceBasicOffWhenExpanded: true,
+      forceSelfTestOffWhenExpanded: false,
+    },
+    "compy-576k": {
+      key: "compy-576k",
+      label: "576K (COMPY)",
+      enabled: true,
+      extendedBytes: 0x80000,
+      bankBits: [1, 2, 3, 6, 7],
+      cpuEnableBit: 4,
+      anticEnableBit: 5,
+      sharedWindow: false,
+      forceBasicOffWhenExpanded: true,
+      forceSelfTestOffWhenExpanded: true,
+    },
+    "rambo-1088k": {
+      key: "rambo-1088k",
+      label: "1088K (RAMBO)",
+      enabled: true,
+      extendedBytes: 0x100000,
+      bankBits: [1, 2, 3, 5, 6, 7],
+      cpuEnableBit: 4,
+      anticEnableBit: 4,
+      sharedWindow: true,
+      forceBasicOffWhenExpanded: true,
+      forceSelfTestOffWhenExpanded: true,
+    },
+  };
+
+  function normalizeMemoryExpansionProfile(value) {
+    if (value === undefined || value === null) return "none";
+    const text = String(value).trim().toLowerCase();
+    if (
+      text === "" ||
+      text === "none" ||
+      text === "64k" ||
+      text === "64kb" ||
+      text === "no-expansion"
+    ) {
+      return "none";
+    }
+    if (
+      text === "130xe" ||
+      text === "128k" ||
+      text === "128kb" ||
+      text === "130xe-128k"
+    ) {
+      return "130xe-128k";
+    }
+    if (text === "192k" || text === "192kb" || text === "rambo-192k") {
+      return "rambo-192k";
+    }
+    if (text === "320k" || text === "320kb" || text === "rambo-320k") {
+      return "rambo-320k";
+    }
+    if (text === "compy-320k" || text === "320k-compy") {
+      return "compy-320k";
+    }
+    if (text === "576k" || text === "576kb" || text === "rambo-576k") {
+      return "rambo-576k";
+    }
+    if (text === "compy-576k" || text === "576k-compy") {
+      return "compy-576k";
+    }
+    if (text === "1088k" || text === "1088kb" || text === "rambo-1088k") {
+      return "rambo-1088k";
+    }
+    return null;
+  }
+
+  function getMemoryExpansionSpec(profileKey) {
+    const key = normalizeMemoryExpansionProfile(profileKey);
+    return MEMORY_EXPANSION_SPECS[key] || MEMORY_EXPANSION_SPECS.none;
+  }
+
+  function createMemoryExpansionState(profileKey) {
+    const spec = getMemoryExpansionSpec(profileKey);
+    return {
+      profile: spec.key,
+      label: spec.label,
+      enabled: !!spec.enabled,
+      extendedBytes: spec.extendedBytes | 0,
+      bankBits: new Uint8Array(spec.bankBits || []),
+      bankCount: spec.bankBits ? 1 << spec.bankBits.length : 0,
+      cpuEnableBit: spec.cpuEnableBit | 0,
+      anticEnableBit: spec.anticEnableBit | 0,
+      sharedWindow: !!spec.sharedWindow,
+      forceBasicOffWhenExpanded: !!spec.forceBasicOffWhenExpanded,
+      forceSelfTestOffWhenExpanded: !!spec.forceSelfTestOffWhenExpanded,
+      bankStorage: new Uint8Array(spec.extendedBytes || 0),
+      mainWindowShadow: new Uint8Array(0x4000),
+      currentBank: 0,
+      cpuWindowEnabled: false,
+      anticWindowEnabled: false,
+      basicEnabled: false,
+      selfTestEnabled: false,
+      initialized: false,
+    };
+  }
+
+  function cloneMemoryExpansionState(state) {
+    const source = state && typeof state === "object" ? state : null;
+    if (!source) return createMemoryExpansionState("none");
+    return {
+      profile: normalizeMemoryExpansionProfile(source.profile),
+      label: source.label ? String(source.label) : getMemoryExpansionSpec(source.profile).label,
+      enabled: !!source.enabled,
+      extendedBytes: source.extendedBytes | 0,
+      bankBits: new Uint8Array(source.bankBits || 0),
+      bankCount: source.bankCount | 0,
+      cpuEnableBit: source.cpuEnableBit | 0,
+      anticEnableBit: source.anticEnableBit | 0,
+      sharedWindow: !!source.sharedWindow,
+      forceBasicOffWhenExpanded: !!source.forceBasicOffWhenExpanded,
+      forceSelfTestOffWhenExpanded: !!source.forceSelfTestOffWhenExpanded,
+      bankStorage: new Uint8Array(source.bankStorage || 0),
+      mainWindowShadow: new Uint8Array(source.mainWindowShadow || 0),
+      currentBank: source.currentBank | 0,
+      cpuWindowEnabled: !!source.cpuWindowEnabled,
+      anticWindowEnabled: !!source.anticWindowEnabled,
+      basicEnabled: !!source.basicEnabled,
+      selfTestEnabled: !!source.selfTestEnabled,
+      initialized: !!source.initialized,
+    };
   }
 
   function cloneRange(range) {
@@ -808,6 +997,9 @@
       const pokeyAudioResetState = opts.pokeyAudioResetState;
       const pokeyAudioSetTurbo = opts.pokeyAudioSetTurbo;
       let memoryWriteHook = null;
+      machine.memoryExpansion = createMemoryExpansionState(
+        opts && opts.memoryExpansion !== undefined ? opts.memoryExpansion : "none",
+      );
 
       function makeDefaultDeviceSlots() {
         const slots = new Int16Array(DEVICE_SLOT_COUNT);
@@ -907,6 +1099,130 @@
         io.osRom = media.osRom;
         io.selfTestRom = media.selfTestRom;
         io.floatingPointRom = media.floatingPointRom;
+        io.memoryExpansion = machine.memoryExpansion;
+      }
+
+      function getMemoryExpansionState() {
+        return machine.memoryExpansion || createMemoryExpansionState("none");
+      }
+
+      function getPortBMemoryBankIndex(portB, state) {
+        const mem = state || getMemoryExpansionState();
+        const bits = mem.bankBits || new Uint8Array(0);
+        if (!mem.enabled || !bits.length) return 0;
+        let bank = 0;
+        for (let i = 0; i < bits.length; i++) {
+          if (portB & (1 << (bits[i] | 0))) bank |= 1 << i;
+        }
+        if (mem.bankCount > 0) bank &= mem.bankCount - 1;
+        return bank >>> 0;
+      }
+
+      function getMemoryWindowEnabled(portB, state, isAntic) {
+        const mem = state || getMemoryExpansionState();
+        if (!mem.enabled) return false;
+        const bit = isAntic && !mem.sharedWindow ? mem.anticEnableBit : mem.cpuEnableBit;
+        if (bit < 0) return false;
+        return (portB & (1 << bit)) === 0;
+      }
+
+      function getMemoryStorageOffset(bankIndex, state) {
+        const mem = state || getMemoryExpansionState();
+        if (!mem.enabled || !mem.bankStorage || mem.bankCount <= 0) return -1;
+        const bank = bankIndex | 0;
+        if (bank < 0 || bank >= mem.bankCount) return -1;
+        return bank << 14;
+      }
+
+      function copyWindowFromStorage(ctx, state, bankIndex) {
+        const mem = state || getMemoryExpansionState();
+        const offset = getMemoryStorageOffset(bankIndex, mem);
+        if (offset < 0) return false;
+        ctx.ram.set(mem.bankStorage.subarray(offset, offset + 0x4000), 0x4000);
+        return true;
+      }
+
+      function storeWindowToStorage(ctx, state, bankIndex) {
+        const mem = state || getMemoryExpansionState();
+        const offset = getMemoryStorageOffset(bankIndex, mem);
+        if (offset < 0) return false;
+        mem.bankStorage.set(ctx.ram.subarray(0x4000, 0x8000), offset);
+        return true;
+      }
+
+      function syncMemoryExpansionWindow(ctx, oldPortB, newPortB) {
+        const mem = getMemoryExpansionState();
+        if (!mem.enabled) return;
+
+        const oldCpuEnabled = getMemoryWindowEnabled(oldPortB, mem, false);
+        const nextCpuEnabled = getMemoryWindowEnabled(newPortB, mem, false);
+        const nextAnticEnabled = getMemoryWindowEnabled(newPortB, mem, true);
+        const oldBank = getPortBMemoryBankIndex(oldPortB, mem);
+        const nextBank = getPortBMemoryBankIndex(newPortB, mem);
+        const reuseBasicBit = (mem.bankBits || []).indexOf(1) >= 0;
+        const reuseSelfTestBit = (mem.bankBits || []).indexOf(7) >= 0;
+
+        if (!mem.initialized) {
+          mem.mainWindowShadow.set(ctx.ram.subarray(0x4000, 0x8000), 0);
+          mem.currentBank = nextBank;
+          mem.cpuWindowEnabled = nextCpuEnabled;
+          mem.anticWindowEnabled = nextAnticEnabled;
+          mem.basicEnabled = (newPortB & 0x02) === 0;
+          mem.selfTestEnabled = (newPortB & 0x80) === 0;
+          if (nextCpuEnabled) {
+            copyWindowFromStorage(ctx, mem, nextBank);
+          }
+          mem.initialized = true;
+          return;
+        }
+
+        if (oldCpuEnabled && !nextCpuEnabled) {
+          storeWindowToStorage(ctx, mem, oldBank);
+          ctx.ram.set(mem.mainWindowShadow.subarray(0, 0x4000), 0x4000);
+        } else if (!oldCpuEnabled && nextCpuEnabled) {
+          mem.mainWindowShadow.set(ctx.ram.subarray(0x4000, 0x8000), 0);
+          mem.currentBank = nextBank;
+          copyWindowFromStorage(ctx, mem, nextBank);
+        } else if (oldCpuEnabled && nextCpuEnabled && oldBank !== nextBank) {
+          storeWindowToStorage(ctx, mem, oldBank);
+          mem.currentBank = nextBank;
+          copyWindowFromStorage(ctx, mem, nextBank);
+        }
+
+        mem.cpuWindowEnabled = nextCpuEnabled;
+        mem.anticWindowEnabled = nextAnticEnabled;
+        mem.currentBank = nextBank;
+
+        if (!reuseBasicBit || !nextCpuEnabled) {
+          mem.basicEnabled = (newPortB & 0x02) === 0;
+        }
+        if (!reuseSelfTestBit || !nextCpuEnabled) {
+          mem.selfTestEnabled = (newPortB & 0x80) === 0;
+        }
+      }
+
+      function readExpansionMemoryByte(ctx, address, isAnticRead) {
+        const addr = address & 0xffff;
+        const mem = getMemoryExpansionState();
+        if (!mem.enabled || addr < 0x4000 || addr > 0x7fff) {
+          return ctx.ram[addr] & 0xff;
+        }
+        const enabled = isAnticRead
+          ? (mem.sharedWindow ? mem.cpuWindowEnabled : mem.anticWindowEnabled)
+          : mem.cpuWindowEnabled;
+        if (!enabled) return ctx.ram[addr] & 0xff;
+        const bank = getPortBMemoryBankIndex(ctx.sram[IO_PORTB] & 0xff, mem);
+        const offset = getMemoryStorageOffset(bank, mem);
+        if (offset < 0) return ctx.ram[addr] & 0xff;
+        return mem.bankStorage[offset + (addr - 0x4000)] & 0xff;
+      }
+
+      function setMemoryExpansion(profileKey) {
+        machine.memoryExpansion = createMemoryExpansionState(profileKey);
+        if (machine.ctx && machine.ctx.ioData) {
+          machine.ctx.ioData.memoryExpansion = machine.memoryExpansion;
+        }
+        return machine.memoryExpansion;
       }
 
       function createDiskImage(bytes, name) {
@@ -1015,6 +1331,9 @@
         const sram = ctx.sram;
         const io = ctx.ioData;
         const portB = sram[IO_PORTB] & 0xff;
+        const mem = getMemoryExpansionState();
+        const basicEnabled = mem.enabled ? !!mem.basicEnabled : (portB & 0x02) === 0;
+        const selfTestEnabled = mem.enabled ? !!mem.selfTestEnabled : (portB & 0x80) === 0;
 
         function traceCopy(startAddr, source) {
           if (!ctx || typeof ctx.memoryWriteHook !== "function") return;
@@ -1041,7 +1360,7 @@
         CPU.setRom(ctx, 0xd000, 0xd7ff);
 
         // BASIC: bit1=0 => enabled (ROM), bit1=1 => disabled (RAM)
-        if (portB & 0x02) {
+        if (!basicEnabled) {
           const basicRamVisible = sram.subarray(0xa000, 0xc000);
           ram.set(basicRamVisible, 0xa000);
           traceCopy(0xa000, basicRamVisible);
@@ -1078,7 +1397,7 @@
         }
 
         // Self-test: bit7=0 => enabled (ROM), bit7=1 => disabled (RAM)
-        if (portB & 0x80) {
+        if (!selfTestEnabled) {
           const selfTestRamVisible = sram.subarray(0x5000, 0x5800);
           ram.set(selfTestRamVisible, 0x5000);
           traceCopy(0x5000, selfTestRamVisible);
@@ -1093,10 +1412,14 @@
 
         // I/O overrides must come after ROM mapping.
         installIoHandlers(ctx, ioAccess);
+        syncMemoryExpansionWindow(ctx, portB, portB);
       }
 
       function applyResetOverrides(options) {
         if (!options || typeof options !== "object") return;
+        if (options.memoryExpansion !== undefined && options.memoryExpansion !== null) {
+          setMemoryExpansion(options.memoryExpansion);
+        }
         if (options.portB !== undefined && options.portB !== null) {
           const portB = sanitizePortB(options.portB | 0);
           machine.ctx.ram[IO_PORTB] = portB;
@@ -1116,6 +1439,8 @@
         machine.ctx.ioData.optionOnStart = !!getOptionOnStart();
         machine.ctx.ioData.sioTurbo = !!getSioTurbo();
         copyMediaToIoData();
+        machine.ctx.ioData.memoryExpansionRead = readExpansionMemoryByte;
+        machine.ctx.ioData.memoryExpansionSync = syncMemoryExpansionWindow;
         machine.ctx.ioData.pokeyAudio = machine.audioState;
         machine.ctx.ioCycleTimedEventFunction = ioCycleTimedEvent;
         cycleTimedEventUpdate(machine.ctx);
@@ -1288,16 +1613,26 @@
       function getBankState() {
         const media = getMediaState();
         const portB = machine.ctx.sram[IO_PORTB] & 0xff;
+        const mem = getMemoryExpansionState();
         return {
           portB: portB,
-          basicEnabled: (portB & 0x02) === 0,
+          basicEnabled: mem.enabled ? !!mem.basicEnabled : (portB & 0x02) === 0,
           osEnabled: (portB & 0x01) !== 0,
           floatingPointEnabled: (portB & 0x01) !== 0,
-          selfTestEnabled: (portB & 0x80) === 0,
+          selfTestEnabled: mem.enabled ? !!mem.selfTestEnabled : (portB & 0x80) === 0,
           basicRomLoaded: !!media.basicRom,
           osRomLoaded: !!media.osRom,
           floatingPointRomLoaded: !!media.floatingPointRom,
           selfTestRomLoaded: !!media.selfTestRom,
+          memoryExpansion: {
+            profile: mem.profile,
+            label: mem.label,
+            enabled: !!mem.enabled,
+            bankCount: mem.bankCount | 0,
+            currentBank: mem.currentBank | 0,
+            cpuWindowEnabled: !!mem.cpuWindowEnabled,
+            anticWindowEnabled: !!mem.anticWindowEnabled,
+          },
         };
       }
 
@@ -1400,6 +1735,7 @@
           keyPressCounter: io.keyPressCounter | 0,
           optionOnStart: !!io.optionOnStart,
           sioTurbo: !!io.sioTurbo,
+          memoryExpansion: cloneMemoryExpansionState(io.memoryExpansion),
         };
       }
 
@@ -1513,6 +1849,7 @@
         io.keyPressCounter = state.keyPressCounter | 0;
         io.optionOnStart = !!state.optionOnStart;
         io.sioTurbo = !!state.sioTurbo;
+        io.memoryExpansion = cloneMemoryExpansionState(state.memoryExpansion);
         return io;
       }
 
@@ -1593,6 +1930,11 @@
         copyBytesTo(machine.ctx.ram, state.ram);
         copyBytesTo(machine.ctx.sram, state.sram);
         machine.ctx.ioData = createIoDataFromSnapshot(state.ioData);
+        machine.memoryExpansion =
+          machine.ctx.ioData.memoryExpansion || createMemoryExpansionState("none");
+        machine.ctx.ioData.memoryExpansion = machine.memoryExpansion;
+        machine.ctx.ioData.memoryExpansionRead = readExpansionMemoryByte;
+        machine.ctx.ioData.memoryExpansionSync = syncMemoryExpansionWindow;
         copyMediaToIoData();
         machine.ctx.ioCycleTimedEventFunction = ioCycleTimedEvent;
         machine.ctx.ioData.pokeyAudio = null;

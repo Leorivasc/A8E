@@ -165,6 +165,19 @@
                 <option value="ntsc">NTSC</option>
               </select>
             </label>
+            <label class="toolbarSelectWrap" title="Select the Atari extended memory profile. The emulator restarts the machine so the new bank map is applied cleanly.">
+              <span>Memory</span>
+              <select id="memoryExpansionSelect" class="toolbarSelect toolbarSelectWide" aria-label="Memory expansion">
+                <option value="none">64K</option>
+                <option value="130xe-128k">128K (130XE)</option>
+                <option value="rambo-192k">192K (RAMBO)</option>
+                <option value="rambo-320k">320K (RAMBO)</option>
+                <option value="compy-320k">320K (COMPY) - Nonfunctional</option>
+                <option value="rambo-576k">576K (RAMBO)</option>
+                <option value="compy-576k">576K (COMPY) - Nonfunctional</option>
+                <option value="rambo-1088k">1088K (RAMBO) - Nonfunctional</option>
+              </select>
+            </label>
             <button id="btnTurbo" class="toggle-btn" title="Toggle CPU turbo mode to run emulation faster than normal speed." aria-label="Toggle CPU turbo mode to run emulation faster than normal speed.">
               <span class="fa-layers fa-fw turbo-stack">
                 <i class="fa-solid fa-microchip"></i>

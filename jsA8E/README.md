@@ -134,7 +134,7 @@ Primary domains:
 - `artifacts.*` for screenshot/artifact capture, including `captureFailureState(...)`
 - `events.*` for `attached`, progress, pause, fault, `debugState`, build, and HostFS subscriptions
 
-Reset-time bank overrides are available for bring-up flows that need a specific boot mapping. `system.reset({ portB: 0xFF })`, `system.boot({ portB: 0xFF })`, and `dev.runXex({ ..., resetOptions: { portB: 0xFF } })` apply the initial PIA `PORTB` value before the cold-reset memory map is built.
+Reset-time bank overrides are available for bring-up flows that need a specific boot mapping. `system.reset({ portB: 0xFF })`, `system.boot({ portB: 0xFF })`, and `dev.runXex({ ..., resetOptions: { portB: 0xFF } })` apply the initial PIA `PORTB` value before the cold-reset memory map is built. The browser UI also exposes a memory-profile selector, and the same reset path accepts `memoryExpansion` for 64K, 130XE, RAMBO, and COMPY-style bank maps.
 
 Worker-backed control calls now acknowledge completion before `system.start()`, `system.pause()`, and `system.reset()` resolve, and `getSystemState({ timeoutMs })` returns partial state with an `error` object instead of hanging forever when one backend read stalls. For deterministic headless/manual fallback, boot with `?a8e_worker=0` (or set `window.A8E_BOOT_OPTIONS = { worker: false }` before `ui.js` runs) to force the main-thread backend.
 

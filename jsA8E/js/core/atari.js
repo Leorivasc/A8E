@@ -5,6 +5,20 @@
   const CPU = window.A8E6502;
   const Palette = window.A8EPalette;
 
+  function normalizeMemoryExpansion(value) {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim().toLowerCase();
+    if (text === "" || text === "none" || text === "64k" || text === "64kb" || text === "no-expansion") return "none";
+    if (text === "130xe" || text === "128k" || text === "128kb" || text === "130xe-128k") return "130xe-128k";
+    if (text === "192k" || text === "192kb" || text === "rambo-192k") return "rambo-192k";
+    if (text === "320k" || text === "320kb" || text === "rambo-320k") return "rambo-320k";
+    if (text === "compy-320k" || text === "320k-compy") return "compy-320k";
+    if (text === "576k" || text === "576kb" || text === "rambo-576k") return "rambo-576k";
+    if (text === "compy-576k" || text === "576k-compy") return "compy-576k";
+    if (text === "1088k" || text === "1088kb" || text === "rambo-1088k") return "rambo-1088k";
+    return null;
+  }
+
   const hwApi =
     window.A8EHw && window.A8EHw.createApi ? window.A8EHw.createApi() : null;
   if (!hwApi) throw new Error("A8EHw is not loaded");
@@ -560,6 +574,7 @@
     let sioTurbo = opts.sioTurbo !== false;
     const skipRendering = !!opts.skipRendering;
     let optionOnStart = !!opts.optionOnStart;
+    let memoryExpansion = normalizeMemoryExpansion(opts.memoryExpansion) || "none";
     let keyboardMappingMode =
       opts.keyboardMappingMode === "original" ? "original" : "translated";
     if (setKeysKeyboardMappingMode)
@@ -718,6 +733,7 @@
       },
       pokeyAudioResetState: pokeyAudioResetState,
       pokeyAudioSetTurbo: pokeyAudioSetTurbo,
+      memoryExpansion: memoryExpansion,
     });
     const memoryHardReset = memoryRuntime.hardReset;
     const memoryLoadOsRom = memoryRuntime.loadOsRom;
@@ -912,6 +928,7 @@
         turbo: !!turbo,
         sioTurbo: !!sioTurbo,
         optionOnStart: !!optionOnStart,
+        memoryExpansion: memoryExpansion,
         keyboardMappingMode: keyboardMappingMode,
       };
     }
@@ -930,6 +947,9 @@
       }
       if (config.optionOnStart !== undefined) {
         optionOnStart = !!config.optionOnStart;
+      }
+      if (config.memoryExpansion !== undefined) {
+        memoryExpansion = normalizeMemoryExpansion(config.memoryExpansion) || "none";
       }
       if (config.keyboardMappingMode !== undefined) {
         keyboardMappingMode =
@@ -1158,6 +1178,9 @@
     function reset(options) {
       if (!isReady()) return;
       debugRuntime.resetExecutionState();
+      if (options && typeof options === "object" && options.memoryExpansion !== undefined) {
+        memoryExpansion = normalizeMemoryExpansion(options.memoryExpansion) || memoryExpansion;
+      }
       hardResetWithInputRelease(options || null);
       publishVideoFrame();
       if (!skipRendering) paint();
@@ -1236,6 +1259,7 @@
       setSioTurbo: setSioTurbo,
       getSioTurbo: function () { return sioTurbo; },
       getSkipRendering: function () { return skipRendering; },
+      getMemoryExpansion: function () { return memoryExpansion; },
       setAudioEnabled: setAudioEnabled,
       getAudioEnabled: function () { return audioEnabled; },
       setOptionOnStart: setOptionOnStart,

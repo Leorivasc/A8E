@@ -101,6 +101,20 @@
     return null;
   }
 
+  function normalizeMemoryExpansion(value) {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim().toLowerCase();
+    if (text === "" || text === "none" || text === "64k" || text === "64kb" || text === "no-expansion") return "none";
+    if (text === "130xe" || text === "128k" || text === "128kb" || text === "130xe-128k") return "130xe-128k";
+    if (text === "192k" || text === "192kb" || text === "rambo-192k") return "rambo-192k";
+    if (text === "320k" || text === "320kb" || text === "rambo-320k") return "rambo-320k";
+    if (text === "compy-320k" || text === "320k-compy") return "compy-320k";
+    if (text === "576k" || text === "576kb" || text === "rambo-576k") return "rambo-576k";
+    if (text === "compy-576k" || text === "576k-compy") return "compy-576k";
+    if (text === "1088k" || text === "1088kb" || text === "rambo-1088k") return "rambo-1088k";
+    return null;
+  }
+
   function notifyError(err) {
     const message =
       err && err.message ? String(err.message) : String(err || "unknown error");
@@ -432,6 +446,10 @@
           app && typeof app.getVideoStandard === "function"
             ? app.getVideoStandard()
             : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.videoStandard) || "pal",
+        memoryExpansion:
+          app && typeof app.getMemoryExpansion === "function"
+            ? app.getMemoryExpansion()
+            : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.memoryExpansion) || "none",
       },
       debug:
         app && typeof app.getDebugState === "function" ? app.getDebugState() : null,
@@ -455,6 +473,7 @@
         : {},
       {
         videoStandard: normalizeVideoStandard(msg.videoStandard) || "pal",
+        memoryExpansion: normalizeMemoryExpansion(msg.memoryExpansion) || "none",
       },
     );
 
@@ -525,6 +544,7 @@
         sioTurbo: msg.sioTurbo !== false,
         optionOnStart: !!msg.optionOnStart,
         videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
+        memoryExpansion: self.A8E_BOOT_OPTIONS.memoryExpansion,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
           queueDebugState(state, force);
@@ -546,6 +566,7 @@
         sioTurbo: msg.sioTurbo !== false,
         optionOnStart: !!msg.optionOnStart,
         videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
+        memoryExpansion: self.A8E_BOOT_OPTIONS.memoryExpansion,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
           queueDebugState(state, force);

@@ -34,6 +34,20 @@
     return null;
   }
 
+  function normalizeMemoryExpansion(value) {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim().toLowerCase();
+    if (text === "" || text === "none" || text === "64k" || text === "64kb" || text === "no-expansion") return "none";
+    if (text === "130xe" || text === "128k" || text === "128kb" || text === "130xe-128k") return "130xe-128k";
+    if (text === "192k" || text === "192kb" || text === "rambo-192k") return "rambo-192k";
+    if (text === "320k" || text === "320kb" || text === "rambo-320k") return "rambo-320k";
+    if (text === "compy-320k" || text === "320k-compy") return "compy-320k";
+    if (text === "576k" || text === "576kb" || text === "rambo-576k") return "rambo-576k";
+    if (text === "compy-576k" || text === "576k-compy") return "compy-576k";
+    if (text === "1088k" || text === "1088kb" || text === "rambo-1088k") return "rambo-1088k";
+    return null;
+  }
+
   function resolveVideoStandardPreference() {
     const boot =
       window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
@@ -91,6 +105,63 @@
     return normalized;
   }
 
+  function resolveMemoryExpansionPreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    const bootExpansion = boot ? normalizeMemoryExpansion(boot.memoryExpansion) : null;
+    if (bootExpansion) return bootExpansion;
+
+    try {
+      if (window.localStorage) {
+        const stored = normalizeMemoryExpansion(
+          window.localStorage.getItem("a8e_memory_expansion"),
+        );
+        if (stored) return stored;
+      }
+    } catch {
+      // ignore storage failures
+    }
+
+    if (
+      window.location &&
+      typeof window.location.search === "string" &&
+      typeof window.URLSearchParams === "function"
+    ) {
+      try {
+        const params = new window.URLSearchParams(window.location.search);
+        const queryExpansion = normalizeMemoryExpansion(
+          params.get("a8e_memory_expansion") || params.get("memoryExpansion"),
+        );
+        if (queryExpansion) return queryExpansion;
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+
+    return "none";
+  }
+
+  function persistMemoryExpansionPreference(memoryExpansion) {
+    const normalized = normalizeMemoryExpansion(memoryExpansion) || "none";
+    try {
+      if (window.localStorage) {
+        window.localStorage.setItem("a8e_memory_expansion", normalized);
+      }
+    } catch {
+      // ignore storage failures
+    }
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : {};
+    window.A8E_BOOT_OPTIONS = Object.assign({}, boot, {
+      memoryExpansion: normalized,
+    });
+    return normalized;
+  }
+
   function resolveWorkerPreference() {
     const boot =
       window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
@@ -141,6 +212,9 @@
     const workerPreference = resolveWorkerPreference();
     const videoStandardPreference = persistVideoStandardPreference(
       resolveVideoStandardPreference(),
+    );
+    const memoryExpansionPreference = persistMemoryExpansionPreference(
+      resolveMemoryExpansionPreference(),
     );
     let screenViewport = canvas.parentElement;
     let layoutRoot =
@@ -426,6 +500,7 @@
     const btnAssembler = document.getElementById("btnAssembler");
     const btnSnapshots = document.getElementById("btnSnapshots");
     const videoStandardSelect = document.getElementById("videoStandardSelect");
+    const memoryExpansionSelect = document.getElementById("memoryExpansionSelect");
     const secondaryControls = document.getElementById("secondaryControls");
 
     function getKeyboardMappingModeFromUi() {
@@ -443,6 +518,16 @@
           : videoStandardPreference,
       ) || "pal";
       if (videoStandardSelect.value !== next) videoStandardSelect.value = next;
+    }
+
+    function syncMemoryExpansionUi() {
+      if (!memoryExpansionSelect) return;
+      const next = normalizeMemoryExpansion(
+        app && typeof app.getMemoryExpansion === "function"
+          ? app.getMemoryExpansion()
+          : memoryExpansionPreference,
+      ) || "none";
+      if (memoryExpansionSelect.value !== next) memoryExpansionSelect.value = next;
     }
 
     const romOs = document.getElementById("romOs");
@@ -665,6 +750,17 @@
       });
     }
 
+    if (memoryExpansionSelect) {
+      memoryExpansionSelect.value = memoryExpansionPreference;
+      memoryExpansionSelect.addEventListener("change", function () {
+        const next = persistMemoryExpansionPreference(memoryExpansionSelect.value);
+        memoryExpansionSelect.value = next;
+        if (app && typeof app.reset === "function") {
+          app.reset({ memoryExpansion: next });
+        }
+      });
+    }
+
     if (
       !useWorkerApp &&
       gl &&
@@ -690,6 +786,7 @@
         optionOnStart: btnOptionOnStart.classList.contains("active"),
         keyboardMappingMode: getKeyboardMappingModeFromUi(),
         videoStandard: videoStandardPreference,
+        memoryExpansion: memoryExpansionPreference,
       }, workerPreference));
       resizeCrtCanvas();
     } else {
@@ -705,6 +802,7 @@
           optionOnStart: btnOptionOnStart.classList.contains("active"),
           keyboardMappingMode: getKeyboardMappingModeFromUi(),
           videoStandard: videoStandardPreference,
+          memoryExpansion: memoryExpansionPreference,
         }, workerPreference));
       } catch (e) {
         // If WebGL init succeeded but shader/program setup failed, fall back to 2D by replacing the canvas.
@@ -737,6 +835,7 @@
               optionOnStart: btnOptionOnStart.classList.contains("active"),
               keyboardMappingMode: getKeyboardMappingModeFromUi(),
               videoStandard: videoStandardPreference,
+              memoryExpansion: memoryExpansionPreference,
             }, workerPreference));
             resizeCrtCanvas();
           } else {
@@ -814,6 +913,7 @@
     }
 
     syncVideoStandardUi();
+    syncMemoryExpansionUi();
 
     function focusCanvas(preventScroll) {
       if (!canvas || typeof canvas.focus !== "function") return;

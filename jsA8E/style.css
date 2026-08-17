@@ -285,6 +285,10 @@ body {
   padding: 8px 10px;
 }
 
+.toolbarSelectWide {
+  min-width: 160px;
+}
+
 .toolbarSelect:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
