@@ -129,3 +129,5 @@ Process rule: review this file before planning any improvement, and update it af
   - Confirmed: PAL and NTSC now use separate browser palette tables.
   - Confirmed: the BASIC color-bar test shows a visible PAL/NTSC difference.
   - Pending: memory-expansion compatibility still needs a clean verification pass.
+
+- 2026-08-21: `Memory` branch: restored the PAL/NTSC palette selection lost during the merge from `main`. The memory-expansion changes remain untouched; the software renderer now receives the hardware video standard and selects the matching PAL or NTSC hue table.

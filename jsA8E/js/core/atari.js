@@ -202,6 +202,7 @@
           Palette: Palette,
           PIXELS_PER_LINE: PIXELS_PER_LINE,
           LINES_PER_SCREEN_PAL: LINES_PER_SCREEN_PAL,
+          VIDEO_STANDARD: hwApi.VIDEO_STANDARD,
           VIEW_W: VIEW_W,
           VIEW_H: VIEW_H,
           VIEW_X: VIEW_X,
