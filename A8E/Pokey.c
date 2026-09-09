@@ -257,23 +257,42 @@ static void PokeyAudio_Callback(void *userdata, Uint8 *stream, int len)
 {
 	PokeyState_t *pPokey = (PokeyState_t *)userdata;
 	int16_t *pOut = (int16_t *)stream;
-	u32 samplesRequested = (u32)(len / (int)sizeof(int16_t));
-	u32 samplesRead = PokeyAudio_RingRead(pPokey, pOut, samplesRequested);
+	u32 channels = (pPokey != NULL && pPokey->have.channels > 0)
+		? (u32)pPokey->have.channels
+		: 1u;
+	u32 framesRequested = (u32)(len / ((int)sizeof(int16_t) * channels));
+	u32 framesRead = PokeyAudio_RingRead(pPokey, pOut, framesRequested);
 	int16_t hold = (pPokey != NULL) ? pPokey->last_sample : 0;
 	u32 i;
 
-	if(samplesRead > 0)
+	if(framesRead > 0)
 	{
-		hold = pOut[samplesRead - 1];
+		hold = pOut[framesRead - 1];
 	}
-	if(pPokey && samplesRead < samplesRequested)
+	if(pPokey && framesRead < framesRequested)
 	{
-		pPokey->debugUnderruns += samplesRequested - samplesRead;
+		pPokey->debugUnderruns += framesRequested - framesRead;
 	}
 
-	for(i = samplesRead; i < samplesRequested; i++)
+	for(i = framesRead; i < framesRequested; i++)
 	{
 		pOut[i] = hold;
+	}
+
+	/* POKEY produces mono. Expand it in-place for stereo SDL devices by
+	 * walking backwards so the ring-buffer samples are not overwritten before
+	 * they have been copied to both output channels. */
+	if(channels > 1)
+	{
+		for(i = framesRequested; i > 0; i--)
+		{
+			int16_t sample = pOut[i - 1];
+			u32 c;
+			for(c = 0; c < channels; c++)
+			{
+				pOut[(i - 1) * channels + c] = sample;
+			}
+		}
 	}
 
 	if(pPokey)
@@ -893,6 +912,38 @@ void Pokey_Init(_6502_Context_t *pContext)
 	if(SDL_OpenAudio(&want, &pPokey->have) < 0)
 	{
 		fprintf(stderr, "A8E audio: SDL_OpenAudio failed: %s\n", SDL_GetError());
+
+#ifdef _WIN32
+		/* Windows-only fallback for systems where SDL's default backend does
+		 * not work with the legacy SDL_OpenAudio API used by this emulator. */
+		if(pPokey->audio_subsystem_started)
+		{
+			SDL_QuitSubSystem(SDL_INIT_AUDIO);
+			pPokey->audio_subsystem_started = 0;
+		}
+
+		if(SDL_AudioInit("directsound") == 0)
+		{
+			pPokey->audio_subsystem_started = 1;
+			pPokey->audio_driver_initialized_explicitly = 1;
+			if(SDL_OpenAudio(&want, &pPokey->have) < 0)
+			{
+				fprintf(stderr, "A8E audio: DirectSound fallback failed: %s\n", SDL_GetError());
+				SDL_AudioQuit();
+				pPokey->audio_subsystem_started = 0;
+				pPokey->audio_driver_initialized_explicitly = 0;
+				pIoData->pPokey = pPokey;
+				return;
+			}
+			fprintf(stderr, "A8E audio: using Windows DirectSound fallback\n");
+		}
+		else
+		{
+			fprintf(stderr, "A8E audio: DirectSound initialization failed: %s\n", SDL_GetError());
+			pIoData->pPokey = pPokey;
+			return;
+		}
+#else
 		if(pPokey->audio_subsystem_started)
 		{
 			SDL_QuitSubSystem(SDL_INIT_AUDIO);
@@ -900,10 +951,14 @@ void Pokey_Init(_6502_Context_t *pContext)
 		}
 		pIoData->pPokey = pPokey;
 		return;
+#endif
 	}
 
-	/* Keep implementation simple: require the format we generate. */
-	if(pPokey->have.format != AUDIO_S16SYS || pPokey->have.channels != 1 || pPokey->have.freq <= 0)
+	/* The mixer is mono, but SDL devices may legitimately negotiate stereo.
+	 * The callback duplicates mono frames for stereo output. */
+	if(pPokey->have.format != AUDIO_S16SYS ||
+	   (pPokey->have.channels != 1 && pPokey->have.channels != 2) ||
+	   pPokey->have.freq <= 0)
 	{
 		fprintf(stderr,
 				"A8E audio: unsupported device format (freq=%d, format=0x%04x, channels=%d)\n",
@@ -913,8 +968,16 @@ void Pokey_Init(_6502_Context_t *pContext)
 		SDL_CloseAudio();
 		if(pPokey->audio_subsystem_started)
 		{
-			SDL_QuitSubSystem(SDL_INIT_AUDIO);
+			if(pPokey->audio_driver_initialized_explicitly)
+			{
+				SDL_AudioQuit();
+			}
+			else
+			{
+				SDL_QuitSubSystem(SDL_INIT_AUDIO);
+			}
 			pPokey->audio_subsystem_started = 0;
+			pPokey->audio_driver_initialized_explicitly = 0;
 		}
 		pIoData->pPokey = pPokey;
 		return;
@@ -940,10 +1003,11 @@ void Pokey_Init(_6502_Context_t *pContext)
 
 	pPokey->audio_opened = 1;
 	SDL_PauseAudio(0);
-	fprintf(stderr, "A8E audio: opened %d Hz, format=0x%04x, channels=%d\n",
+	fprintf(stderr, "A8E audio: opened %d Hz, format=0x%04x, channels=%d, driver=%s\n",
 			pPokey->have.freq,
 			pPokey->have.format,
-			pPokey->have.channels);
+			pPokey->have.channels,
+			SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "unknown");
 
 	pIoData->pPokey = pPokey;
 }
@@ -973,7 +1037,15 @@ void Pokey_Close(_6502_Context_t *pContext)
 	}
 	if(pPokey->audio_subsystem_started)
 	{
-		SDL_QuitSubSystem(SDL_INIT_AUDIO);
+		if(pPokey->audio_driver_initialized_explicitly)
+		{
+			SDL_AudioQuit();
+		}
+		else
+		{
+			SDL_QuitSubSystem(SDL_INIT_AUDIO);
+		}
+		pPokey->audio_subsystem_started = 0;
 	}
 	if(pPokey->pDebugFile)
 	{

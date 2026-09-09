@@ -34,8 +34,10 @@ manager on Linux.
 
 - PAL/NTSC timing, palettes, `$D014`, POKEY emulation, and the audio ring-buffer
   synchronization are portable C code.
-- Windows builds use Visual Studio or MinGW-w64. SDL audio commonly uses
-  DirectSound or WinMM; `SDL_AUDIODRIVER=directsound` is Windows-specific.
+- Windows builds use Visual Studio or MinGW-w64. SDL audio normally uses the
+  system default; if the default backend cannot open the legacy SDL audio API,
+  A8E automatically retries with DirectSound. WinMM and `SDL_AUDIODRIVER` are
+  available as manual Windows-specific diagnostic overrides.
 - Linux builds use GCC or Clang and the distribution's SDL2 package. SDL audio
   commonly uses ALSA, PulseAudio, or PipeWire.
 - macOS builds use Clang and SDL2 from Homebrew. SDL selects the audio backend;
@@ -271,7 +273,7 @@ On Linux or other Unix systems, drop `-framework Cocoa` and use your platform's 
 Debug output is controlled via compile-time `#define` macros in `AtariIo.h`. You can uncomment them in the header or pass them directly via `CMAKE_C_FLAGS`.
 
 The runtime `-d` option is separate from the compile-time trace macros. It
-records the negotiated SDL sample rate, audio status, ring-buffer level,
+records the negotiated SDL sample rate and channel count, audio status, ring-buffer level,
 generated and consumed samples, and cumulative underrun/overrun counts. When
 SDL audio is playing, the ring buffer is the active timing source; the PAL/NTSC
 frame-period delay is used only when audio is unavailable.
