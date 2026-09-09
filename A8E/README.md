@@ -2,7 +2,7 @@
 
 > Hardware emulation reference: Before implementing any Atari 800 XL PAL machine related hardware emulation, use the [AHRM](/AHRM/index.md) as reference.
 
-A native Atari 800 XL emulator written in C, utilizing SDL 1.2 style headers (`<SDL/SDL.h>`).
+A native Atari 800 XL emulator written in C, using SDL2 (`<SDL2/SDL.h>`).
 
 ## Table of Contents
 
@@ -24,6 +24,26 @@ To run A8E, the following ROM files must be present in your current working dire
 * `ATARIXL.ROM` (16 KB)
 * `ATARIBAS.ROM` (8 KB)
 
+SDL2 development packages provide the headers and libraries required to build
+the emulator. Official SDL2 source and release information is available from
+the [SDL repository](https://github.com/libsdl-org/SDL). The package source is
+platform-specific: vcpkg or MSYS2 on Windows, and the distribution package
+manager on Linux.
+
+### Platform Notes
+
+- PAL/NTSC timing, palettes, `$D014`, POKEY emulation, and the audio ring-buffer
+  synchronization are portable C code.
+- Windows builds use Visual Studio or MinGW-w64. SDL audio commonly uses
+  DirectSound or WinMM; `SDL_AUDIODRIVER=directsound` is Windows-specific.
+- Linux builds use GCC or Clang and the distribution's SDL2 package. SDL audio
+  commonly uses ALSA, PulseAudio, or PipeWire.
+- macOS builds use Clang and SDL2 from Homebrew. SDL selects the audio backend;
+  the Windows `directsound` setting does not apply.
+- Compiler, linker, SDL2 discovery, audio backend, shell commands, and
+  filesystem path conventions vary by platform. The emulated hardware behavior
+  does not.
+
 ## Current Emulation Status
 
 The native core includes the current raster-timing pass:
@@ -44,6 +64,7 @@ A8E [options] [disk.atr|program.xex]
 * `-f` / `-F`: Launch in fullscreen mode. Uses desktop-resolution fullscreen (`SDL_WINDOW_FULLSCREEN_DESKTOP`) — the display mode is never changed, so the aspect ratio is correct on widescreen monitors and the desktop is never left in a degraded state if the app crashes. The window can be toggled at runtime with **Alt+Enter**.
 * `-b` / `-B`: Boot **with** BASIC enabled. By default, A8E simulates holding the OPTION key to disable BASIC. Passing this flag releases the console buttons.
 * `-n` / `-N`: Start an NTSC machine. PAL is the default. NTSC uses 262 scanlines, its native CPU clock, `$D014 = $0F`, a separate NTSC palette, and the NTSC pixel aspect ratio.
+* `-d` / `-D`: Enable audio diagnostics. Writes per-frame buffer and underrun/overrun metrics to `a8e_audio_debug.csv` in the current directory. The file is overwritten on each run.
 
 ## Controls
 
@@ -248,6 +269,12 @@ On Linux or other Unix systems, drop `-framework Cocoa` and use your platform's 
 ## Debugging & Logging
 
 Debug output is controlled via compile-time `#define` macros in `AtariIo.h`. You can uncomment them in the header or pass them directly via `CMAKE_C_FLAGS`.
+
+The runtime `-d` option is separate from the compile-time trace macros. It
+records the negotiated SDL sample rate, audio status, ring-buffer level,
+generated and consumed samples, and cumulative underrun/overrun counts. When
+SDL audio is playing, the ring buffer is the active timing source; the PAL/NTSC
+frame-period delay is used only when audio is unavailable.
 
 **CMake Example:**
 ```sh

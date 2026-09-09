@@ -5501,6 +5501,7 @@ void AtariIoOpen(
 	pContext->pIoData = pIoData;
 	memset(pIoData, 0, sizeof(IoData_t));
 	pIoData->eVideoStandard = eVideoStandard;
+	pIoData->bAudioDebug = (u8)((lMode & 0x02) != 0);
 	pIoData->lLinesPerScreen = eVideoStandard == ATARI_VIDEO_NTSC
 		? LINES_PER_SCREEN_NTSC
 		: LINES_PER_SCREEN_PAL;

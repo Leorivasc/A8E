@@ -115,6 +115,7 @@ typedef struct
 	u32 lLinesPerScreen;
 	u32 lCpuHz;
 	AtariVideoStandard_t eVideoStandard;
+	u8 bAudioDebug;
 
 	u64 llCycle;
 	u64 llDisplayListFetchCycle;

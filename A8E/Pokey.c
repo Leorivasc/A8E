@@ -76,6 +76,7 @@ typedef struct
 	u8 hp2_latch;
 	SDL_AudioSpec have;
 	int audio_subsystem_started;
+	int audio_driver_initialized_explicitly;
 	int audio_opened;
 
 	/* Sample phase (32.32 fixed-point CPU cycles since last output sample). */
@@ -104,6 +105,13 @@ typedef struct
 	float dc_block_r;
 	float dc_block_x1;
 	float dc_block_y1;
+
+	FILE *pDebugFile;
+	u64 debugFrame;
+	u64 debugSamplesGenerated;
+	u64 debugSamplesConsumed;
+	u64 debugUnderruns;
+	u64 debugOverruns;
 } PokeyState_t;
 
 static u64 PokeyMasterReferenceCycle(_6502_Context_t *pContext)
@@ -173,6 +181,7 @@ static void PokeyAudio_RingWrite(PokeyState_t *pPokey, const int16_t *pSamples, 
 
 		if(drop)
 		{
+			pPokey->debugOverruns += drop;
 			pPokey->ring_read = PokeyAudio_RingWrap(pPokey->ring_read + drop, ring_size, ring_mask);
 			pPokey->ring_count -= drop;
 		}
@@ -239,6 +248,7 @@ static u32 PokeyAudio_RingRead(PokeyState_t *pPokey, int16_t *pSamples, u32 coun
 
 		pPokey->ring_read = PokeyAudio_RingWrap(pPokey->ring_read + to_read, ring_size, ring_mask);
 		pPokey->ring_count -= to_read;
+		pPokey->debugSamplesConsumed += to_read;
 		return to_read;
 	}
 }
@@ -255,6 +265,10 @@ static void PokeyAudio_Callback(void *userdata, Uint8 *stream, int len)
 	if(samplesRead > 0)
 	{
 		hold = pOut[samplesRead - 1];
+	}
+	if(pPokey && samplesRead < samplesRequested)
+	{
+		pPokey->debugUnderruns += samplesRequested - samplesRead;
 	}
 
 	for(i = samplesRead; i < samplesRequested; i++)
@@ -786,6 +800,19 @@ void Pokey_Init(_6502_Context_t *pContext)
 		return;
 	}
 	memset(pPokey, 0, sizeof(PokeyState_t));
+	if(pIoData->bAudioDebug)
+	{
+		pPokey->pDebugFile = fopen("a8e_audio_debug.csv", "w");
+		if(pPokey->pDebugFile)
+		{
+			fprintf(pPokey->pDebugFile,
+					"frame,standard,cpu_hz,sample_rate,ring_level,generated,consumed,underruns,overruns,audio_status\n");
+		}
+		else
+		{
+			fprintf(stderr, "A8E audio debug: cannot open a8e_audio_debug.csv\n");
+		}
+	}
 
 	/* Prefer 48kHz to avoid common host-side resampling. */
 	pPokey->sample_rate_hz = 48000;
@@ -948,10 +975,50 @@ void Pokey_Close(_6502_Context_t *pContext)
 	{
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
 	}
+	if(pPokey->pDebugFile)
+	{
+		fclose(pPokey->pDebugFile);
+	}
 
 	free(pPokey->ring);
 	free(pPokey);
 	pIoData->pPokey = NULL;
+}
+
+void Pokey_DebugFrame(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	PokeyState_t *pPokey = Pokey_GetState(pContext);
+	const char *pStandard;
+	int audioStatus;
+
+	if(!pIoData || !pPokey || !pPokey->pDebugFile)
+	{
+		return;
+	}
+
+	pStandard = pIoData->eVideoStandard == ATARI_VIDEO_NTSC ? "NTSC" : "PAL";
+	if(pPokey->audio_opened)
+	{
+		SDL_LockAudio();
+	}
+	audioStatus = SDL_GetAudioStatus();
+	fprintf(pPokey->pDebugFile, "%llu,%s,%u,%u,%u,%llu,%llu,%llu,%llu,%d\n",
+			pPokey->debugFrame++,
+			pStandard,
+			pPokey->cpu_hz,
+			pPokey->sample_rate_hz,
+			pPokey->ring_count,
+			pPokey->debugSamplesGenerated,
+			pPokey->debugSamplesConsumed,
+			pPokey->debugUnderruns,
+			pPokey->debugOverruns,
+			audioStatus);
+	fflush(pPokey->pDebugFile);
+	if(pPokey->audio_opened)
+	{
+		SDL_UnlockAudio();
+	}
 }
 
 void Pokey_Sync(_6502_Context_t *pContext, u64 llCycleCounter)
@@ -1114,7 +1181,8 @@ void Pokey_Sync(_6502_Context_t *pContext, u64 llCycleCounter)
 			{
 				pPokey->sample_accum += (int64_t)level * (int64_t)cycles_needed_fp;
 				tmp[tmpCount++] = PokeyAudio_FinalizeSample(pPokey,
-															(int32_t)(pPokey->sample_accum / (int64_t)adjusted_cps));
+																	(int32_t)(pPokey->sample_accum / (int64_t)adjusted_cps));
+				pPokey->debugSamplesGenerated++;
 
 				if(tmpCount == (sizeof(tmp) / sizeof(tmp[0])))
 				{
@@ -1126,6 +1194,7 @@ void Pokey_Sync(_6502_Context_t *pContext, u64 llCycleCounter)
 				while(batch_fp >= adjusted_cps)
 				{
 					tmp[tmpCount++] = PokeyAudio_FinalizeSample(pPokey, level);
+					pPokey->debugSamplesGenerated++;
 
 					if(tmpCount == (sizeof(tmp) / sizeof(tmp[0])))
 					{

@@ -129,3 +129,5 @@ Process rule: review this file before planning any improvement, and update it af
 
 - 2026-09-09: `A8E/A8E.c`: replaced the fixed 18 ms no-audio fallback delay with the selected machine's rounded frame period. This prevents NTSC (about 16.68 ms per frame) from being throttled below its native cadence while preserving PAL's approximately 20 ms cadence.
 - 2026-09-09: `A8E/Pokey.c`: added startup diagnostics for SDL audio initialization, device opening, and negotiated format. Audio failures previously fell back to silent operation without reporting the cause.
+- 2026-09-09: `A8E/{A8E.c,Pokey.{c,h},AtariIo.c,AtariIo.h}`: added `-d` audio diagnostics. The native emulator writes per-frame CSV metrics for ring level, generated/consumed samples, underruns, overruns, selected standard, and SDL audio status.
+- 2026-09-09: `A8E/A8E.c`: audio playback now uses the SDL ring buffer as the sole active timing source. The PAL/NTSC frame-delay fallback is used only when SDL audio is not playing, preventing the extra delay from causing audio underruns.

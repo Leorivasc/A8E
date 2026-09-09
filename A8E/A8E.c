@@ -88,6 +88,12 @@ int main(int argc, char *argv[])
 
 				break;
 
+			case 'd':
+			case 'D':
+				lMode |= 0x02;
+
+				break;
+
 			default:
 				break;
 			}
@@ -212,6 +218,7 @@ int main(int argc, char *argv[])
 		SDL_RenderClear(pRenderer);
 		SDL_RenderCopy(pRenderer, pScreenTexture, NULL, NULL);
 		SDL_RenderPresent(pRenderer);
+		Pokey_DebugFrame(pAtariContext);
 
 		while(SDL_PollEvent(&tEvent))
 		{
@@ -282,9 +289,9 @@ int main(int argc, char *argv[])
 				}
 			}
 
-			/* Fallback: if audio throttling didn't engage (audio disabled or buffer very empty),
-			   use time-based delay to prevent runaway speed. */
-			if(!didThrottle)
+			/* Fallback only when audio is unavailable. When SDL is playing, the
+			   audio ring buffer is the clock; an extra frame delay can starve it. */
+			if(!didThrottle && SDL_GetAudioStatus() != SDL_AUDIO_PLAYING)
 			{
 				u32 elapsed = SDL_GetTicks() - lLastTicks;
 				if(elapsed < lFramePeriodMs)
