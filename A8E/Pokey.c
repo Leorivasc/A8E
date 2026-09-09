@@ -256,42 +256,92 @@ static u32 PokeyAudio_RingRead(PokeyState_t *pPokey, int16_t *pSamples, u32 coun
 static void PokeyAudio_Callback(void *userdata, Uint8 *stream, int len)
 {
 	PokeyState_t *pPokey = (PokeyState_t *)userdata;
-	int16_t *pOut = (int16_t *)stream;
+	int16_t *pOut16 = (int16_t *)stream;
+	int32_t *pOut32 = (int32_t *)stream;
+	float *pOutFloat = (float *)stream;
+	int bFloat = pPokey != NULL && pPokey->have.format == AUDIO_F32SYS;
+	int bS32 = pPokey != NULL && pPokey->have.format == AUDIO_S32SYS;
+	u32 bytesPerSample = (bFloat || bS32) ? (u32)sizeof(int32_t) : (u32)sizeof(int16_t);
 	u32 channels = (pPokey != NULL && pPokey->have.channels > 0)
 		? (u32)pPokey->have.channels
 		: 1u;
-	u32 framesRequested = (u32)(len / ((int)sizeof(int16_t) * channels));
-	u32 framesRead = PokeyAudio_RingRead(pPokey, pOut, framesRequested);
+	u32 framesRequested = (u32)(len / ((int)bytesPerSample * channels));
 	int16_t hold = (pPokey != NULL) ? pPokey->last_sample : 0;
 	u32 i;
 
-	if(framesRead > 0)
+	if(!bFloat && !bS32)
 	{
-		hold = pOut[framesRead - 1];
-	}
-	if(pPokey && framesRead < framesRequested)
-	{
-		pPokey->debugUnderruns += framesRequested - framesRead;
-	}
-
-	for(i = framesRead; i < framesRequested; i++)
-	{
-		pOut[i] = hold;
-	}
-
-	/* POKEY produces mono. Expand it in-place for stereo SDL devices by
-	 * walking backwards so the ring-buffer samples are not overwritten before
-	 * they have been copied to both output channels. */
-	if(channels > 1)
-	{
-		for(i = framesRequested; i > 0; i--)
+		u32 framesRead = PokeyAudio_RingRead(pPokey, pOut16, framesRequested);
+		if(framesRead > 0)
 		{
-			int16_t sample = pOut[i - 1];
-			u32 c;
-			for(c = 0; c < channels; c++)
+			hold = pOut16[framesRead - 1];
+		}
+		if(pPokey && framesRead < framesRequested)
+		{
+			pPokey->debugUnderruns += framesRequested - framesRead;
+		}
+		for(i = framesRead; i < framesRequested; i++)
+		{
+			pOut16[i] = hold;
+		}
+
+		/* POKEY produces mono. Expand it in-place for stereo SDL devices. */
+		if(channels > 1)
+		{
+			for(i = framesRequested; i > 0; i--)
 			{
-				pOut[(i - 1) * channels + c] = sample;
+				int16_t sample = pOut16[i - 1];
+				u32 c;
+				for(c = 0; c < channels; c++)
+				{
+					pOut16[(i - 1) * channels + c] = sample;
+				}
 			}
+		}
+	}
+	else
+	{
+		/* Some Windows devices negotiate 32-bit output. Convert POKEY's
+		 * 16-bit samples while expanding mono to stereo. */
+		int16_t mono[2048];
+		u32 frameOffset = 0;
+		while(frameOffset < framesRequested)
+		{
+			u32 chunk = framesRequested - frameOffset;
+			u32 framesRead;
+			if(chunk > (u32)(sizeof(mono) / sizeof(mono[0])))
+			{
+				chunk = (u32)(sizeof(mono) / sizeof(mono[0]));
+			}
+			framesRead = PokeyAudio_RingRead(pPokey, mono, chunk);
+			if(framesRead > 0)
+			{
+				hold = mono[framesRead - 1];
+			}
+			if(pPokey && framesRead < chunk)
+			{
+				pPokey->debugUnderruns += chunk - framesRead;
+			}
+			for(i = framesRead; i < chunk; i++)
+			{
+				mono[i] = hold;
+			}
+			for(i = 0; i < chunk; i++)
+			{
+				u32 c;
+				for(c = 0; c < channels; c++)
+				{
+					if(bFloat)
+					{
+						pOutFloat[(frameOffset + i) * channels + c] = (float)mono[i] / 32768.0f;
+					}
+					else
+					{
+						pOut32[(frameOffset + i) * channels + c] = (int32_t)mono[i] * 65536;
+					}
+				}
+			}
+			frameOffset += chunk;
 		}
 	}
 
@@ -956,7 +1006,9 @@ void Pokey_Init(_6502_Context_t *pContext)
 
 	/* The mixer is mono, but SDL devices may legitimately negotiate stereo.
 	 * The callback duplicates mono frames for stereo output. */
-	if(pPokey->have.format != AUDIO_S16SYS ||
+	if((pPokey->have.format != AUDIO_S16SYS &&
+		pPokey->have.format != AUDIO_S32SYS &&
+		pPokey->have.format != AUDIO_F32SYS) ||
 	   (pPokey->have.channels != 1 && pPokey->have.channels != 2) ||
 	   pPokey->have.freq <= 0)
 	{
