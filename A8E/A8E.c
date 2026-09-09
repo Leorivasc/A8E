@@ -43,14 +43,17 @@ int main(int argc, char *argv[])
 	u8 cTurboFlag = 0;
 	u32 lLastTicks = 0;
 	u32 lCounter;
+	u32 lFramePeriodMs;
 	u8 cDisassembleFlag = 0;
-	u64 llCycles = CYCLES_PER_LINE * LINES_PER_SCREEN_PAL;
+	u64 llCycles;
 	u32 lMode = 0;
+	AtariVideoStandard_t eVideoStandard = ATARI_VIDEO_PAL;
 	char *pDiskFileName = "d1.atr";
 	u32 lAtariScreenWidth = 336;
 	u32 lAtariScreenHeight = 240;
 	u32 lWindowWidth = 0;
 	u32 lWindowHeight = 0;
+	u32 lLogicalWidth;
 	u32 lWindowScale = 2;
 	u32 lFullscreen = 0;
 	int lIndex;
@@ -79,6 +82,12 @@ int main(int argc, char *argv[])
 
 				break;
 
+			case 'n':
+			case 'N':
+				eVideoStandard = ATARI_VIDEO_NTSC;
+
+				break;
+
 			default:
 				break;
 			}
@@ -89,7 +98,10 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	lWindowWidth = lAtariScreenWidth * lWindowScale;
+	/* Logical width applies the non-square pixel aspect without changing the
+	   internal 456-pixel Atari line or the 336-pixel visible crop. */
+	lLogicalWidth = eVideoStandard == ATARI_VIDEO_NTSC ? 288u : 350u;
+	lWindowWidth = lLogicalWidth * lWindowScale;
 	lWindowHeight = lAtariScreenHeight * lWindowScale;
 
 	/* SDL_WINDOW_FULLSCREEN_DESKTOP scales to desktop resolution without
@@ -125,7 +137,7 @@ int main(int argc, char *argv[])
 
 	/* Logical size lets the renderer scale the Atari output to fill the
 	   window (or screen in fullscreen) while preserving the aspect ratio. */
-	SDL_RenderSetLogicalSize(pRenderer, (int)lAtariScreenWidth, (int)lAtariScreenHeight);
+	SDL_RenderSetLogicalSize(pRenderer, (int)lLogicalWidth, (int)lAtariScreenHeight);
 
 	pScreenTexture = SDL_CreateTexture(pRenderer, SDL_PIXELFORMAT_ARGB8888,
 									   SDL_TEXTUREACCESS_STREAMING, (int)lAtariScreenWidth, (int)lAtariScreenHeight);
@@ -156,7 +168,16 @@ int main(int argc, char *argv[])
 	_6502_Init();
 
 	pAtariContext = _6502_Open();
-	AtariIoOpen(pAtariContext, lMode, pDiskFileName);
+	AtariIoOpen(pAtariContext, lMode, pDiskFileName, eVideoStandard);
+	llCycles = CYCLES_PER_LINE *
+		(eVideoStandard == ATARI_VIDEO_NTSC ? LINES_PER_SCREEN_NTSC : LINES_PER_SCREEN_PAL);
+	{
+		u32 lCpuHz = eVideoStandard == ATARI_VIDEO_NTSC
+			? ATARI_CPU_HZ_NTSC
+			: ATARI_CPU_HZ_PAL;
+		/* Rounded frame period used only when audio cannot provide throttling. */
+		lFramePeriodMs = (u32)((llCycles * 1000u + lCpuHz / 2u) / lCpuHz);
+	}
 
 	_6502_Reset(pAtariContext);
 
@@ -164,7 +185,7 @@ int main(int argc, char *argv[])
 	{
 		if(cDisassembleFlag)
 		{
-			lCounter = CYCLES_PER_LINE * LINES_PER_SCREEN_PAL / 3;
+			lCounter = (u32)(llCycles / 3);
 
 			while(lCounter)
 			{
@@ -181,7 +202,8 @@ int main(int argc, char *argv[])
 		{
 			_6502_Run(pAtariContext, llCycles);
 
-			llCycles += CYCLES_PER_LINE * LINES_PER_SCREEN_PAL;
+			llCycles += CYCLES_PER_LINE *
+				(eVideoStandard == ATARI_VIDEO_NTSC ? LINES_PER_SCREEN_NTSC : LINES_PER_SCREEN_PAL);
 		}
 
 		AtariIoDrawScreen(pAtariContext, pScreenSurface, lAtariScreenWidth, lAtariScreenHeight);
@@ -265,9 +287,9 @@ int main(int argc, char *argv[])
 			if(!didThrottle)
 			{
 				u32 elapsed = SDL_GetTicks() - lLastTicks;
-				if(elapsed < 18) /* slightly under 20ms to let buffer build */
+				if(elapsed < lFramePeriodMs)
 				{
-					SDL_Delay(18 - elapsed);
+					SDL_Delay(lFramePeriodMs - elapsed);
 				}
 			}
 		}

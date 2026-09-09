@@ -45,11 +45,20 @@
 #define APPLICATION_CAPTION "A8E " A8E_BUILD_VERSION " (c) Sascha Springer"
 
 #define PIXELS_PER_LINE 456
+#define LINES_PER_SCREEN_NTSC 262
 #define LINES_PER_SCREEN_PAL 312
+#define LINES_PER_SCREEN_MAX LINES_PER_SCREEN_PAL
 #define COLOR_CLOCKS_PER_LINE (PIXELS_PER_LINE / 2)
 #define CYCLES_PER_LINE (COLOR_CLOCKS_PER_LINE / 2)
 
+#define ATARI_CPU_HZ_NTSC 1789773u
 #define ATARI_CPU_HZ_PAL 1773447u
+
+typedef enum
+{
+	ATARI_VIDEO_PAL = 0,
+	ATARI_VIDEO_NTSC = 1
+} AtariVideoStandard_t;
 
 #define CYCLE_NEVER 0xffffffffffffffffLL
 
@@ -101,6 +110,12 @@ typedef struct
 
 typedef struct
 {
+	/* Machine-wide video configuration. Keep this outside VideoData_t so
+	 * GTIA and POKEY can use the selected hardware standard directly. */
+	u32 lLinesPerScreen;
+	u32 lCpuHz;
+	AtariVideoStandard_t eVideoStandard;
+
 	u64 llCycle;
 	u64 llDisplayListFetchCycle;
 	u64 llDliCycle;
@@ -169,7 +184,11 @@ typedef struct
 	u8 *pFloatingPointRom;
 } IoData_t;
 
-void AtariIoOpen(_6502_Context_t *pContext, u32 lMode, char *pDiskFileName);
+void AtariIoOpen(
+	_6502_Context_t *pContext,
+	u32 lMode,
+	char *pDiskFileName,
+	AtariVideoStandard_t eVideoStandard);
 void AtariIoClose(_6502_Context_t *pContext);
 
 void AtariIoCycleTimedEventUpdate(_6502_Context_t *pContext);

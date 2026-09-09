@@ -129,9 +129,10 @@ static u32 PokeyAudio_ClampU32(u32 v, u32 lo, u32 hi)
 	return v;
 }
 
-static u32 Pokey_CpuHz(void)
+static u32 Pokey_CpuHz(_6502_Context_t *pContext)
 {
-	return ATARI_CPU_HZ_PAL;
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	return pIoData ? pIoData->lCpuHz : ATARI_CPU_HZ_PAL;
 }
 
 static u32 PokeyAudio_RingWrap(u32 idx, u32 ring_size, u32 ring_mask)
@@ -788,7 +789,7 @@ void Pokey_Init(_6502_Context_t *pContext)
 
 	/* Prefer 48kHz to avoid common host-side resampling. */
 	pPokey->sample_rate_hz = 48000;
-	pPokey->cpu_hz = Pokey_CpuHz();
+	pPokey->cpu_hz = Pokey_CpuHz(pContext);
 	pPokey->cycles_per_sample_fp =
 		(((u64)pPokey->cpu_hz) << 32) / (u64)pPokey->sample_rate_hz;
 	pPokey->cycles_per_sample_fp_base = pPokey->cycles_per_sample_fp;
@@ -853,6 +854,7 @@ void Pokey_Init(_6502_Context_t *pContext)
 	{
 		if(SDL_InitSubSystem(SDL_INIT_AUDIO) < 0)
 		{
+			fprintf(stderr, "A8E audio: SDL_InitSubSystem failed: %s\n", SDL_GetError());
 			/* Keep emulator running without audio. */
 			pIoData->pPokey = pPokey;
 			return;
@@ -863,6 +865,7 @@ void Pokey_Init(_6502_Context_t *pContext)
 
 	if(SDL_OpenAudio(&want, &pPokey->have) < 0)
 	{
+		fprintf(stderr, "A8E audio: SDL_OpenAudio failed: %s\n", SDL_GetError());
 		if(pPokey->audio_subsystem_started)
 		{
 			SDL_QuitSubSystem(SDL_INIT_AUDIO);
@@ -875,6 +878,11 @@ void Pokey_Init(_6502_Context_t *pContext)
 	/* Keep implementation simple: require the format we generate. */
 	if(pPokey->have.format != AUDIO_S16SYS || pPokey->have.channels != 1 || pPokey->have.freq <= 0)
 	{
+		fprintf(stderr,
+				"A8E audio: unsupported device format (freq=%d, format=0x%04x, channels=%d)\n",
+				pPokey->have.freq,
+				pPokey->have.format,
+				pPokey->have.channels);
 		SDL_CloseAudio();
 		if(pPokey->audio_subsystem_started)
 		{
@@ -905,6 +913,10 @@ void Pokey_Init(_6502_Context_t *pContext)
 
 	pPokey->audio_opened = 1;
 	SDL_PauseAudio(0);
+	fprintf(stderr, "A8E audio: opened %d Hz, format=0x%04x, channels=%d\n",
+			pPokey->have.freq,
+			pPokey->have.format,
+			pPokey->have.channels);
 
 	pIoData->pPokey = pPokey;
 }

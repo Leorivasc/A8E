@@ -43,6 +43,7 @@ A8E [options] [disk.atr|program.xex]
 * `disk.atr` / `program.xex`: Pass an ATR image or Atari executable as the first argument. `.xex` files are converted to a temporary ATR layout at load time. If no argument is passed, the emulator defaults to looking for `d1.atr`.
 * `-f` / `-F`: Launch in fullscreen mode. Uses desktop-resolution fullscreen (`SDL_WINDOW_FULLSCREEN_DESKTOP`) — the display mode is never changed, so the aspect ratio is correct on widescreen monitors and the desktop is never left in a degraded state if the app crashes. The window can be toggled at runtime with **Alt+Enter**.
 * `-b` / `-B`: Boot **with** BASIC enabled. By default, A8E simulates holding the OPTION key to disable BASIC. Passing this flag releases the console buttons.
+* `-n` / `-N`: Start an NTSC machine. PAL is the default. NTSC uses 262 scanlines, its native CPU clock, `$D014 = $0F`, a separate NTSC palette, and the NTSC pixel aspect ratio.
 
 ## Controls
 

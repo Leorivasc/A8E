@@ -38,7 +38,7 @@ static ProbeMachine_t ProbeMachine_Open(void)
 		return tMachine;
 	}
 
-	AtariIoOpen(tMachine.pContext, 0, NULL);
+	AtariIoOpen(tMachine.pContext, 0, NULL, ATARI_VIDEO_PAL);
 	tMachine.pIoData = (IoData_t *)tMachine.pContext->pIoData;
 
 	return tMachine;

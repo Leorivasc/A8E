@@ -353,6 +353,13 @@ u8 *Gtia_COLPM2_PAL(_6502_Context_t *pContext, u8 *pValue)
 #endif
 	}
 
+	/* The same address is the PAL identification register on XL hardware. */
+	if(!pValue)
+	{
+		RAM[IO_COLPM2_PAL] = ((IoData_t *)pContext->pIoData)->eVideoStandard == ATARI_VIDEO_NTSC
+			? 0x0f
+			: 0x01;
+	}
 	return &RAM[IO_COLPM2_PAL];
 }
 
