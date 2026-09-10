@@ -407,6 +407,9 @@
       out.faultAddress = clamp16(raw.faultAddress);
     }
     if (typeof raw.opcode === "number") out.opcode = clamp8(raw.opcode);
+    if (raw.pokey && typeof raw.pokey === "object") {
+      out.pokey = Object.assign({}, raw.pokey);
+    }
     if (raw.faultType) out.faultType = String(raw.faultType);
     if (raw.faultMessage) out.faultMessage = String(raw.faultMessage);
     return out;

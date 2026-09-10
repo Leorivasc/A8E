@@ -1109,6 +1109,35 @@
       cycleTimedEventUpdate(ctx);
     }
 
+    // Programs may configure AUDF after the initial STIMER write. In that
+    // case, arm only timers that are currently inactive; do not reset the
+    // phase of timers that are already running.
+    function pokeyArmInactiveTimers(ctx) {
+      const io = ctx.ioData;
+      const now = ctx.cycleCounter;
+      let changed = false;
+
+      const p1 = pokeyTimerPeriodCpuCycles(ctx, 1);
+      if (io.timer1Cycle === CYCLE_NEVER && p1) {
+        io.timer1Cycle = now + p1;
+        changed = true;
+      }
+
+      const p2 = pokeyTimerPeriodCpuCycles(ctx, 2);
+      if (io.timer2Cycle === CYCLE_NEVER && p2) {
+        io.timer2Cycle = now + p2;
+        changed = true;
+      }
+
+      const p4 = pokeyTimerPeriodCpuCycles(ctx, 4);
+      if (io.timer4Cycle === CYCLE_NEVER && p4) {
+        io.timer4Cycle = now + p4;
+        changed = true;
+      }
+
+      if (changed) cycleTimedEventUpdate(ctx);
+    }
+
     return {
       createState: pokeyAudioCreateState,
       setTargetBufferSamples: pokeyAudioSetTargetBufferSamples,
@@ -1126,6 +1155,7 @@
       potUpdate: pokeyPotUpdate,
       timerPeriodCpuCycles: pokeyTimerPeriodCpuCycles,
       restartTimers: pokeyRestartTimers,
+      armInactiveTimers: pokeyArmInactiveTimers,
       seroutWrite: pokeySioApi.seroutWrite,
       serinRead: pokeySioApi.serinRead,
     };

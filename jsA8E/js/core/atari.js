@@ -338,6 +338,7 @@
   const pokeyPotUpdate = pokeyAudioApi.potUpdate;
   const pokeyTimerPeriodCpuCycles = pokeyAudioApi.timerPeriodCpuCycles;
   const pokeyRestartTimers = pokeyAudioApi.restartTimers;
+  const pokeyArmInactiveTimers = pokeyAudioApi.armInactiveTimers;
   const pokeySeroutWrite = pokeyAudioApi.seroutWrite;
   const pokeySerinRead = pokeyAudioApi.serinRead;
 
@@ -419,6 +420,7 @@
           pokeyPotPrepareSkctlWrite: pokeyPotPrepareSkctlWrite,
           pokeyPotStartScan: pokeyPotStartScan,
           pokeyRestartTimers: pokeyRestartTimers,
+          pokeyArmInactiveTimers: pokeyArmInactiveTimers,
           pokeySyncLfsr17: pokeySyncLfsr17,
           pokeySeroutWrite: pokeySeroutWrite,
           pokeySerinRead: pokeySerinRead,
@@ -682,7 +684,24 @@
     }
 
     function getDebugState() {
-      return debugRuntime.getDebugState();
+      const state = debugRuntime.getDebugState();
+      const ctx = machine.ctx;
+      const io = ctx.ioData;
+      state.pokey = {
+        // IRQEN is write-only at $D20E; IRQST is the value read there.
+        irqen: ctx.sram[IO_IRQEN_IRQST] & 0xff,
+        irqst: ctx.ram[IO_IRQEN_IRQST] & 0xff,
+        audf4: ctx.sram[IO_AUDF4_POT6] & 0xff,
+        audctl: ctx.sram[IO_AUDCTL_ALLPOT] & 0xff,
+        skctl: ctx.sram[IO_SKCTL_SKSTAT] & 0xff,
+        timer4PeriodCpuCycles: pokeyTimerPeriodCpuCycles(ctx, 4) >>> 0,
+        timer4Cycle: io.timer4Cycle,
+        timer4IrqCount: io.pokeyTimer4IrqCount >>> 0,
+        timer4LastIrqCycle: io.pokeyTimer4LastIrqCycle,
+        cpuIrqPending: ctx.irqPending | 0,
+        cpuInterruptMask: CPU.getPs(ctx) & 0x04 ? 1 : 0,
+      };
+      return state;
     }
 
     function getCounters() {

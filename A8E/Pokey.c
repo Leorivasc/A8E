@@ -851,6 +851,51 @@ u64 Pokey_TimerPeriodCpuCycles(_6502_Context_t *pContext, u8 timer)
 	}
 }
 
+/* Arm only timers that have no scheduled deadline. This preserves the phase
+ * of timers already running while allowing software to write AUDF after the
+ * initial STIMER or after leaving POKEY initialization mode. */
+static void Pokey_ArmInactiveTimers(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData;
+	u64 llNow;
+	u64 period;
+	int bChanged = 0;
+
+	if(!pContext || !pContext->pIoData)
+	{
+		return;
+	}
+
+	pIoData = (IoData_t *)pContext->pIoData;
+	llNow = pContext->llCycleCounter;
+
+	period = Pokey_TimerPeriodCpuCycles(pContext, 1);
+	if(pIoData->llTimer1Cycle == CYCLE_NEVER && period != 0)
+	{
+		pIoData->llTimer1Cycle = llNow + period;
+		bChanged = 1;
+	}
+
+	period = Pokey_TimerPeriodCpuCycles(pContext, 2);
+	if(pIoData->llTimer2Cycle == CYCLE_NEVER && period != 0)
+	{
+		pIoData->llTimer2Cycle = llNow + period;
+		bChanged = 1;
+	}
+
+	period = Pokey_TimerPeriodCpuCycles(pContext, 4);
+	if(pIoData->llTimer4Cycle == CYCLE_NEVER && period != 0)
+	{
+		pIoData->llTimer4Cycle = llNow + period;
+		bChanged = 1;
+	}
+
+	if(bChanged)
+	{
+		AtariIoCycleTimedEventUpdate(pContext);
+	}
+}
+
 void Pokey_Init(_6502_Context_t *pContext)
 {
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
@@ -1608,6 +1653,7 @@ u8 *Pokey_AUDF1_POT0(_6502_Context_t *pContext, u8 *pValue)
 				pPokey->aChannels[0].audf = *pValue;
 			}
 		}
+		Pokey_ArmInactiveTimers(pContext);
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" AUDF1: %02X\n", *pValue);
@@ -1655,6 +1701,7 @@ u8 *Pokey_AUDF2_POT2(_6502_Context_t *pContext, u8 *pValue)
 				pPokey->aChannels[1].audf = *pValue;
 			}
 		}
+		Pokey_ArmInactiveTimers(pContext);
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" AUDF2: %02X\n", *pValue);
@@ -1702,6 +1749,7 @@ u8 *Pokey_AUDF3_POT4(_6502_Context_t *pContext, u8 *pValue)
 				pPokey->aChannels[2].audf = *pValue;
 			}
 		}
+		Pokey_ArmInactiveTimers(pContext);
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" AUDF3: %02X\n", *pValue);
@@ -1749,6 +1797,7 @@ u8 *Pokey_AUDF4_POT6(_6502_Context_t *pContext, u8 *pValue)
 				pPokey->aChannels[3].audf = *pValue;
 			}
 		}
+		Pokey_ArmInactiveTimers(pContext);
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" AUDF4: %02X\n", *pValue);
@@ -1797,6 +1846,7 @@ u8 *Pokey_AUDCTL_ALLPOT(_6502_Context_t *pContext, u8 *pValue)
 				PokeyAudio_RecomputeClocks(pPokey->aChannels, pPokey->audctl);
 			}
 		}
+		Pokey_ArmInactiveTimers(pContext);
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" AUDCTL: %02X\n", *pValue);
@@ -2418,6 +2468,7 @@ u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue)
 		Pokey_Sync(pContext, pContext->llCycleCounter);
 		Pokey_PotPrepareSkctlWrite(pContext);
 		SRAM[IO_SKCTL_SKSTAT] = *pValue;
+		Pokey_ArmInactiveTimers(pContext);
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" SKCTL: %02X\n", *pValue);

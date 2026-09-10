@@ -486,6 +486,8 @@
 
       if (masterEff >= io.timer4Cycle) {
         const p4 = pokeyTimerPeriodCpuCycles(ctx, 4);
+        io.pokeyTimer4IrqCount = (io.pokeyTimer4IrqCount + 1) >>> 0;
+        io.pokeyTimer4LastIrqCycle = masterEff;
         ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_4;
         if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_4) CPU.irq(ctx);
         if (p4 === 0) io.timer4Cycle = CYCLE_NEVER;

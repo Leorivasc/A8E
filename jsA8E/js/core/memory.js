@@ -1661,6 +1661,8 @@
           timer1Cycle: io.timer1Cycle,
           timer2Cycle: io.timer2Cycle,
           timer4Cycle: io.timer4Cycle,
+          pokeyTimer4IrqCount: io.pokeyTimer4IrqCount >>> 0,
+          pokeyTimer4LastIrqCycle: io.pokeyTimer4LastIrqCycle,
           valuePortA: io.valuePortA | 0,
           valuePortB: io.valuePortB | 0,
           sioBuffer: new Uint8Array(io.sioBuffer || 0),
@@ -1757,6 +1759,9 @@
         io.timer1Cycle = state.timer1Cycle;
         io.timer2Cycle = state.timer2Cycle;
         io.timer4Cycle = state.timer4Cycle;
+        io.pokeyTimer4IrqCount = state.pokeyTimer4IrqCount >>> 0;
+        if (state.pokeyTimer4LastIrqCycle !== undefined)
+          io.pokeyTimer4LastIrqCycle = state.pokeyTimer4LastIrqCycle;
         io.valuePortA = state.valuePortA | 0;
         io.valuePortB = state.valuePortB | 0;
         copyBytesTo(io.sioBuffer, state.sioBuffer);

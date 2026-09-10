@@ -25,6 +25,9 @@
         timer1Cycle: CYCLE_NEVER,
         timer2Cycle: CYCLE_NEVER,
         timer4Cycle: CYCLE_NEVER,
+        // Diagnostic counters for POKEY timer-4 IRQ investigation.
+        pokeyTimer4IrqCount: 0,
+        pokeyTimer4LastIrqCycle: CYCLE_NEVER,
         // PIA shadow ports (for output mode)
         valuePortA: 0,
         valuePortB: 0,

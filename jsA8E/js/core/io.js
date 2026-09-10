@@ -77,6 +77,7 @@
     const pokeyPotPrepareSkctlWrite = cfg.pokeyPotPrepareSkctlWrite;
     const pokeyPotStartScan = cfg.pokeyPotStartScan;
     const pokeyRestartTimers = cfg.pokeyRestartTimers;
+    const pokeyArmInactiveTimers = cfg.pokeyArmInactiveTimers;
     const pokeySyncLfsr17 = cfg.pokeySyncLfsr17;
     const pokeySeroutWrite = cfg.pokeySeroutWrite;
     const pokeySerinRead = cfg.pokeySerinRead;
@@ -307,6 +308,7 @@
             sram[addr] = v;
             if (io.pokeyAudio)
               {pokeyAudioOnRegisterWrite(io.pokeyAudio, addr, v);}
+            pokeyArmInactiveTimers(ctx);
             break;
 
           case IO_POTGO:
@@ -359,6 +361,7 @@
               io.sioInSize = 0;
               io.sioInIndex = 0;
             }
+            pokeyArmInactiveTimers(ctx);
             break;
 
           // --- PIA ---

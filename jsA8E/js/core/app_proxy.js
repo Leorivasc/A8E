@@ -908,6 +908,9 @@
       if (typeof raw.faultAddress === "number")
         {out.faultAddress = (raw.faultAddress | 0) & 0xffff;}
       if (typeof raw.opcode === "number") out.opcode = (raw.opcode | 0) & 0xff;
+      if (raw.pokey && typeof raw.pokey === "object") {
+        out.pokey = Object.assign({}, raw.pokey);
+      }
       if (raw.faultType) out.faultType = String(raw.faultType);
       if (raw.faultMessage) out.faultMessage = String(raw.faultMessage);
       return out;
