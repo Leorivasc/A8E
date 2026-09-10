@@ -48,6 +48,7 @@ int main(int argc, char *argv[])
 	u64 llCycles;
 	u32 lMode = 0;
 	AtariVideoStandard_t eVideoStandard = ATARI_VIDEO_PAL;
+	AtariMemoryExpansion_t eMemoryExpansion = ATARI_MEMORY_NONE;
 	char *pDiskFileName = "d1.atr";
 	u32 lAtariScreenWidth = 336;
 	u32 lAtariScreenHeight = 240;
@@ -68,6 +69,11 @@ int main(int argc, char *argv[])
 	{
 		if(argv[lIndex][0] == '-')
 		{
+			if(strcmp(argv[lIndex], "-128K") == 0 || strcmp(argv[lIndex], "-128k") == 0)
+			{
+				eMemoryExpansion = ATARI_MEMORY_130XE_128K;
+				continue;
+			}
 			switch(argv[lIndex][1])
 			{
 			case 'b':
@@ -174,7 +180,9 @@ int main(int argc, char *argv[])
 	_6502_Init();
 
 	pAtariContext = _6502_Open();
-	AtariIoOpen(pAtariContext, lMode, pDiskFileName, eVideoStandard);
+	AtariIoOpenWithMemory(pAtariContext, lMode, pDiskFileName, eVideoStandard, eMemoryExpansion);
+	printf("A8E memory: opened %s\n",
+		eMemoryExpansion == ATARI_MEMORY_130XE_128K ? "128K (130XE)" : "64K");
 	llCycles = CYCLES_PER_LINE *
 		(eVideoStandard == ATARI_VIDEO_NTSC ? LINES_PER_SCREEN_NTSC : LINES_PER_SCREEN_PAL);
 	{

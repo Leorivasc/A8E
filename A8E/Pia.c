@@ -73,6 +73,28 @@ u8 *Pia_PORTB(_6502_Context_t *pContext, u8 *pValue)
 
 	if(pValue)
 	{
+		u8 cOldBank = pIoData->cExtendedBank;
+		u8 bOldCpu = pIoData->bCpuExtendedWindow;
+		u8 cNewPortB;
+		if(pIoData->eMemoryExpansion == ATARI_MEMORY_130XE_128K)
+		{
+			cNewPortB = (u8)((*pValue & 0xbf) | 0x40);
+			u8 cNewBank = (u8)((cNewPortB >> 2) & 0x03);
+			u8 bNewCpu = (u8)((cNewPortB & 0x10) == 0);
+			if(!bOldCpu && bNewCpu)
+				memcpy(pIoData->pMainWindowShadow, &RAM[0x4000], 0x4000);
+			if(bOldCpu)
+				memcpy(&pIoData->pExtendedMemory[cOldBank * 0x4000u], &RAM[0x4000], 0x4000);
+			pIoData->cExtendedBank = cNewBank;
+			pIoData->bCpuExtendedWindow = bNewCpu;
+			pIoData->bAnticExtendedWindow = (u8)((cNewPortB & 0x20) == 0);
+			if(bOldCpu && !bNewCpu)
+				memcpy(&RAM[0x4000], pIoData->pMainWindowShadow, 0x4000);
+			else if(bNewCpu)
+				memcpy(&RAM[0x4000], &pIoData->pExtendedMemory[pIoData->cExtendedBank * 0x4000u], 0x4000);
+		}
+		else
+			cNewPortB = (u8)((*pValue & 0x83) | 0x7c);
 #ifdef VERBOSE_ROM_SWITCH
 		printf("$%04X: PORTB ", pContext->tCpu.pc);
 #endif
@@ -149,7 +171,7 @@ u8 *Pia_PORTB(_6502_Context_t *pContext, u8 *pValue)
 #ifdef VERBOSE_ROM_SWITCH
 		printf("\n");
 #endif
-		RAM[IO_PORTB] = SRAM[IO_PORTB] = (*pValue & 0x83) | 0x7c;
+		RAM[IO_PORTB] = SRAM[IO_PORTB] = cNewPortB;
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" PORTB: %02X\n", *pValue);

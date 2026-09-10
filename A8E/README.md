@@ -56,6 +56,21 @@ The native core includes the current raster-timing pass:
 
 The native timing pass now covers the legacy-style active-line geometry, HSCROL handling, visible PMG interleaving, and blank-line color-burst behavior. Remaining work is continued regression verification against real raster-effect content and any localized title-specific differences that turn up during that sweep. See [../legacy/COLOR_CLOCK_ACCURACY.md](../legacy/COLOR_CLOCK_ACCURACY.md) for the current verification status.
 
+### Memory Expansion
+
+The native core supports the Atari 130XE 128K memory profile. Start it with
+`-128K`, for example:
+
+```text
+A8E -128K Bosconian.atr
+```
+
+The profile provides four 16K extended-RAM banks selected by `PORTB` bits 2-3.
+`PORTB` bit 4 controls the CPU window and bit 5 controls the independent ANTIC
+window. The main `$4000-$7FFF` RAM window is preserved while the CPU window is
+switched, as required by software bank-isolation tests. The default remains
+64K. RAMBO and COMPY profiles are not implemented yet.
+
 **Command Line:**
 ```text
 A8E [options] [disk.atr|program.xex]
@@ -66,7 +81,14 @@ A8E [options] [disk.atr|program.xex]
 * `-f` / `-F`: Launch in fullscreen mode. Uses desktop-resolution fullscreen (`SDL_WINDOW_FULLSCREEN_DESKTOP`) — the display mode is never changed, so the aspect ratio is correct on widescreen monitors and the desktop is never left in a degraded state if the app crashes. The window can be toggled at runtime with **Alt+Enter**.
 * `-b` / `-B`: Boot **with** BASIC enabled. By default, A8E simulates holding the OPTION key to disable BASIC. Passing this flag releases the console buttons.
 * `-n` / `-N`: Start an NTSC machine. PAL is the default. NTSC uses 262 scanlines, its native CPU clock, `$D014 = $0F`, a separate NTSC palette, and the NTSC pixel aspect ratio.
+* `-128K`: Enable the 128K 130XE memory expansion. The default remains 64K;
+  RAMBO and COMPY profiles are currently unavailable.
 * `-d` / `-D`: Enable audio diagnostics. Writes per-frame buffer and underrun/overrun metrics to `a8e_audio_debug.csv` in the current directory. The file is overwritten on each run.
+
+At startup, A8E prints the selected memory profile, for example
+`A8E memory: opened 128K (130XE)`, or `A8E memory: opened 64K` when the default
+profile is active. This makes it possible to verify that `-128K` reached the
+native runtime before loading a program.
 
 ## Controls
 

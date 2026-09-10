@@ -60,6 +60,12 @@ typedef enum
 	ATARI_VIDEO_NTSC = 1
 } AtariVideoStandard_t;
 
+typedef enum
+{
+	ATARI_MEMORY_NONE = 0,
+	ATARI_MEMORY_130XE_128K = 1
+} AtariMemoryExpansion_t;
+
 #define CYCLE_NEVER 0xffffffffffffffffLL
 
 #define CONSOL_HACK
@@ -161,6 +167,12 @@ typedef struct
 	u8 bModeLineEndsThisLine;
 	u8 cValuePortA;
 	u8 cValuePortB;
+	AtariMemoryExpansion_t eMemoryExpansion;
+	u8 *pExtendedMemory;
+	u8 *pMainWindowShadow;
+	u8 cExtendedBank;
+	u8 bCpuExtendedWindow;
+	u8 bAnticExtendedWindow;
 
 	VideoData_t tVideoData;
 	DrawLineData_t tDrawLineData;
@@ -190,6 +202,12 @@ void AtariIoOpen(
 	u32 lMode,
 	char *pDiskFileName,
 	AtariVideoStandard_t eVideoStandard);
+void AtariIoOpenWithMemory(
+	_6502_Context_t *pContext,
+	u32 lMode,
+	char *pDiskFileName,
+	AtariVideoStandard_t eVideoStandard,
+	AtariMemoryExpansion_t eMemoryExpansion);
 void AtariIoClose(_6502_Context_t *pContext);
 
 void AtariIoCycleTimedEventUpdate(_6502_Context_t *pContext);

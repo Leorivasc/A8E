@@ -1041,6 +1041,17 @@ static u8 AtariIo_PlayfieldDmaAllowedAtCycle(_6502_Context_t *pContext, u32 lCyc
 	return AtariIo_CurrentLineCycle(pIoData, lCycleOffset) <= 105u;
 }
 
+static u8 AtariIo_ReadAnticMemory(_6502_Context_t *pContext, u16 sAddress)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	if(pIoData->eMemoryExpansion == ATARI_MEMORY_130XE_128K &&
+	   pIoData->bAnticExtendedWindow && sAddress >= 0x4000 && sAddress < 0x8000)
+	{
+		return pIoData->pExtendedMemory[pIoData->cExtendedBank * 0x4000u + (sAddress - 0x4000u)];
+	}
+	return RAM[sAddress];
+}
+
 static u8 AtariIo_ReadVirtualPlayfieldBus(_6502_Context_t *pContext, u32 lCycleOffset)
 {
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
@@ -1052,7 +1063,7 @@ static u8 AtariIo_ReadVirtualPlayfieldBus(_6502_Context_t *pContext, u32 lCycleO
 		return 0xff;
 	}
 
-	return RAM[sBusAddress];
+	return AtariIo_ReadAnticMemory(pContext, sBusAddress);
 }
 
 static void AtariIo_SchedulePlayfieldDma(_6502_Context_t *pContext, u32 lCycleOffset, u32 lCycles)
@@ -1082,7 +1093,7 @@ static u8 AtariIo_FetchBufferedDisplayByte(_6502_Context_t *pContext, u8 cBuffer
 	{
 		if(AtariIo_PlayfieldDmaAllowedAtCycle(pContext, lCycleOffset))
 		{
-			cValue = RAM[pIoData->tDrawLineData.sDisplayMemoryAddress];
+			cValue = AtariIo_ReadAnticMemory(pContext, pIoData->tDrawLineData.sDisplayMemoryAddress);
 			AtariIo_SchedulePlayfieldDma(pContext, lCycleOffset, 1);
 		}
 		else
@@ -1107,7 +1118,13 @@ static u8 AtariIo_FetchUnbufferedDisplayByte(_6502_Context_t *pContext, u16 sAdd
 	if(AtariIo_PlayfieldDmaAllowedAtCycle(pContext, lCycleOffset))
 	{
 		AtariIo_SchedulePlayfieldDma(pContext, lCycleOffset, 1);
-		return RAM[sAddress];
+		IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+		if(pIoData->eMemoryExpansion == ATARI_MEMORY_130XE_128K &&
+		   pIoData->bAnticExtendedWindow && sAddress >= 0x4000 && sAddress < 0x8000)
+		{
+			return pIoData->pExtendedMemory[pIoData->cExtendedBank * 0x4000u + (sAddress - 0x4000u)];
+		}
+		return AtariIo_ReadAnticMemory(pContext, sAddress);
 	}
 
 	return AtariIo_ReadVirtualPlayfieldBus(pContext, lCycleOffset);
@@ -1145,7 +1162,7 @@ static int AtariIo_FetchPmgDmaCycle(_6502_Context_t *pContext, u32 lCycleInLine,
 	if(lCycleInLine == 0 && cPmDmaMissiles) {
 		if(!AtariIo_PmgVdelayAllowsFetch(pContext, lDisplayLine, 0x08)) return 0;
 		if(cPmReceiveMissiles) {
-			SRAM[IO_GRAFM_TRIG1] = RAM[AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 768u : 384u)];
+			SRAM[IO_GRAFM_TRIG1] = AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 768u : 384u));
 		}
 		return 1;
 	}
@@ -1153,25 +1170,25 @@ static int AtariIo_FetchPmgDmaCycle(_6502_Context_t *pContext, u32 lCycleInLine,
 		if(lCycleInLine == 2) {
 			if(!AtariIo_PmgVdelayAllowsFetch(pContext, lDisplayLine, 0x10)) return 0;
 			if(cPmReceivePlayers) {
-				SRAM[IO_GRAFP0_P1PL] = RAM[AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1024u : 512u)];
+				SRAM[IO_GRAFP0_P1PL] = AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1024u : 512u));
 			}
 			return 1;
 		} else if(lCycleInLine == 3) {
 			if(!AtariIo_PmgVdelayAllowsFetch(pContext, lDisplayLine, 0x20)) return 0;
 			if(cPmReceivePlayers) {
-				SRAM[IO_GRAFP1_P2PL] = RAM[AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1280u : 640u)];
+				SRAM[IO_GRAFP1_P2PL] = AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1280u : 640u));
 			}
 			return 1;
 		} else if(lCycleInLine == 4) {
 			if(!AtariIo_PmgVdelayAllowsFetch(pContext, lDisplayLine, 0x40)) return 0;
 			if(cPmReceivePlayers) {
-				SRAM[IO_GRAFP2_P3PL] = RAM[AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1536u : 768u)];
+				SRAM[IO_GRAFP2_P3PL] = AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1536u : 768u));
 			}
 			return 1;
 		} else if(lCycleInLine == 5) {
 			if(!AtariIo_PmgVdelayAllowsFetch(pContext, lDisplayLine, 0x80)) return 0;
 			if(cPmReceivePlayers) {
-				SRAM[IO_GRAFP3_TRIG0] = RAM[AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1792u : 896u)];
+				SRAM[IO_GRAFP3_TRIG0] = AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1792u : 896u));
 			}
 			return 1;
 		}
@@ -5463,6 +5480,16 @@ void AtariIoOpen(
 	char *pDiskFileName,
 	AtariVideoStandard_t eVideoStandard)
 {
+	AtariIoOpenWithMemory(pContext, lMode, pDiskFileName, eVideoStandard, ATARI_MEMORY_NONE);
+}
+
+void AtariIoOpenWithMemory(
+	_6502_Context_t *pContext,
+	u32 lMode,
+	char *pDiskFileName,
+	AtariVideoStandard_t eVideoStandard,
+	AtariMemoryExpansion_t eMemoryExpansion)
+{
 	FILE *pFile;
 	IoInitValue_t *pIoInitValue = m_aIoInitValues;
 	IoData_t *pIoData;
@@ -5501,6 +5528,17 @@ void AtariIoOpen(
 	pContext->pIoData = pIoData;
 	memset(pIoData, 0, sizeof(IoData_t));
 	pIoData->eVideoStandard = eVideoStandard;
+	pIoData->eMemoryExpansion = eMemoryExpansion;
+	if(eMemoryExpansion == ATARI_MEMORY_130XE_128K)
+	{
+		pIoData->pExtendedMemory = (u8 *)calloc(1, 0x10000u);
+		pIoData->pMainWindowShadow = (u8 *)malloc(0x4000u);
+		if(!pIoData->pExtendedMemory || !pIoData->pMainWindowShadow)
+		{
+			AtariIo_LogError("A8E: Out of memory allocating 130XE RAM.\n");
+			exit(1);
+		}
+	}
 	pIoData->bAudioDebug = (u8)((lMode & 0x02) != 0);
 	pIoData->lLinesPerScreen = eVideoStandard == ATARI_VIDEO_NTSC
 		? LINES_PER_SCREEN_NTSC
@@ -5660,6 +5698,8 @@ void AtariIoClose(_6502_Context_t *pContext)
 	free(pIoData->pOsRom);
 	free(pIoData->pSelfTestRom);
 	free(pIoData->pFloatingPointRom);
+		free(pIoData->pExtendedMemory);
+	free(pIoData->pMainWindowShadow);
 }
 
 void AtariIoStatus(_6502_Context_t *pContext)
