@@ -7,3 +7,4 @@ node_modules/
 ATARIBAS.ROM
 ATARIXL.ROM
 .cache/
+*.atr
