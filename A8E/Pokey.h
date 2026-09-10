@@ -68,5 +68,6 @@ void Pokey_PotUpdate(_6502_Context_t *pContext);
 
 /* Returns 1 if audio buffer is too full and emulation should wait, 0 otherwise. */
 int Pokey_ShouldThrottle(_6502_Context_t *pContext);
+void Pokey_DebugFrame(_6502_Context_t *pContext);
 
 #endif

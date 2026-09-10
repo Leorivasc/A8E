@@ -155,7 +155,7 @@ static void AtariIoAdvanceScanline(_6502_Context_t *pContext)
 		RAM[IO_NMIRES_NMIST] &= ~NMI_DLI;
 	}
 
-	if(pIoData->tVideoData.lCurrentDisplayLine >= LINES_PER_SCREEN_PAL)
+	if(pIoData->tVideoData.lCurrentDisplayLine >= pIoData->lLinesPerScreen)
 	{
 		pIoData->tVideoData.lCurrentDisplayLine = 0;
 		pIoData->lNextDisplayListLine = 8;
@@ -165,7 +165,7 @@ static void AtariIoAdvanceScanline(_6502_Context_t *pContext)
 		pIoData->bModeLineScrollExit = 0;
 		pIoData->bModeLineExitDli = 0;
 		pIoData->bModeLineEndsThisLine = 0;
-		memset(pIoData->tVideoData.pPriorityData, 0, PIXELS_PER_LINE * LINES_PER_SCREEN_PAL);
+		memset(pIoData->tVideoData.pPriorityData, 0, PIXELS_PER_LINE * LINES_PER_SCREEN_MAX);
 	}
 
 	RAM[IO_VCOUNT] = pIoData->tVideoData.lCurrentDisplayLine >> 1;
@@ -1196,14 +1196,16 @@ static void AtariIo_DrawClockAction(_6502_Context_t *pContext)
 	{
 		u32 lCurrentDisplayLine = pIoData->tVideoData.lCurrentDisplayLine;
 		u32 lNextDisplayLine = lCurrentDisplayLine + 1;
-		if(lCurrentDisplayLine == LINES_PER_SCREEN_PAL - 1u &&
+		/* AHRM 4.10: the one-cycle end-of-frame VCOUNT anomaly is PAL-only. */
+		if(pIoData->eVideoStandard == ATARI_VIDEO_PAL &&
+		   lCurrentDisplayLine == pIoData->lLinesPerScreen - 1u &&
 		   lCycleInLine == 111u)
 		{
-			RAM[IO_VCOUNT] = (u8)((LINES_PER_SCREEN_PAL >> 1) & 0xff);
+			RAM[IO_VCOUNT] = (u8)((pIoData->lLinesPerScreen >> 1) & 0xff);
 		}
 		else
 		{
-			if(lNextDisplayLine >= LINES_PER_SCREEN_PAL)
+			if(lNextDisplayLine >= pIoData->lLinesPerScreen)
 			{
 				lNextDisplayLine = 0;
 			}
@@ -1551,7 +1553,7 @@ static u8 m_aKeyCodeTable[512] =
 #define CONTRAST 1.0
 #define BRIGHTNESS 0.9
 
-static void AtariIo_CreatePalette()
+static void AtariIo_CreatePalette(AtariVideoStandard_t eVideoStandard)
 {
 	u32 lHue;
 	u32 lLum;
@@ -1562,7 +1564,7 @@ static void AtariIo_CreatePalette()
 	double dY;
 	double dS;
 
-	double aHueAngleTable[16] =
+	double aHueAngleTablePal[16] =
 		{
 			0.0, // 0
 			163.0, // 1
@@ -1581,6 +1583,14 @@ static void AtariIo_CreatePalette()
 			-188.0, // 14
 			-197.0, // 15
 		};
+	double aHueAngleTableNtsc[16] =
+		{
+			0.0, 163.0, 139.0, 115.0, 91.0, 67.0, 43.0, 19.0,
+			-5.0, -29.0, -53.0, -77.0, -101.0, -125.0, -149.0, -173.0
+		};
+	double *pHueAngleTable = eVideoStandard == ATARI_VIDEO_NTSC
+		? aHueAngleTableNtsc
+		: aHueAngleTablePal;
 
 	for(lLum = 0; lLum < 16; lLum++)
 	{
@@ -1598,7 +1608,7 @@ static void AtariIo_CreatePalette()
 			}
 
 			//			dAngle = (ANGLE_START - ANGLE_STEP * lHue) / 180.0 * M_PI;
-			dAngle = aHueAngleTable[lHue] / 180.0 * M_PI;
+			dAngle = pHueAngleTable[lHue] / 180.0 * M_PI;
 
 			dR = dY + dS * sin(dAngle);
 			dG = dY - (27.0 / 53.0) * dS * sin(dAngle) - (10.0 / 53.0) * dS * cos(dAngle);
@@ -5447,7 +5457,11 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 	AtariIoCycleTimedEventUpdate(pContext);
 }
 
-void AtariIoOpen(_6502_Context_t *pContext, u32 lMode, char *pDiskFileName)
+void AtariIoOpen(
+	_6502_Context_t *pContext,
+	u32 lMode,
+	char *pDiskFileName,
+	AtariVideoStandard_t eVideoStandard)
 {
 	FILE *pFile;
 	IoInitValue_t *pIoInitValue = m_aIoInitValues;
@@ -5477,10 +5491,6 @@ void AtariIoOpen(_6502_Context_t *pContext, u32 lMode, char *pDiskFileName)
 		exit(-1);
 	}
 
-	AtariIo_CreatePalette();
-
-	SDL_SetPaletteColors(pSdlAtariSurface->format->palette, m_aAtariColors, 0, 256);
-
 	pIoData = malloc(sizeof(IoData_t));
 	if(pIoData == NULL)
 	{
@@ -5490,6 +5500,18 @@ void AtariIoOpen(_6502_Context_t *pContext, u32 lMode, char *pDiskFileName)
 	}
 	pContext->pIoData = pIoData;
 	memset(pIoData, 0, sizeof(IoData_t));
+	pIoData->eVideoStandard = eVideoStandard;
+	pIoData->bAudioDebug = (u8)((lMode & 0x02) != 0);
+	pIoData->lLinesPerScreen = eVideoStandard == ATARI_VIDEO_NTSC
+		? LINES_PER_SCREEN_NTSC
+		: LINES_PER_SCREEN_PAL;
+	pIoData->lCpuHz = eVideoStandard == ATARI_VIDEO_NTSC
+		? ATARI_CPU_HZ_NTSC
+		: ATARI_CPU_HZ_PAL;
+
+	/* Keep the palette tied to this machine instance's video standard. */
+	AtariIo_CreatePalette(pIoData->eVideoStandard);
+	SDL_SetPaletteColors(pSdlAtariSurface->format->palette, m_aAtariColors, 0, 256);
 
 	pIoData->pBasicRom = malloc(0x2000);
 	pIoData->pOsRom = malloc(0x1000);
@@ -5607,7 +5629,7 @@ void AtariIoOpen(_6502_Context_t *pContext, u32 lMode, char *pDiskFileName)
 		}
 	}
 
-	pIoData->tVideoData.pPriorityData = (u8 *)malloc(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL);
+	pIoData->tVideoData.pPriorityData = (u8 *)malloc(PIXELS_PER_LINE * LINES_PER_SCREEN_MAX);
 
 	if(pIoData->tVideoData.pPriorityData == NULL)
 	{
@@ -5615,7 +5637,7 @@ void AtariIoOpen(_6502_Context_t *pContext, u32 lMode, char *pDiskFileName)
 		exit(1);
 	}
 
-	memset(pIoData->tVideoData.pPriorityData, 0, PIXELS_PER_LINE * LINES_PER_SCREEN_PAL);
+	memset(pIoData->tVideoData.pPriorityData, 0, PIXELS_PER_LINE * LINES_PER_SCREEN_MAX);
 
 	pContext->IoCycleTimedEventFunction = AtariIo_CycleTimedEvent;
 

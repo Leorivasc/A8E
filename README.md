@@ -120,3 +120,14 @@ Shift + Arrow is a convenience shortcut — it sends the same key codes as **Ctr
 | F5 | RESET |
 | F8 | BREAK |
 
+## License
+
+Unless otherwise noted, the original A8E source code and project documentation
+in this repository are copyright (C) 2004–2026 Sascha Springer and are licensed
+under the GNU General Public License, version 2 only. See [LICENSE](LICENSE).
+
+The original A8E SourceForge project listed GPLv2. This repository now states
+that license explicitly. ROM dumps, disk images, the AHRM reference material,
+third-party package metadata, and external libraries retain their own terms and
+are not relicensed by this notice.
+

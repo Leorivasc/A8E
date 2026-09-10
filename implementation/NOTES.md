@@ -121,6 +121,7 @@ Process rule: review this file before planning any improvement, and update it af
 
 - 2026-08-16: `jsA8E/{index.html,style.css,js/app/ui.js,js/core/{hw,atari,app_proxy}.js,emulator_worker.js}`: wired a minimal PAL/NTSC selector into the browser UI and boot path. The selected standard now persists through `window.A8E_BOOT_OPTIONS` / `localStorage`, reaches both the main-thread and worker backends before hardware setup, and rebuilds the timing tables on reload. `hw.js` now selects PAL vs NTSC line count and CPU clock from the boot standard, and `$D014` reads back `01` for PAL / `0F` for NTSC per AHRM so `peek(53268)` can distinguish the machine type again.
 
+
 - 2026-08-17: `jsA8E/{index.html,style.css,js/app/ui.js,js/core/{state,io,memory,atari,app_proxy}.js,emulator_worker.js}`: reworked the browser memory-expansion path on top of the clean PAL/NTSC base. The UI now exposes a profile selector, `PORTB` writes preserve the raw banking bits, and the runtime carries the active extended-RAM profile through main-thread and worker boot/reset flows while restoring the banked window on `PORTB` changes. Snapshot state now includes the memory profile so COMPY and larger RAMBO variants can keep CPU/ANTIC views separate.
 
 - 2026-08-17: project checkpoint.
@@ -129,3 +130,19 @@ Process rule: review this file before planning any improvement, and update it af
   - Confirmed: PAL and NTSC now use separate browser palette tables.
   - Confirmed: the BASIC color-bar test shows a visible PAL/NTSC difference.
   - Pending: memory-expansion compatibility still needs a clean verification pass.
+
+- 2026-08-17: `jsA8E/{js/render/{palette,software}.js,js/core/atari.js}`: split the browser color palette by video standard so NTSC and PAL no longer share a single RGB table. The renderer now passes `videoStandard` into palette construction, giving NTSC its own chroma tuning path and leaving PAL with a separate mapping.
+- 2026-08-17: `jsA8E/{js/render/{palette,software}.js,js/core/atari.js}`: restored the PAL palette to the original C hue table and switched NTSC to a separate, more evenly spaced hue progression. The browser renderer still selects the palette from `videoStandard`, so PAL keeps its prior look while NTSC can diverge more realistically.
+- 2026-08-17: `jsA8E/js/render/palette.js`: documented the calibrated palette split for future reference. PAL keeps the legacy C hue table (`0, 163, 150, 109, 42, 17, -3, -14, -26, -53, -80, -107, -134, -161, -188, -197`), while NTSC uses the smoother progression (`0, 163, 139, 115, 91, 67, 43, 19, -5, -29, -53, -77, -101, -125, -149, -173`). This was verified visually with the BASIC color-bar test, which now shows a clear PAL/NTSC difference without collapsing the PAL palette.
+
+- 2026-09-08: `A8E/{A8E.c,AtariIo.{c,h},Gtia.c,Pokey.c}`: ported the PAL/NTSC machine selection to the native C emulator. PAL remains the default; `-n` selects NTSC with 262 lines, 1.789773 MHz POKEY timing, `$D014 = $0F`, a separate NTSC palette, and an NTSC logical pixel aspect. The internal 456-pixel line and maximum 312-line allocation remain shared only as storage limits; active timing and register behavior use the selected machine state.
+
+- 2026-09-09: `A8E/A8E.c`: replaced the fixed 18 ms no-audio fallback delay with the selected machine's rounded frame period. This prevents NTSC (about 16.68 ms per frame) from being throttled below its native cadence while preserving PAL's approximately 20 ms cadence.
+- 2026-09-09: `A8E/Pokey.c`: added startup diagnostics for SDL audio initialization, device opening, and negotiated format. Audio failures previously fell back to silent operation without reporting the cause.
+- 2026-09-09: `A8E/{A8E.c,Pokey.{c,h},AtariIo.c,AtariIo.h}`: added `-d` audio diagnostics. The native emulator writes per-frame CSV metrics for ring level, generated/consumed samples, underruns, overruns, selected standard, and SDL audio status.
+- 2026-09-09: `A8E/A8E.c`: audio playback now uses the SDL ring buffer as the sole active timing source. The PAL/NTSC frame-delay fallback is used only when SDL audio is not playing, preventing the extra delay from causing audio underruns.
+- 2026-09-09: `A8E/Pokey.c`: on Windows only, failed default SDL audio opening now retries with `SDL_AudioInit("directsound")`; Linux and macOS retain SDL's automatic backend selection. Startup logs now include the active SDL audio driver.
+- 2026-09-09: `A8E/Pokey.c`: accepted SDL devices negotiating mono or stereo output. The native POKEY mixer remains mono and duplicates each frame into both channels for stereo devices, avoiding a false initialization failure when Windows defaults to two channels.
+- 2026-09-09: `A8E/Pokey.c`: accepted SDL devices negotiating 32-bit signed or float output in addition to `AUDIO_S16SYS`. In particular, `0x8120` is `AUDIO_F32SYS`; the callback converts the 16-bit POKEY mixer output to float or signed 32-bit samples and preserves mono/stereo handling.
+- 2026-09-09: `A8E/Pokey.c`: corrected the SDL callback branch selection so `AUDIO_F32SYS` uses the 32-bit conversion path instead of being written as 16-bit PCM. This fixes silent output when the Windows WASAPI device negotiates format `0x8120`.
+
