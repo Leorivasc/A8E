@@ -131,6 +131,7 @@ Process rule: review this file before planning any improvement, and update it af
   - Confirmed: the BASIC color-bar test shows a visible PAL/NTSC difference.
   - Pending: memory-expansion compatibility still needs a clean verification pass.
 
+
 - 2026-08-17: `jsA8E/{js/render/{palette,software}.js,js/core/atari.js}`: split the browser color palette by video standard so NTSC and PAL no longer share a single RGB table. The renderer now passes `videoStandard` into palette construction, giving NTSC its own chroma tuning path and leaving PAL with a separate mapping.
 - 2026-08-17: `jsA8E/{js/render/{palette,software}.js,js/core/atari.js}`: restored the PAL palette to the original C hue table and switched NTSC to a separate, more evenly spaced hue progression. The browser renderer still selects the palette from `videoStandard`, so PAL keeps its prior look while NTSC can diverge more realistically.
 - 2026-08-17: `jsA8E/js/render/palette.js`: documented the calibrated palette split for future reference. PAL keeps the legacy C hue table (`0, 163, 150, 109, 42, 17, -3, -14, -26, -53, -80, -107, -134, -161, -188, -197`), while NTSC uses the smoother progression (`0, 163, 139, 115, 91, 67, 43, 19, -5, -29, -53, -77, -101, -125, -149, -173`). This was verified visually with the BASIC color-bar test, which now shows a clear PAL/NTSC difference without collapsing the PAL palette.
@@ -145,4 +146,5 @@ Process rule: review this file before planning any improvement, and update it af
 - 2026-09-09: `A8E/Pokey.c`: accepted SDL devices negotiating mono or stereo output. The native POKEY mixer remains mono and duplicates each frame into both channels for stereo devices, avoiding a false initialization failure when Windows defaults to two channels.
 - 2026-09-09: `A8E/Pokey.c`: accepted SDL devices negotiating 32-bit signed or float output in addition to `AUDIO_S16SYS`. In particular, `0x8120` is `AUDIO_F32SYS`; the callback converts the 16-bit POKEY mixer output to float or signed 32-bit samples and preserves mono/stereo handling.
 - 2026-09-09: `A8E/Pokey.c`: corrected the SDL callback branch selection so `AUDIO_F32SYS` uses the 32-bit conversion path instead of being written as 16-bit PCM. This fixes silent output when the Windows WASAPI device negotiates format `0x8120`.
+- 2026-08-21: `Memory` branch: restored the PAL/NTSC palette selection lost during the merge from `main`. The memory-expansion changes remain untouched; the software renderer now receives the hardware video standard and selects the matching PAL or NTSC hue table.
 
