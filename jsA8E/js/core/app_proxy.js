@@ -817,7 +817,9 @@
 
   function createWorkerApp(opts) {
     const canvas = opts.canvas;
-    const worker = new Worker("emulator_worker.js");
+    // Bump this during temporary Worker-side diagnostics so browsers do not
+    // reuse a cached emulator_worker.js while investigating a live session.
+    const worker = new Worker("emulator_worker.js?diag=20260910-nmi4");
     const audioChannel = new MessageChannel();
     const audioBridge = createAudioBridge(audioChannel.port1);
     const hostFsProxy = createHostFsProxy(sendHostFsCommand);
@@ -910,6 +912,15 @@
       if (typeof raw.opcode === "number") out.opcode = (raw.opcode | 0) & 0xff;
       if (raw.pokey && typeof raw.pokey === "object") {
         out.pokey = Object.assign({}, raw.pokey);
+      }
+      if (raw.nmiDiagnostics && typeof raw.nmiDiagnostics === "object") {
+        out.nmiDiagnostics = Object.assign({}, raw.nmiDiagnostics);
+        if (raw.nmiDiagnostics.lastEvent)
+          out.nmiDiagnostics.lastEvent = Object.assign({}, raw.nmiDiagnostics.lastEvent);
+        if (raw.nmiDiagnostics.lastService)
+          out.nmiDiagnostics.lastService = Object.assign({}, raw.nmiDiagnostics.lastService);
+        if (raw.nmiDiagnostics.lastRequest)
+          out.nmiDiagnostics.lastRequest = Object.assign({}, raw.nmiDiagnostics.lastRequest);
       }
       if (raw.faultType) out.faultType = String(raw.faultType);
       if (raw.faultMessage) out.faultMessage = String(raw.faultMessage);

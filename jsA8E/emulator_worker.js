@@ -191,6 +191,15 @@
     if (typeof raw.opcode === "number") out.opcode = (raw.opcode | 0) & 0xff;
     if (raw.faultType) out.faultType = String(raw.faultType);
     if (raw.faultMessage) out.faultMessage = String(raw.faultMessage);
+    if (raw.nmiDiagnostics && typeof raw.nmiDiagnostics === "object") {
+      out.nmiDiagnostics = Object.assign({}, raw.nmiDiagnostics);
+      if (raw.nmiDiagnostics.lastEvent)
+        out.nmiDiagnostics.lastEvent = Object.assign({}, raw.nmiDiagnostics.lastEvent);
+      if (raw.nmiDiagnostics.lastService)
+        out.nmiDiagnostics.lastService = Object.assign({}, raw.nmiDiagnostics.lastService);
+      if (raw.nmiDiagnostics.lastRequest)
+        out.nmiDiagnostics.lastRequest = Object.assign({}, raw.nmiDiagnostics.lastRequest);
+    }
     return out;
   }
 

@@ -4,6 +4,8 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-10: `A8E/6502.c`: matched the validated jsA8E NMI dispatch fix. Native A8E now accepts one pending NMI edge while an earlier NMI handler is active, instead of dropping it behind the software active-handler guard. The single pending flag is retained to avoid queueing unbounded interrupts.
+
 Reference: follow `AGENTS.md`.
 Process rule: review this file before planning any improvement, and update it after each code improvement.
 
@@ -46,6 +48,9 @@ Process rule: review this file before planning any improvement, and update it af
 - [Debug](jsA8E/DEBUG.md)
 
 ## Recent Improvements
+
+- 2026-09-10: `jsA8E/js/core/{state,cpu,antic,atari,app_proxy}.js`, `jsA8E/js/app/automation/utils.js`, `jsA8E/emulator_worker.js`: added non-invasive DLI/VBI/NMI timing diagnostics to `getDebugState()` and preserved them across the Worker boundary. The counters distinguish scheduled, latched, suppressed, requested, coalesced, and serviced NMIs, including the last event location, coalesced source classification, CPU pending/active state, and RTI/RTS return counts; emulation behavior is unchanged and the counters reset with the machine. A temporary Worker URL cache-buster is marked in `app_proxy.js` for live Chrome diagnostics.
+- 2026-09-10: `jsA8E/js/core/cpu.js`, `jsA8E/tests/cpu_interrupt_step_regression.test.js`: removed the software `nmiActive` mask from pending-NMI dispatch. A new edge can now be serviced while an earlier NMI handler is active, while the single pending flag still prevents an unbounded queue; this follows the 6502 NMI behavior and targets the DLI coalescing observed with Karate Champion.
 
 - 2026-09-10: `jsA8E/js/core/{atari,state,antic,memory}.js`, `jsA8E/js/{core/app_proxy,app/automation/utils}.js`: extended `getDebugState()` with non-invasive POKEY timer-4 diagnostics (`IRQEN`, `IRQST`, timer configuration, deadline, IRQ count, and CPU IRQ state) to investigate Bosconian's digitized-voice wait loop. The field is now preserved across the worker/API boundary, the diagnostic counter is preserved in snapshots, and neither changes emulation behavior.
 - 2026-09-10: `jsA8E/js/core/{pokey,io,atari}.js`: arm inactive POKEY timers when valid AUDF/AUDCTL or SKCTL configuration arrives after an earlier STIMER, without resetting already-running timer phase. This covers software that configures a timer after initialization and is based on AHRM POKEY initialization behavior.

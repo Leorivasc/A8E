@@ -79,6 +79,21 @@
     const ANTIC_CMD_MASK_DLI_JMP = 0x4f; // Isolates DLI, LMS, and instruction bits
     const ANTIC_CMD_MASK_JVB_DLI = 0xcf; // Isolates replayed JVB+DLI pattern
 
+    function recordNmiEvent(ctx, type, phase) {
+      const diagnostics = ctx.ioData.nmiDiagnostics;
+      if (!diagnostics) return;
+      const key = type + phase.charAt(0).toUpperCase() + phase.slice(1);
+      diagnostics[key] = (diagnostics[key] | 0) + 1;
+      diagnostics.lastEvent = {
+        type: type,
+        phase: phase,
+        cycle: ctx.cycleCounter >>> 0,
+        line: ctx.ioData.video.currentDisplayLine | 0,
+        lineCycle: ((ctx.ioData.clock - ctx.ioData.displayListFetchCycle) | 0),
+        nmist: ctx.ram[IO_NMIRES_NMIST] & 0xff,
+      };
+    }
+
     function resetNmiTiming(ctx) {
       const timing = ctx.ioData.nmiTiming;
       const nmien = ctx.sram[IO_NMIEN] & (NMI_DLI | NMI_VBI);
@@ -247,6 +262,7 @@
             if ((cmd & ANTIC_CMD_MASK_DLI_JMP) === ANTIC_JVB_INSTRUCTION) {
               // Replayed JVB has one-scanline height.
               io.dliCycle = io.clock + DLI_HORIZONTAL_OFFSET;
+              recordNmiEvent(ctx, "dli", "scheduled");
               cycleTimedEventUpdate(ctx);
             } else if (!scrollExit) {
               io.dliCycle =
@@ -254,6 +270,7 @@
                 (io.nextDisplayListLine - io.video.currentDisplayLine - 1) *
                   CYCLES_PER_LINE +
                 DLI_HORIZONTAL_OFFSET;
+              recordNmiEvent(ctx, "dli", "scheduled");
               cycleTimedEventUpdate(ctx);
             }
           }
@@ -369,6 +386,7 @@
         // fires at cycle 8, gated by the same NMIEN deadlines as the DLI
         // (AHRM 4.8). io.displayListFetchCycle already points at line 248.
         io.vbiCycle = io.displayListFetchCycle + DLI_HORIZONTAL_OFFSET;
+        recordNmiEvent(ctx, "vbi", "scheduled");
       }
     }
 
@@ -405,6 +423,7 @@
         // NMIST is set at cycle 7 unconditionally (AHRM 4.8)
         ram[IO_NMIRES_NMIST] &= ~NMI_VBI;
         ram[IO_NMIRES_NMIST] |= NMI_DLI;
+        recordNmiEvent(ctx, "dli", "latched");
 
         if (beamEff > io.dliCycle) {
           // NMI fires at cycle 8 (one cycle after NMIST at cycle 7)
@@ -414,10 +433,12 @@
               io.nmiTiming.enabledOnCycle7Mask &= ~NMI_DLI;
               io.dliCycle = beamEff; // reschedule: NMI fires at beamEff+1
             } else {
+              recordNmiEvent(ctx, "dli", "fired");
               CPU.nmi(ctx);
               io.dliCycle = CYCLE_NEVER;
             }
           } else {
+            recordNmiEvent(ctx, "dli", "suppressed");
             io.dliCycle = CYCLE_NEVER;
           }
         }
@@ -427,6 +448,7 @@
         // NMIST is set at cycle 7 unconditionally (AHRM 4.8)
         ram[IO_NMIRES_NMIST] &= ~NMI_DLI;
         ram[IO_NMIRES_NMIST] |= NMI_VBI;
+        recordNmiEvent(ctx, "vbi", "latched");
 
         if (beamEff > io.vbiCycle) {
           // NMI fires at cycle 8 (one cycle after NMIST at cycle 7)
@@ -436,10 +458,12 @@
               io.nmiTiming.enabledOnCycle7Mask &= ~NMI_VBI;
               io.vbiCycle = beamEff; // reschedule: NMI fires at beamEff+1
             } else {
+              recordNmiEvent(ctx, "vbi", "fired");
               CPU.nmi(ctx);
               io.vbiCycle = CYCLE_NEVER;
             }
           } else {
+            recordNmiEvent(ctx, "vbi", "suppressed");
             io.vbiCycle = CYCLE_NEVER;
           }
         }

@@ -89,5 +89,24 @@ function testPendingIrqConsumesOnlyInterruptEntryStep() {
   assert.equal(ctx.cycleCounter, 9, "IRQ handler NOP should add its own 2 cycles");
 }
 
+function testNmiCanNestWhilePreviousHandlerIsActive() {
+  const { cpuApi, ctx } = makeContext();
+
+  ctx.ram[0xfffa] = 0x34;
+  ctx.ram[0xfffb] = 0x12;
+  ctx.ram[0x1234] = 0xea;
+
+  cpuApi.nmi(ctx);
+  cpuApi.executeOne(ctx);
+  cpuApi.nmi(ctx);
+  cpuApi.executeOne(ctx);
+
+  assert.equal(ctx.cpu.pc, 0x1234, "nested NMI should enter the same vector");
+  assert.equal(ctx.cpu.sp, 0xf9, "nested NMI should push a second return frame");
+  assert.equal(ctx.nmiPending, 0, "nested NMI edge should be consumed");
+  assert.equal(ctx.nmiActive, 1, "nested NMI should keep the active state set");
+}
+
 testPendingNmiConsumesOnlyInterruptEntryStep();
 testPendingIrqConsumesOnlyInterruptEntryStep();
+testNmiCanNestWhilePreviousHandlerIsActive();

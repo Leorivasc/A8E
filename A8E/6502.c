@@ -651,7 +651,9 @@ static void _6502_ServiceInterrupt(_6502_Context_t *pContext, u16 sVector, u8 cB
 
 static void _6502_ServicePendingNmi(_6502_Context_t *pContext)
 {
-	if(!pContext->cNmiPendingFlag || pContext->cNmiActiveFlag)
+	/* NMI is not masked by the interrupt-disable flag or by an active NMI
+	 * handler. Keep one pending edge, matching the hardware line semantics. */
+	if(!pContext->cNmiPendingFlag)
 	{
 		return;
 	}
@@ -664,7 +666,7 @@ static void _6502_ServicePendingNmi(_6502_Context_t *pContext)
 
 static u8 _6502_ServicePendingInterrupts(_6502_Context_t *pContext)
 {
-	if(pContext->cNmiPendingFlag && !pContext->cNmiActiveFlag)
+	if(pContext->cNmiPendingFlag)
 	{
 		_6502_ServicePendingNmi(pContext);
 		return 1;
@@ -1713,9 +1715,8 @@ void _6502_RTI(_6502_Context_t *pContext)
 	CPU.pc = RAM[0x100 + CPU.sp];
 	CPU.sp++;
 	CPU.pc |= RAM[0x100 + CPU.sp] << 8;
-	/* Clear NMI-active guard on every RTI. This is safe because _6502_ServiceInterrupt
-	 * sets PS.i=1, which blocks IRQs for the duration of the NMI handler unless the
-	 * handler explicitly executes CLI. No known Atari code does this. */
+	/* The active flag describes the current NMI handler for diagnostics/state;
+	 * it does not mask a later NMI edge. */
 	pContext->cNmiActiveFlag = 0;
 }
 
