@@ -1990,6 +1990,7 @@ static u8 aSioBuffer[1024];
 static u16 cSioOutIndex = 0;
 static u16 sSioInIndex = 0;
 static u16 sSioInSize = 0;
+static u16 sSioPendingReadSize = 0;
 
 /* SIO data phase state (for WRITE/PUT/VERIFY commands) */
 #define SIO_DATA_OFFSET 32
@@ -2020,6 +2021,32 @@ static void Pokey_SioQueueSerinResponse(_6502_Context_t *pContext, u16 size)
 
 	sSioInSize = size;
 	sSioInIndex = 0;
+	pIoData->llSerialInputDataReadyCycle =
+		llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+	AtariIoCycleTimedEventUpdate(pContext);
+}
+
+static void Pokey_SioQueuePendingReadData(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u16 sBytesToRead = sSioPendingReadSize;
+	u16 sIndex;
+	u64 llNow;
+
+	if(sBytesToRead == 0) return;
+
+	/* The command ACK was already consumed. Present the Complete/data phase
+	 * separately, matching the physical SIO transaction and jsA8E. */
+	aSioBuffer[0] = 'C';
+	for(sIndex = 0; sIndex < sBytesToRead; sIndex++)
+		aSioBuffer[sIndex + 1] = aSioBuffer[sIndex + 2];
+	aSioBuffer[sBytesToRead + 1] =
+		AtariIo_SioChecksum(aSioBuffer + 1, sBytesToRead);
+	sSioPendingReadSize = 0;
+
+	llNow = PokeyMasterReferenceCycle(pContext);
+	sSioInIndex = 0;
+	sSioInSize = sBytesToRead + 2;
 	pIoData->llSerialInputDataReadyCycle =
 		llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
 	AtariIoCycleTimedEventUpdate(pContext);
@@ -2165,6 +2192,29 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 
 					switch(aSioBuffer[1])
 					{
+					case 0x3F: /* RETURN HIGH SPEED INDEX */
+						/* $3F is also the Type 1 Poll command. An absent
+						 * peripheral must remain silent. Only disk IDs D1-D8
+						 * use the high-speed query interpretation. */
+						if(aSioBuffer[0] >= 0x31 && aSioBuffer[0] <= 0x38)
+						{
+							/* AHRM 10.3: standard US Doubler divisor. */
+							aSioBuffer[0] = 'A';
+							aSioBuffer[1] = 'C';
+							aSioBuffer[2] = 0x0A;
+							aSioBuffer[3] = AtariIo_SioChecksum(aSioBuffer + 2, 1);
+							sSioInSize = 4;
+							pIoData->llSerialInputDataReadyCycle =
+								llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+							AtariIoCycleTimedEventUpdate(pContext);
+						}
+						break;
+
+					case 0x40: /* TYPE 3/4 POLL */
+						/* This virtual disk has no downloadable handler. Polls
+						 * therefore receive no reply, as specified for Poll Reset. */
+						break;
+
 					case 0x52: /* READ SECTOR */
 						sSectorIndex = aSioBuffer[2] + (aSioBuffer[3] << 8);
 
@@ -2201,7 +2251,8 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 
 								aSioBuffer[sBytesToRead + 2] = AtariIo_SioChecksum(aSioBuffer + 2, sBytesToRead);
 
-								sSioInSize = sBytesToRead + 3;
+								sSioPendingReadSize = sBytesToRead;
+								Pokey_SioQueueSerinResponse(pContext, 1);
 #ifdef VERBOSE_SIO
 								{
 									u32 lIndex;
@@ -2377,6 +2428,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		else
 		{
 			sSioInIndex = 0;
+			Pokey_SioQueuePendingReadData(pContext);
 		}
 	}
 

@@ -77,6 +77,7 @@
       currentOpcode: 0,
       currentInstructionCycles: 0,
       memoryWriteHook: null,
+      memoryAccessHook: null,
       instructionTraceHook: null,
       illegalOpcodeHook: null,
       stealDmaReentrancyGuard: false,
@@ -423,14 +424,43 @@
   // Helpers for operations
   function readAccess(ctx) {
     const addr = ctx.accessAddress & 0xffff;
-    if (ctx.accessMode === ACCESS_MODE_RAM || ctx.accessMode === ACCESS_MODE_ROM) {
-      return ctx.ram[addr] & 0xff;
+    const hook = ctx.memoryAccessHook;
+    if (typeof hook === "function") {
+      hook(
+        "read",
+        addr,
+        ctx.ram[addr] & 0xff,
+        ctx.cycleCounter >>> 0,
+        ctx.instructionCounter >>> 0,
+        ctx.currentInstructionPc & 0xffff,
+        ctx.currentOpcode & 0xff,
+        ctx,
+      );
     }
-    return ctx.accessFunction(ctx, null) & 0xff;
+    let value;
+    if (ctx.accessMode === ACCESS_MODE_RAM || ctx.accessMode === ACCESS_MODE_ROM) {
+      value = ctx.ram[addr] & 0xff;
+    } else {
+      value = ctx.accessFunction(ctx, null) & 0xff;
+    }
+    return value;
   }
   function writeAccess(ctx, value) {
     const addr = ctx.accessAddress & 0xffff;
     const v = value & 0xff;
+    const hook = ctx.memoryAccessHook;
+    if (typeof hook === "function") {
+      hook(
+        "write",
+        addr,
+        v,
+        ctx.cycleCounter >>> 0,
+        ctx.instructionCounter >>> 0,
+        ctx.currentInstructionPc & 0xffff,
+        ctx.currentOpcode & 0xff,
+        ctx,
+      );
+    }
     if (ctx.accessMode === ACCESS_MODE_RAM) {
       writeRam(ctx, addr, v);
       return v;
@@ -1272,6 +1302,10 @@
     ctx.memoryWriteHook = typeof fn === "function" ? fn : null;
   }
 
+  function setMemoryAccessHook(ctx, fn) {
+    ctx.memoryAccessHook = typeof fn === "function" ? fn : null;
+  }
+
   window.A8E6502 = {
     makeContext: makeContext,
     setRom: setRom,
@@ -1287,6 +1321,7 @@
     setPcHook: setPcHook,
     clearPcHook: clearPcHook,
     setMemoryWriteHook: setMemoryWriteHook,
+    setMemoryAccessHook: setMemoryAccessHook,
     // exposed for debugging/tests
     getPs: getPs,
     setPs: setPs,

@@ -26,6 +26,7 @@
     const CHAR_COMPLETE = "C".charCodeAt(0);
     const CHAR_ERROR = "E".charCodeAt(0);
     const CHAR_NACK = "N".charCodeAt(0);
+    const SIO_DIAGNOSTIC_LIMIT = 512;
 
     const CMD_FORMAT = 0x21;
     const CMD_READ_SECTOR = 0x52;
@@ -34,6 +35,8 @@
     const CMD_VERIFY_SECTOR = 0x56;
     const CMD_WRITE_SECTOR = 0x57;
     const CMD_PUT_SECTOR = 0x50;
+    const CMD_HIGH_SPEED_INDEX = 0x3f;
+    const CMD_POLL = 0x40;
 
     function sioChecksum(buf, size) {
       let checksum = 0;
@@ -44,8 +47,35 @@
       return checksum & 0xff;
     }
 
+    function recordSioEvent(ctx, type, fields) {
+      const diagnostics = ctx.ioData && ctx.ioData.sioDiagnostics;
+      if (!diagnostics) return;
+      const event = Object.assign({
+        sequence: diagnostics.eventCount >>> 0,
+        cycle: ctx.cycleCounter >>> 0,
+        type: type,
+      }, fields || {});
+      diagnostics.eventCount = (diagnostics.eventCount + 1) >>> 0;
+      diagnostics.events.push(event);
+      if (diagnostics.events.length > SIO_DIAGNOSTIC_LIMIT)
+        diagnostics.events.shift();
+    }
+
     function effectiveEventCycle(ctx) {
       return ctx.cycleCounter;
+    }
+
+    function handleAbsentDevice(ctx, device, command) {
+      const io = ctx.ioData;
+      // An absent Type 1/2 device is electrically silent. The OS owns the
+      // timeout and completion state (AHRM 9.1, 9.2).
+      io.sioInIndex = 0;
+      io.sioInSize = 0;
+      io.sioPendingReadSize = 0;
+      recordSioEvent(ctx, "absent_device", {
+        device: device & 0xff,
+        command: command & 0xff,
+      });
     }
 
     function queueSerinResponse(ctx, now, size) {
@@ -53,6 +83,11 @@
       io.sioInSize = size | 0;
       io.sioInIndex = 0;
       io.serialInputDataReadyCycle = now + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+      recordSioEvent(ctx, "response_queued", {
+        size: size | 0,
+        firstByte: io.sioBuffer[0] & 0xff,
+        secondByte: io.sioBuffer[1] & 0xff,
+      });
       cycleTimedEventUpdate(ctx);
     }
 
@@ -114,7 +149,29 @@
         buf.subarray(dataStartIndex, dataStartIndex + dataSize),
         dataSize,
       );
-      queueSerinResponse(ctx, now, dataSize + 3);
+      // A disk drive acknowledges the command before sending the data frame.
+      // Keep the two phases separate so software polling SERIN/IRQST sees the
+      // same byte boundaries as the real SIO bus (AHRM 9.1, 5.6).
+      io.sioPendingReadSize = dataSize | 0;
+      io.sioBuffer[0] = CHAR_ACK;
+      queueSerinResponse(ctx, now, 1);
+    }
+
+    function queuePendingReadData(ctx, now) {
+      const io = ctx.ioData;
+      const dataSize = io.sioPendingReadSize | 0;
+      if (dataSize <= 0) return false;
+
+      const buf = io.sioBuffer;
+      // The response already contains C, data, and checksum at offsets
+      // 1..dataSize+1. Move the sector down one byte for the data phase.
+      buf[0] = CHAR_COMPLETE;
+      for (let i = 0; i < dataSize; i++)
+        buf[i + 1] = buf[i + 2] & 0xff;
+      buf[dataSize + 1] = sioChecksum(buf.subarray(1, dataSize + 1), dataSize);
+      io.sioPendingReadSize = 0;
+      queueSerinResponse(ctx, now, dataSize + 2);
+      return true;
     }
 
     function canAccessSector(disk, diskSize, sectorInfo) {
@@ -173,6 +230,13 @@
           // READ SECTOR
           const sectorIndex = (aux1 | (aux2 << 8)) & 0xffff;
           const si = sectorBytesAndOffset(sectorIndex, sectorSize);
+          recordSioEvent(ctx, "read_command", {
+            device: devId & 0xff,
+            command: cmd & 0xff,
+            sector: sectorIndex,
+            sectorSize: si ? si.bytes : 0,
+            bufferOffset: si ? si.offset : -1,
+          });
           if (!canAccessSector(disk, diskSize, si)) {
             queueDeviceNack(ctx, now);
             return;
@@ -182,8 +246,38 @@
           return;
         }
 
+        if (cmd === CMD_HIGH_SPEED_INDEX) {
+          // AHRM 10.3: a disk drive may answer this command with the
+          // US Doubler divisor. Type 1 polls using $3F are filtered before
+          // reaching this disk handler and receive no response instead.
+          recordSioEvent(ctx, "high_speed_index_command", {
+            device: devId & 0xff,
+            command: cmd & 0xff,
+            divisor: 0x0a,
+          });
+          buf[2] = 0x0a;
+          queueAckData(ctx, now, 2, 1);
+          return;
+        }
+
+        if (cmd === CMD_POLL) {
+          // Type 3 poll/reset is a bus-wide protocol. This disk device does
+          // not provide a downloadable handler, so it must stay silent.
+          recordSioEvent(ctx, "poll_command", {
+            device: devId & 0xff,
+            command: cmd & 0xff,
+            aux1: aux1 & 0xff,
+            aux2: aux2 & 0xff,
+          });
+          return;
+        }
+
         if (cmd === CMD_STATUS) {
           // STATUS
+          recordSioEvent(ctx, "status_command", {
+            device: devId & 0xff,
+            command: cmd & 0xff,
+          });
           if (!disk || !disk.length || disk[0] === 0) {
             queueDeviceNack(ctx, now);
             return;
@@ -249,6 +343,12 @@
         }
 
         // Unsupported command.
+        recordSioEvent(ctx, "unsupported_command", {
+          device: devId & 0xff,
+          command: cmd & 0xff,
+          aux1: aux1 & 0xff,
+          aux2: aux2 & 0xff,
+        });
         queueDeviceNack(ctx, now);
       }
 
@@ -311,7 +411,6 @@
     ) {
       sioDeviceHandlers[devId] = diskDevice(devId);
     }
-
     function seroutWrite(ctx, value) {
       const io = ctx.ioData;
       const now = effectiveEventCycle(ctx);
@@ -376,6 +475,12 @@
       io.sioOutIndex = 0;
 
       if (sioChecksum(buf, 4) !== (buf[4] & 0xff)) {
+        recordSioEvent(ctx, "command_checksum_error", {
+          device: buf[0] & 0xff,
+          command: buf[1] & 0xff,
+          aux1: buf[2] & 0xff,
+          aux2: buf[3] & 0xff,
+        });
         queueDeviceNack(ctx, now);
         return;
       }
@@ -389,9 +494,24 @@
       const aux1 = buf[2] & 0xff;
       const aux2 = buf[3] & 0xff;
       const handler2 = sioDeviceHandlers[dev];
+      recordSioEvent(ctx, "command_frame", {
+        device: dev,
+        command: cmd2,
+        aux1: aux1,
+        aux2: aux2,
+      });
       if (handler2 && handler2.onCommandFrame) {
         handler2.onCommandFrame(ctx, now, cmd2, aux1, aux2);
       } else {
+        // $3F/$40 are SIO poll commands. An absent peripheral must not be
+        // turned into a disk NACK; the OS uses the resulting timeout.
+        if (cmd2 === CMD_HIGH_SPEED_INDEX || cmd2 === CMD_POLL) {
+          // A missing peripheral must remain electrically silent. The OS
+          // owns the timeout and completion state; SIO only records that the
+          // response phase is pending.
+          handleAbsentDevice(ctx, dev, cmd2);
+          return;
+        }
         queueDeviceNack(ctx, now);
       }
     }
@@ -403,6 +523,14 @@
         io.sioInIndex = (io.sioInIndex + 1) & 0xffff;
         io.sioInSize = (io.sioInSize - 1) | 0;
         ctx.ram[IO_SEROUT_SERIN] = b;
+        // Keep the trace focused on frame boundaries. Logging every byte
+        // would hide command/sector events in a single 128-byte response.
+        if ((io.sioInSize | 0) <= 1) {
+          recordSioEvent(ctx, "serin_frame_end", {
+            value: b,
+            remaining: io.sioInSize | 0,
+          });
+        }
 
         if ((io.sioInSize | 0) > 0) {
           io.serialInputDataReadyCycle =
@@ -410,6 +538,7 @@
           cycleTimedEventUpdate(ctx);
         } else {
           io.sioInIndex = 0;
+          queuePendingReadData(ctx, effectiveEventCycle(ctx));
         }
       }
       return ctx.ram[IO_SEROUT_SERIN] & 0xff;

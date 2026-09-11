@@ -248,6 +248,7 @@
       ? window.A8EState.createApi({
           CPU: CPU,
           CYCLES_PER_LINE: CYCLES_PER_LINE,
+          CYCLES_PER_FRAME: CYCLES_PER_FRAME,
           CYCLE_NEVER: CYCLE_NEVER,
           IO_INIT_VALUES: IO_INIT_VALUES,
         })
@@ -296,7 +297,6 @@
     window.A8EPokeyAudio && window.A8EPokeyAudio.createApi
       ? window.A8EPokeyAudio.createApi({
           ATARI_CPU_HZ_PAL: ATARI_CPU_HZ_PAL,
-          CYCLES_PER_LINE: CYCLES_PER_LINE,
           POKEY_AUDIO_MAX_CATCHUP_CYCLES: POKEY_AUDIO_MAX_CATCHUP_CYCLES,
           CYCLE_NEVER: CYCLE_NEVER,
           SERIAL_OUTPUT_DATA_NEEDED_CYCLES: SERIAL_OUTPUT_DATA_NEEDED_CYCLES,
@@ -725,6 +725,12 @@
       state.nmiDiagnostics = ctx.ioData.nmiDiagnostics;
       state.nmiDiagnostics.cpuNmiPending = ctx.nmiPending | 0;
       state.nmiDiagnostics.cpuNmiActive = ctx.nmiActive | 0;
+      if (io.sioDiagnostics) {
+        state.sioDiagnostics = {
+          eventCount: io.sioDiagnostics.eventCount >>> 0,
+          events: io.sioDiagnostics.events.slice(),
+        };
+      }
       return state;
     }
 
@@ -794,6 +800,7 @@
     const writeRangeRuntime = memoryRuntime.writeRange;
     const setMemoryWriteHookRuntime = memoryRuntime.setMemoryWriteHook;
     const setCpuMemoryWriteHookRuntime = CPU.setMemoryWriteHook;
+    const setCpuMemoryAccessHookRuntime = CPU.setMemoryAccessHook;
     const getBankStateRuntime = memoryRuntime.getBankState;
 
     // H: device -- create instance and install CIO hook(s)
@@ -825,7 +832,10 @@
       for (let i = 0; i < addresses.length; i++) {
         const addr = addresses[i] & 0xffff;
         if (hDeviceHookAddresses.indexOf(addr) >= 0) continue;
-        CPU.setPcHook(machine.ctx, addr, hDevice.onCioCall);
+        CPU.setPcHook(machine.ctx, addr, function (ctx) {
+          if (hDevice && hDevice.onCioCall(ctx)) return true;
+          return false;
+        });
         hDeviceHookAddresses.push(addr);
       }
 
@@ -866,6 +876,7 @@
         hDevice.resetChannels();
         installHDeviceCioHooks();
       } else {
+        installHDeviceCioHooks();
         debugRuntime.rebindBreakpointHooks();
       }
     }
@@ -959,6 +970,12 @@
       }
       if (typeof setCpuMemoryWriteHookRuntime === "function") {
         setCpuMemoryWriteHookRuntime(machine.ctx, fn);
+      }
+    }
+
+    function setMemoryAccessHook(fn) {
+      if (typeof setCpuMemoryAccessHookRuntime === "function") {
+        setCpuMemoryAccessHookRuntime(machine.ctx, fn);
       }
     }
 
@@ -1325,6 +1342,7 @@
       writeMemory: writeMemory,
       writeRange: writeRange,
       setMemoryWriteHook: setMemoryWriteHook,
+      setMemoryAccessHook: setMemoryAccessHook,
       getBankState: getBankState,
       saveSnapshot: saveSnapshot,
       loadSnapshot: loadSnapshot,

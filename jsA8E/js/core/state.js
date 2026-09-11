@@ -32,7 +32,8 @@
         valuePortA: 0,
         valuePortB: 0,
         // SIO state (ported from Pokey.c)
-        sioBuffer: new Uint8Array(1024),
+        // 850 handler downloads can be 1496 bytes (AHRM 9.10).
+        sioBuffer: new Uint8Array(4096),
         sioOutIndex: 0,
         sioOutPhase: 0, // 0=command frame, 1=data frame (write/put/verify)
         sioDataIndex: 0,
@@ -42,6 +43,14 @@
         sioPendingBytes: 0,
         sioInIndex: 0,
         sioInSize: 0,
+        // Read-sector ACK is followed by a separate Complete/data phase.
+        sioPendingReadSize: 0,
+        // Bounded SIO trace for external diagnostics; it does not affect SIO.
+        sioDiagnostics: {
+          eventCount: 0,
+          events: [],
+          limit: 512,
+        },
         // POKEY-ish randomness state (LFSR)
         pokeyLfsr17: 0x1ffff,
         pokeyLfsr17LastCycle: 0,

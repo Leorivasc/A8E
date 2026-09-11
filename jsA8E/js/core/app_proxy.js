@@ -817,9 +817,7 @@
 
   function createWorkerApp(opts) {
     const canvas = opts.canvas;
-    // Bump this during temporary Worker-side diagnostics so browsers do not
-    // reuse a cached emulator_worker.js while investigating a live session.
-    const worker = new Worker("emulator_worker.js?diag=20260910-nmi4");
+    const worker = new Worker("emulator_worker.js");
     const audioChannel = new MessageChannel();
     const audioBridge = createAudioBridge(audioChannel.port1);
     const hostFsProxy = createHostFsProxy(sendHostFsCommand);
@@ -829,6 +827,7 @@
     const pendingRequests = new Map();
     let requestSeq = 1;
     const debugListeners = new Set();
+    const memoryAccessListeners = new Set();
     let keyboardMappingMode =
       opts && opts.keyboardMappingMode === "original"
         ? "original"
@@ -921,6 +920,17 @@
           out.nmiDiagnostics.lastService = Object.assign({}, raw.nmiDiagnostics.lastService);
         if (raw.nmiDiagnostics.lastRequest)
           out.nmiDiagnostics.lastRequest = Object.assign({}, raw.nmiDiagnostics.lastRequest);
+      }
+      if (raw.sioDiagnostics && typeof raw.sioDiagnostics === "object") {
+        out.sioDiagnostics = {
+          eventCount: raw.sioDiagnostics.eventCount >>> 0,
+          limit: raw.sioDiagnostics.limit | 0,
+          events: Array.isArray(raw.sioDiagnostics.events)
+            ? raw.sioDiagnostics.events.map(function (event) {
+                return Object.assign({}, event);
+              })
+            : [],
+        };
       }
       if (raw.faultType) out.faultType = String(raw.faultType);
       if (raw.faultMessage) out.faultMessage = String(raw.faultMessage);
@@ -1126,6 +1136,13 @@
 
       if (data.type === "debugState") {
         emitDebugState(data.debug || null);
+        return;
+      }
+
+      if (data.type === "memoryAccess") {
+        memoryAccessListeners.forEach(function (fn) {
+          try { fn(data.access || null); } catch { /* diagnostics must not stop emulation */ }
+        });
         return;
       }
 
@@ -1343,6 +1360,14 @@
       },
       getBankState: function () {
         return sendRequest("getBankState");
+      },
+      setMemoryAccessTrace: function (enabled) {
+        return sendRequest("setMemoryAccessHook", { enabled: !!enabled });
+      },
+      onMemoryAccess: function (fn) {
+        if (typeof fn !== "function") return function () {};
+        memoryAccessListeners.add(fn);
+        return function () { memoryAccessListeners.delete(fn); };
       },
       getMountedDiskForDeviceSlot: function (slot) {
         return sendRequest("getMountedDiskForDeviceSlot", {
@@ -1568,6 +1593,10 @@
       };}
     if (app && typeof app.getBankState !== "function")
       {app.getBankState = function () { return null; };}
+    if (app && typeof app.setMemoryAccessTrace !== "function")
+      {app.setMemoryAccessTrace = function () { return Promise.resolve({ enabled: false }); };}
+    if (app && typeof app.onMemoryAccess !== "function")
+      {app.onMemoryAccess = function () { return function () {}; };}
     if (app && typeof app.getMountedDiskForDeviceSlot !== "function")
       {app.getMountedDiskForDeviceSlot = function () { return null; };}
     if (app && typeof app.getConsoleKeyState !== "function")

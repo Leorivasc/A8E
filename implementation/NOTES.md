@@ -5,9 +5,32 @@
 Simple implementation notes for this repository.
 
 - 2026-09-10: `A8E/6502.c`: matched the validated jsA8E NMI dispatch fix. Native A8E now accepts one pending NMI edge while an earlier NMI handler is active, instead of dropping it behind the software active-handler guard. The single pending flag is retained to avoid queueing unbounded interrupts.
+- 2026-09-11: `A8E/Pokey.c`: synchronized disk READ responses with jsA8E by delivering the command ACK separately from the Complete/data/checksum phase. The pending phase is queued when the ACK is consumed, matching AHRM SIO framing without changing write, status, format, or poll commands.
 
 Reference: follow `AGENTS.md`.
 Process rule: review this file before planning any improvement, and update it after each code improvement.
+
+Maintenance rule: temporary diagnostics and single-purpose test routines must be removed after the related bug is confirmed, unless they are generalized into reusable regression tests. Avoid accumulating one-off test hooks in the emulator.
+
+Keep reusable inspection points: the public `A8EAutomation` connection and general-purpose memory, CPU, state, trace, disassembly, breakpoint, and input controls may remain available for future investigations. Remove only game-specific wrappers, probes, counters, and cache-busters once their investigation is complete.
+
+- 2026-09-10: `jsA8E/js/core/{state,pokey_sio,atari,app_proxy}.js`, `jsA8E/emulator_worker.js`: added a bounded, non-invasive SIO event trace to identify disk-loader stalls. It records command/sector requests, queued responses, and SERIN reads without changing SIO timing or data behavior; remove it after the investigation unless generalized for future diagnostics.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: extended the temporary Animal Party SIO capture to include loader variables, POKEY serial registers, and disassembly in the same run, avoiding unreliable post-reload inspection.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: included the NMI/IRQ vectors and handler disassembly in the Animal Party capture to identify the source of the loader's `$A527` wait flag.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: reduced the Animal Party capture output to the final SIO events while retaining the full CPU/vector diagnostics.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: compacted disassembly in the Animal Party capture so the NMI/IRQ handler flow remains visible without truncating the result.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: added timed post-button samples of the Animal Party loader flag and POKEY status to distinguish a transient load phase from a stable wait loop.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: added an optional pre-button screenshot mode so the automated test can verify it reaches the presentation screen before sending joystick input.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: made pre-button screenshot mode wait 30 seconds; the earlier 12-second capture was still a black loading state and could not validate the intended button transition.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: corrected the button-phase capture to use Worker-backed state and include post-button SIO events; the prior reproduction now confirms the presentation wait state at `$9088` and a return to the boot loop after the pulse.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: compacted button-phase samples to avoid duplicating full SIO state in every timed CPU sample.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: added a memory window around `$8180` to compare the post-button sector-126 load with the ATR payload.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: added a compact pre-buffer capture for the Animal Party DCB and candidate load windows, without changing machine state.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: corrected the candidate load window from `$8180` to `$8100`, matching the DCB buffer low/high bytes (`$8101`).
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: added the actual post-button DCB buffer (`$0881`) to the temporary Animal Party inspection, after decoding the DCB fields correctly; this remains diagnostic-only.
+- 2026-09-10: `jsA8E/tests/cdp_diagnostic.js`: extended the post-button capture with `$0881` and `$02FC`, the buffer and completion flag used by the ATR boot loader.
+- 2026-09-10: `jsA8E/js/core/{state,memory,io,pokey_sio}.js`: separated disk READ responses into the Acknowledgment and Complete/data phases described by AHRM SIO, preserving the pending phase through snapshots; this is the first Animal Party compatibility experiment and remains under verification.
+- 2026-09-10: `A8E/Pokey.c`, `jsA8E/js/core/pokey_sio.js`: added generic AHRM handling for disk `$3F` high-speed index queries and silent routing for absent Type 1/3/4 peripherals. Disk IDs use the high-speed query; non-disk devices do not receive fabricated responses.
 
 ## Project Paths
 - `A8E/` -> native C implementation.
@@ -160,4 +183,16 @@ Process rule: review this file before planning any improvement, and update it af
 - 2026-09-09: `A8E/Pokey.c`: accepted SDL devices negotiating 32-bit signed or float output in addition to `AUDIO_S16SYS`. In particular, `0x8120` is `AUDIO_F32SYS`; the callback converts the 16-bit POKEY mixer output to float or signed 32-bit samples and preserves mono/stereo handling.
 - 2026-09-09: `A8E/Pokey.c`: corrected the SDL callback branch selection so `AUDIO_F32SYS` uses the 32-bit conversion path instead of being written as 16-bit PCM. This fixes silent output when the Windows WASAPI device negotiates format `0x8120`.
 - 2026-08-21: `Memory` branch: restored the PAL/NTSC palette selection lost during the merge from `main`. The memory-expansion changes remain untouched; the software renderer now receives the hardware video standard and selects the matching PAL or NTSC hue table.
+
+- 2026-09-10: `jsA8E/js/core/pokey_sio.js`, `jsA8E/js/core/pokey.js`: made the absent-device path explicitly clear pending `SERIN` data, the pending read phase, and the SERIN-ready flag before allowing `$3F/$40` polls to time out. This preserves the no-response behavior while preventing stale bytes from a previous SIO command from being consumed as a poll result.
+- 2026-09-10: `jsA8E/js/core/pokey_sio.js`: corrected the timeout cleanup to use the configured `CYCLE_NEVER` sentinel. The missing local constant caused the CPU execution error that appeared as the blue-screen hang after the first timeout patch.
+- 2026-09-10: `jsA8E/js/core/atari.js`: completed the SIO timeout wiring by passing the active frame-cycle value into POKEY/SIO. Without this connection, absent-device timeouts were scheduled with `NaN` and `TIMFLG` could never be raised.
+- 2026-09-10: `jsA8E/js/core/{pokey_sio,antic}.js`: corrected `TIMFLG` polarity using the OS definition: SIO waits start with `$0317=1`, and an absent-device timeout changes it to `$00`. The previous diagnostic implementation inverted this flag.
+- 2026-09-10: `jsA8E/js/core/antic.js`: completed the generic absent-SIO-device timeout cleanup. When `TIMFLG` expires, pending serial timing events, frame phases, response bytes, and active-low serial IRQ sources are cleared without changing the OS DCB or inventing a peripheral response.
+- 2026-09-10: `jsA8E/js/core/{atari,pokey,pokey_sio}.js`: aligned the synthetic absent-device `DTIMLO` timeout to the next OS VBI (scan line 248) instead of expiring at an arbitrary SIO command cycle. The selected PAL/NTSC frame geometry is passed into SIO so the timing remains standard-specific.
+- 2026-09-10: `jsA8E/js/core/pokey_sio.js`: stopped rearming the absent-device `DTIMLO` timeout on every Type 1 poll retry. The first unanswered `$3F` command starts one timeout window; subsequent retries remain silent until that same window expires.
+- 2026-09-11: `jsA8E/js/core/pokey_sio.js`: cleared all three active-low serial IRQST sources (`$08/$10/$20`) before an absent-device poll retry. Clearing only SERIN could leave stale SEROUT/ transmission-done state from the preceding disk command and alter the OS SIOV retry path.
+- 2026-09-11: `jsA8E/js/core/pokey_sio.js`: made absent `$3F/$40` SIO devices fully silent by removing the artificial `IRQST`, `TIMFLG`, SERIN and SEROUT cleanup. The OS now exclusively owns the timeout/retry result, per AHRM 9.1.
+- 2026-09-11: `jsA8E/{js/core/app_proxy.js,emulator_worker.js}`: versioned the worker and `pokey_sio.js` URLs as `sio-silent1` so the absent-device behavior change cannot be hidden by browser cache.
+- 2026-09-11: removed AtariWriter-only reset/checksum/status probes, CDP wrappers, cache-busters, and placeholder 850/R: device classes after that investigation was paused. Generic SIO disk phases, absent-device routing, bounded SIO events, and reusable public inspection APIs remain.
 

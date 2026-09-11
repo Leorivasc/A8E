@@ -200,6 +200,17 @@
       if (raw.nmiDiagnostics.lastRequest)
         out.nmiDiagnostics.lastRequest = Object.assign({}, raw.nmiDiagnostics.lastRequest);
     }
+    if (raw.sioDiagnostics && typeof raw.sioDiagnostics === "object") {
+      out.sioDiagnostics = {
+        eventCount: raw.sioDiagnostics.eventCount >>> 0,
+        limit: raw.sioDiagnostics.limit | 0,
+        events: Array.isArray(raw.sioDiagnostics.events)
+          ? raw.sioDiagnostics.events.map(function (event) {
+              return Object.assign({}, event);
+            })
+          : [],
+      };
+    }
     return out;
   }
 
@@ -917,6 +928,22 @@
       case "getBankState":
         if (typeof app.getBankState === "function") return app.getBankState();
         return null;
+      case "setMemoryAccessHook":
+        // Memory access hooks are diagnostic-only and are intentionally not
+        // serialized across the Worker boundary.
+        if (typeof app.setMemoryAccessHook === "function") {
+          app.setMemoryAccessHook(data.enabled ? function (kind, address, value, cycle, instruction, pc, opcode) {
+            if (address !== 0xd301 && (address < 0x4000 || address > 0x7fff)) return;
+            self.postMessage({
+              type: "memoryAccess",
+              access: {
+                kind, address, value, cycle, instruction, pc, opcode,
+                bank: typeof app.getBankState === "function" ? app.getBankState() : null,
+              },
+            });
+          } : null);
+        }
+        return { enabled: !!data.enabled };
       case "getMountedDiskForDeviceSlot":
         if (typeof app.getMountedDiskForDeviceSlot === "function") {
           return app.getMountedDiskForDeviceSlot(data.slot | 0);

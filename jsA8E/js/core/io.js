@@ -360,6 +360,7 @@
               io.sioDataIndex = 0;
               io.sioInSize = 0;
               io.sioInIndex = 0;
+              io.sioPendingReadSize = 0;
             }
             pokeyArmInactiveTimers(ctx);
             break;
