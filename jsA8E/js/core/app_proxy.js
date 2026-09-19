@@ -52,6 +52,16 @@
     diskLibraryDelete: 15000,
   };
 
+  function resolveAudioWorkletUrl() {
+    const base =
+      typeof document !== "undefined" && document.baseURI
+        ? document.baseURI
+        : typeof self !== "undefined" && self.location && self.location.href
+          ? self.location.href
+          : "";
+    return new URL("js/audio/worklet.js", base).href;
+  }
+
   function isTauriWebView() {
     return !!(
       window.__TAURI__ ||
@@ -531,8 +541,9 @@
         nodePromise = Promise.resolve(null);
         return nodePromise;
       }
+      const workletUrl = resolveAudioWorkletUrl();
       nodePromise = ctx.audioWorklet
-        .addModule("js/audio/worklet.js")
+        .addModule(workletUrl)
         .then(function () {
           if (disposed) return null;
           if (workletNode) return workletNode;
@@ -552,7 +563,8 @@
           workletNode = n;
           return n;
         })
-        .catch(function () {
+        .catch(function (error) {
+          console.error("A8E audio worklet unavailable; using ScriptProcessor fallback", error);
           setupScriptNode();
           nodePromise = Promise.resolve(null);
           return null;

@@ -55,6 +55,10 @@ Simple implementation notes for this repository.
 - 2026-09-18: documented that Tauri development uses the manual Python server
   on port `8090` from `devUrl`, while packaged AppImage builds use embedded
   Tauri assets and do not bind a local TCP port.
+- 2026-09-19: `jsA8E/js/{audio/runtime.js,core/app_proxy.js}`: resolve the
+  AudioWorklet module against the active document or worker origin so browser
+  workers and packaged Tauri assets both load it correctly. Worklet failures
+  now report a console diagnostic before using the ScriptProcessor fallback.
 
 - 2026-09-15: removed obsolete game-specific investigation scripts, the CDP
   diagnostic runner, and the unused SIO/NMI/POKEY diagnostic counters. The
