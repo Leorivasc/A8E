@@ -19,6 +19,35 @@ Simple implementation notes for this repository.
   button, with labels retained through tooltip and ARIA text.
 - 2026-09-18: `jsA8E/{index.html,js/app/ui.js}`: `Work` is now the default
   layout when no saved presentation preference exists.
+- 2026-09-18: added the initial `src-tauri/` desktop shell. It serves the
+  existing `jsA8E` static frontend through Tauri in development via the same
+  `python -m http.server` URL and packages that frontend for release without
+  moving emulator logic into Rust. Rust/Cargo are not installed in the current
+  environment, so native compilation remains pending.
+- 2026-09-18: `jsA8E/js/core/app_proxy.js` now detects the Tauri WebView and
+  selects the main-thread backend there. WebKitGTK may expose
+  `OffscreenCanvas` without a usable worker 2D context, which caused the
+  desktop shell to fail with `Missing 2D canvas context` in the worker.
+- 2026-09-18: documented Tauri portability in `implementation/tauri.md` and
+  `jsA8E/README.md`. Rust/Cargo/CLI/Python and Linux GTK/WebKitGTK development
+  packages are build-time requirements; Windows uses WebView2, macOS uses
+  system WebKit, and Linux packages retain WebKitGTK/GTK runtime dependencies.
+  The remaining CDN assets are recorded as a prerequisite for a fully offline
+  desktop release.
+- 2026-09-18: added `scripts/build-tauri-linux.sh`, a reproducible Linux
+  packaging helper that validates Cargo, the Tauri CLI, and WebKitGTK
+  prerequisites before running `cargo tauri build` and listing generated
+  distribution artifacts.
+- 2026-09-18: the Linux packaging helper defaults to `deb,rpm`; AppImage can
+  be requested with `A8E_TAURI_BUNDLES=deb,rpm,appimage`. This keeps the normal
+  build independent of AppImage's external `linuxdeploy` download chain.
+- 2026-09-18: added a Tauri drag-drop bridge across `src-tauri/src/lib.rs`,
+  `jsA8E/js/app/ui.js`, HostFS, and Disk Library. Native dropped paths are read
+  through a Rust command and forwarded as `File` objects to the existing panel
+  handlers; browser HTML5 drag-and-drop remains unchanged.
+- 2026-09-18: documented that Tauri development uses the manual Python server
+  on port `8090` from `devUrl`, while packaged AppImage builds use embedded
+  Tauri assets and do not bind a local TCP port.
 
 - 2026-09-15: removed obsolete game-specific investigation scripts, the CDP
   diagnostic runner, and the unused SIO/NMI/POKEY diagnostic counters. The

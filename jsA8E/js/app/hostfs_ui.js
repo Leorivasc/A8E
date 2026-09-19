@@ -142,6 +142,12 @@
         dropZone.classList.remove("drag-over");
         _handleDrop(e.dataTransfer).then(refreshList);
       });
+      dropZone.addEventListener("a8e-native-file-drop", function (e) {
+        const files = e.detail && Array.isArray(e.detail.files)
+          ? e.detail.files
+          : [];
+        if (files.length) _uploadFiles(files).then(refreshList);
+      });
     }
 
     // --- Select All / None ---

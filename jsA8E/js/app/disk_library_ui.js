@@ -282,6 +282,12 @@
         dropZone.classList.remove("drag-over");
         readFiles(event.dataTransfer ? event.dataTransfer.files : []);
       });
+      dropZone.addEventListener("a8e-native-file-drop", function (event) {
+        const files = event.detail && Array.isArray(event.detail.files)
+          ? event.detail.files
+          : [];
+        if (files.length) readFiles(files);
+      });
     }
 
     if (selectAllBtn) {

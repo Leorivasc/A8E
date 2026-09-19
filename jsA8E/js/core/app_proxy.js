@@ -52,7 +52,21 @@
     diskLibraryDelete: 15000,
   };
 
+  function isTauriWebView() {
+    return !!(
+      window.__TAURI__ ||
+      window.__TAURI_INTERNALS__ ||
+      (window.location &&
+        typeof window.location.hostname === "string" &&
+        window.location.hostname.endsWith(".tauri.localhost"))
+    );
+  }
+
   function supportsWorker() {
+    // WebKitGTK can expose OffscreenCanvas but return no 2D context from the
+    // worker. Keep the desktop shell on the main-thread backend until the
+    // native WebView worker rendering path is reliable across platforms.
+    if (isTauriWebView()) return false;
     if (typeof window.Worker === "undefined") return false;
     if (typeof window.OffscreenCanvas === "undefined") return false;
     if (typeof window.MessageChannel === "undefined") return false;

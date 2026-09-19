@@ -2159,6 +2159,8 @@
       });
     }
 
+    installTauriFileDropBridge();
+
     // Keyboard input forwarded to emulator.
     function isMetaKeyEvent(e) {
       return !!e && (e.key === "Meta" || !!e.metaKey);
@@ -2194,6 +2196,86 @@
     function onWindowModifierKeyUp(e) {
       if (!shouldTrackGlobalModifierEvent()) return;
       trackPhysicalModifier(e, false);
+    }
+
+    function installTauriFileDropBridge() {
+      const tauri = window.__TAURI__;
+      const core = tauri && tauri.core;
+      const webview = tauri && tauri.webview;
+      if (
+        !core ||
+        typeof core.invoke !== "function" ||
+        !webview ||
+        typeof webview.getCurrentWebview !== "function"
+      ) return;
+
+      function fileNameFromPath(path) {
+        const value = String(path || "").replace(/\\/g, "/");
+        return value.substring(value.lastIndexOf("/") + 1) || "dropped-file";
+      }
+
+      function zoneAtPosition(position) {
+        if (!position || typeof document.elementFromPoint !== "function") return null;
+        const x = Number(position.x);
+        const y = Number(position.y);
+        if (!isFinite(x) || !isFinite(y)) return null;
+        const element = document.elementFromPoint(x, y);
+        if (!element || !element.closest) return null;
+        return (
+          element.closest(".hostfs-drop-zone") ||
+          element.closest(".disklib-drop-zone") ||
+          (screenViewport && screenViewport.contains(element) ? screenViewport : null)
+        );
+      }
+
+      async function readDroppedFiles(paths) {
+        const files = [];
+        for (const path of paths || []) {
+          try {
+            const bytes = await core.invoke("read_dropped_file", { path: path });
+            files.push(new File([new Uint8Array(bytes)], fileNameFromPath(path)));
+          } catch (error) {
+            console.error("Tauri drop: unable to read file", path, error);
+          }
+        }
+        return files;
+      }
+
+      let currentWebview;
+      try {
+        currentWebview = webview.getCurrentWebview();
+      } catch (error) {
+        console.error("Tauri drag-drop bridge unavailable", error);
+        return;
+      }
+      if (!currentWebview || typeof currentWebview.onDragDropEvent !== "function") return;
+
+      Promise.resolve(currentWebview.onDragDropEvent(async function (event) {
+        const payload = event && event.payload;
+        if (!payload) return;
+        if (payload.type === "over") {
+          const zone = zoneAtPosition(payload.position);
+          if (zone) zone.classList.add("drag-over");
+          return;
+        }
+        document.querySelectorAll(".drag-over").forEach(function (element) {
+          element.classList.remove("drag-over");
+        });
+        if (payload.type !== "drop") return;
+
+        const zone = zoneAtPosition(payload.position);
+        const files = await readDroppedFiles(payload.paths);
+        if (!zone || !files.length) return;
+        if (zone === screenViewport) {
+          await handleScreenDrop({ files: files, getData: function () { return ""; } });
+          return;
+        }
+        zone.dispatchEvent(
+          new CustomEvent("a8e-native-file-drop", { detail: { files: files } }),
+        );
+      })).catch(function (error) {
+        console.error("Tauri drag-drop bridge unavailable", error);
+      });
     }
 
     function releaseInputState() {

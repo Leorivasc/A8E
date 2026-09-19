@@ -56,6 +56,42 @@ python -m http.server 8000
 # open http://localhost:8000/jsA8E/
 ```
 
+## Tauri Desktop Shell
+
+The optional `../src-tauri/` project wraps this same static frontend in a
+native Tauri window. Browser development remains available with the command
+above. For native development, keep the server running and launch Tauri from
+the repository root:
+
+```sh
+cargo tauri dev --config src-tauri/tauri.conf.json
+```
+
+Tauri development uses `http://127.0.0.1:8090/jsA8E/`, so start the server on
+port `8090` for that mode. This port is only a development-server requirement;
+the packaged AppImage embeds the frontend, uses Tauri's internal asset
+protocol, and does not open a local TCP listening port.
+
+Release builds package `jsA8E/` into the desktop application. The native
+WebView has no browser tab bar, allowing AtariWriter `Ctrl+letter` commands to
+reach the emulator without browser chrome shortcuts competing for them.
+
+From the repository root, Linux packaging can be run with:
+
+```sh
+./scripts/build-tauri-linux.sh
+```
+
+Tauri build requirements are platform-specific. Rust, Cargo, the Tauri CLI,
+and Python are only needed for development or packaging. Windows uses
+WebView2, macOS uses its system WebKit, and Linux uses WebKitGTK supplied by
+the distribution. The generated Linux package declares its WebKitGTK and GTK
+runtime dependencies, so the release target should use a known Debian/Ubuntu
+baseline or another distribution-specific package format. See
+[`../implementation/tauri.md`](../implementation/tauri.md) for the complete
+portability notes. The current frontend still references Font Awesome and
+`fflate` from CDNs; these should be made local for an offline desktop release.
+
 ## Build Version Tooltip
 
 - Tooltip version text is loaded from `jsA8E/version.json` at runtime.
