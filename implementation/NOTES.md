@@ -3,7 +3,14 @@
 > Hardware emulation reference: Before implementing any Atari 800 XL PAL/NTSC hardware emulation, use the [AHRM](/AHRM/index.md) as reference.
 
 Simple implementation notes for this repository.
-
+- 2026-09-19: `jsA8E/{index.html,js/app/ui.js,js/core/app_proxy.js}`: all
+  presentation layouts now start with SIO turbo, the on-screen joystick, and
+  the on-screen keyboard disabled. Changing layouts no longer enables either
+  input panel; each can still be enabled independently from its toolbar button.
+- 2026-09-19: `jsA8E/{index.html,style.css}`: Disk Library headers and rows now
+  share one horizontal scroll viewport, keeping column headings aligned when
+  long filenames exceed the available panel width.
+  
 - 2026-09-18: `jsA8E/{index.html,style.css,js/app/ui.js}`: added the first
   extensible presentation-layout presets. `Emulation`, `Work`, and
   `Development` are selectable beside the lifecycle controls, persist through
