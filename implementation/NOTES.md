@@ -179,6 +179,10 @@ Simple implementation notes for this repository.
   level-sensitive POKEY IRQ behavior. Masked requests now collapse to one
   pending level, and writing `IRQEN` clears that request when no enabled
   active POKEY source remains, matching AHRM 5.7.
+- 2026-09-20: `jsA8E/js/core/{cpu,io}.js`: reconciled the JavaScript POKEY IRQ
+  level in both directions when writing `IRQEN/$D20E`. An already asserted and
+  re-enabled source now reasserts the CPU IRQ, matching AHRM 5.7 and the native
+  `_6502_ReconcileIrq()` path instead of only clearing stale pending state.
 - 2026-09-13: `A8E/A8E.c`: made the native window title include the active
   memory profile and PAL/NTSC standard. The title is generated from the same
   parsed runtime state reported on the console.
@@ -489,3 +493,21 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   enabled, ANTIC now reads the preserved motherboard `$4000-$7FFF` view rather
   than the CPU's live bank; enabling the independent ANTIC window still exposes
   that selected bank. This follows AHRM 2.7 and is covered by a regression.
+- 2026-09-20: `jsA8E/js/app/hostfs_ui.js`: added a row-level Run action for
+  `.XEX` files in HostFS. The action reads the file from H:, loads it into D1:
+  through the existing emulator loader, and resets/starts the machine. This is
+  a direct UI loader path, not an Atari-side CIO command executed through H:.
+- 2026-09-20: `implementation/jsA8E/COMPILER_DEBUGGER.md`: recorded the
+  compiler/debugger review. The current XEX workflow is functional, while
+  worker Run synchronization, preprocessor source mapping, worker step
+  acknowledgements, `stepOverAsync()` validation, object linking, `.SET`
+  redefinition, and case-insensitive automation symbol lookup remain follow-up
+  items.
+- 2026-09-20: `jsA8E/js/app/ui.js`: identified a pending UI improvement for the
+  top-bar run/pause control. While a worker lifecycle request is in flight, the
+  UI currently disables the control; a future change should coalesce repeated
+  clicks and apply the last requested start/pause state after the worker ACK.
+- 2026-09-20: jsA8E: added a separate application fullscreen control. The
+  existing fullscreen button and F11 continue to maximize only the Atari
+  display; the new workspace button maximizes the complete browser app, keeping
+  the toolbar, screen, Disk Library, HostFS, and other panels visible.
