@@ -4,8 +4,8 @@ disks/
 docs/
 node_modules/
 .DS_Store
-ATARIBAS.ROM
-ATARIXL.ROM
+#ATARIBAS.ROM
+#ATARIXL.ROM
 .cache/
 src-tauri/target/
 *.atr
