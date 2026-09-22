@@ -2,6 +2,8 @@
 
 > Hardware emulation reference: Before implementing any Atari 800 XL PAL/NTSC hardware emulation, use the [AHRM](/AHRM/index.md) as reference.
 
+[OPEN HERE](/jsA8E/index.html)
+
 <img src="jsA8E/a8e.webp" alt="A8E Logo" width="800">
 
 Atari 800 XL emulator with two implementations in this repository:
