@@ -4,6 +4,44 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-23: `jsA8E/style.css`: remove the generic flex layout from Disk
+  Library cells. Use a nested grid for filenames and text alignment for the
+  download action so its icon keeps its normal width in the shared final grid
+  column.
+
+- 2026-09-23: `jsA8E/assets/standby.{asm,xex}`, `jsA8E/js/app/ui.js`, and
+  disk-library restore/UI code: supply an internal D1 startup XEX whenever no
+  user ATR/XEX is mounted. Wait for saved library mounts before selecting the
+  fallback; file-picker/drop loads still restart into user media. Library
+  drive edits now update mounted devices without resetting or auto-starting, so
+  users can swap disk sides; the library status only confirms the mount action,
+  and Full Reset stays user-controlled for booting from D1. The standby program
+  draws its instructions in a private screen buffer through a custom ANTIC
+  display list, avoiding CIO E: output.
+
+- 2026-09-23: `jsA8E/index.html`, `jsA8E/style.css`, and `jsA8E/js/app/ui.js`:
+  use a compact icon-only Open Disk control and show disk status through the
+  existing library/mount state instead of a redundant toolbar badge. Use double
+  chevrons for SIO turbo to distinguish it from the disk picker; place Open
+  Disk immediately after the ATARIBAS.ROM loader.
+
+- 2026-09-22: `jsA8E/index.html`: move ROM loading, fullscreen, turbo,
+  keyboard/joystick, and utility-panel controls into the primary toolbar row.
+  Keep only the video-standard and memory-expansion selectors in the collapsible
+  secondary row.
+
+- 2026-09-22: `jsA8E/style.css`: place the top toolbar in a higher stacking
+  layer so the brand help tooltip can paint above the page panels. The toolbar's
+  backdrop filter creates a stacking context, so the tooltip's own z-index
+  could not lift it over later content by itself.
+
+- 2026-09-22: `jsA8E/js/core/memory.js` and `A8E/AtariIo.c`: preserve the XEX
+  loader's zero-page sector cursor across `INITAD` calls, and select a sector
+  buffer from available RAM at `$0880` or above, away from the shared
+  `$0600-$067F` workspace. The JavaScript and native loader images and their
+  relocated operands are kept in sync. This resolves the Amaurote Plus XEX
+  startup failure; see [the investigation](../ATR/amaurote.md).
+
 - 2026-09-18: `jsA8E/{index.html,style.css,js/app/ui.js}`: added the first
   extensible presentation-layout presets. `Emulation`, `Work`, and
   `Development` are selectable beside the lifecycle controls, persist through

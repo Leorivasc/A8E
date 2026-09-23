@@ -81,6 +81,8 @@ Several programs that previously failed during loading now reach their normal
 startup screens in the emulator:
 
 - **AtariBlast** completes its mixed-geometry ATR load and reaches the game screen.
+- **Amaurote Plus** starts from XEX and reaches its game menu after the
+  presentation; see [the investigation](ATR/amaurote.md).
 - **Mikie V1.12** completes its banked XEX load and reaches the control screen.
 - **AtariWriter Plus XE** completes its 130XE startup sequence and reaches the user menu.
 - **Karate Champion** and **Animal Party** are also covered by the generic DLI/NMI
@@ -112,6 +114,14 @@ python -m http.server 8000
 ```
 
 (`file://` is not sufficient because shader and ROM auto-load paths use `fetch()`.)
+
+When the browser emulator starts with D1 empty, it mounts the built-in
+`standby.xex` and shows disk-loading instructions through an ANTIC display
+list. **Open Disk** loads and starts a selected image. Disk Library mount
+changes take effect without restarting the running program, so it can request
+another disk side; the library status only confirms the mount action. Use
+**Full Reset** when you want to boot from the image currently mounted in D1.
+See the [browser README](jsA8E/README.md) for more details.
 
 For an online demo of the jsA8E version, visit https://jsa8e.anides.de/
 
