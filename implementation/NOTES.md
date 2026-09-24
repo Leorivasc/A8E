@@ -4,6 +4,12 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-24: `ATR/10Sept26.md`, the Karate Champion and Animal Party notes,
+  and the root README: reconcile the historical game summaries with current
+  validation. Keep the Bosconian POKEY timer fix separate from Karate's NMI
+  cause, and clarify that the existing SIO observer test does not cover the
+  Animal Party READ response phases.
+
 - 2026-09-24: `ATR/world_karate_championship_v1_ed.md` and
   `ATR/animal_party.md`: added title-level investigation records for the
   World Karate Championship (v1,ED) DLI/NMI case and Animal Party SIO
