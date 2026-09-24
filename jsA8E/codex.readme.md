@@ -52,9 +52,10 @@ This file is a handoff note for the next session.
 - A full cycle-by-cycle comparison against an Altirra trace is still useful for
   future AHRM corner cases, but it is no longer a prerequisite for the generic
   bank-map implementation.
-- Karate Champion and Animal Party still need final title-level startup
-  confirmation; their DLI/NMI and SIO paths are covered by the generic fixes
-  and diagnostic work.
+- World Karate Championship (v1,ED) loads, executes, and allows a tournament
+  to be started normally in jsA8E. Animal Party also loads and has been
+  verified during gameplay; both paths are covered by their generic fixes and
+  diagnostic work.
 - Ultimate1MB firmware-dependent behavior (BIOS/flash, RTC, and PBI) remains
   outside the current model.
 
