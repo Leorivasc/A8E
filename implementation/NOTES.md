@@ -4,6 +4,10 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-24: `implementation/alignment_23Sept26.md`: added the prioritized
+  AHRM alignment study for A8E and jsA8E, including feasibility, difficulty,
+  implementation steps, acceptance criteria, and recommended execution order.
+
 - 2026-09-24: `ATR/world_karate_championship_v1_ed.md` and
   `ATR/animal_party.md`: added title-level investigation records for the
   World Karate Championship (v1,ED) DLI/NMI case and Animal Party SIO
