@@ -116,7 +116,7 @@ insertText:
 dropText:
     .byte "DROP A DISK OR OPEN DISK", $00
 sideText:
-    .byte "MOUNT SIDE 2 IN D1 WHEN ASKED", $00
+    .byte "", $00
 resetText:
     .byte "FULL RESET TO BOOT FROM D1", $00
 
