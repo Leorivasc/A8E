@@ -4,6 +4,15 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-24: `A8E/{AtariIo.c,AtariIo.h,Pia.c}` and
+  `A8E/tests/memory_expansion_probe.c`: completed AHRM-01 native PIA
+  DDRB/ORB alignment. A8E now retains independent PORTB direction/output
+  latches, computes the effective XL/XE pull-up value, and reapplies ROM,
+  bank, CPU-window, and ANTIC-window mapping after either latch changes.
+  Reset starts with all DDRB bits as inputs and effective PORTB `$FF`.
+  The native probe now validates the latch contract and all existing memory
+  profiles; no diagnostic tracing was added to normal emulation.
+
 - 2026-09-24: `implementation/alignment_23Sept26.md`: added the prioritized
   AHRM alignment study for A8E and jsA8E, including feasibility, difficulty,
   implementation steps, acceptance criteria, and recommended execution order.

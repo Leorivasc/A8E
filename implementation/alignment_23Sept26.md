@@ -119,6 +119,21 @@ Acceptance criteria:
   writes as required by AHRM 2.5-2.7.
 - Existing 130XE/RAMBO/COMPY probes still pass.
 
+Status: **implemented and validated on 2026-09-24**.
+
+- Native A8E now stores independent ORB and DDRB latches, computes
+  `(ORB & DDRB) | ~DDRB`, and applies that effective value immediately to
+  ROM and expansion mapping.
+- Native reset state now starts with all DDRB bits as inputs and effective
+  PORTB pull-ups high, matching the jsA8E contract.
+- `A8E/tests/memory_expansion_probe.c` covers latch separation, partial
+  directions, ORB-before-DDRB writes, read behavior, and effective-value
+  recomputation. All existing native memory profiles remain covered by the
+  same probe.
+- The next validation step is cross-core trace comparison for more complex
+  bank-switching sequences; this is not required to close the basic AHRM-01
+  contract.
+
 ### AHRM-02: Remove the unconditional native CONSOL hack
 
 Priority: **P0**
@@ -590,10 +605,8 @@ diagnostic tracing disabled.
 - `pia_ddrb_orb_contract.test.js` is the first executable contract fixture.
   It covers pull-ups on input bits, independent DDRB/ORB latches, partial
   direction masks, ORB-before-DDRB writes, and immediate MMU updates.
-- The fixture currently establishes the jsA8E expected behavior. A native
-  counterpart will become a required passing probe when AHRM-01 is
-  implemented; this avoids hiding the known native divergence in a green
-  preflight.
+- The native `memory_expansion_probe` now implements the corresponding
+  contract, so AHRM-01 is no longer a known native divergence.
 - Five no-trace jsA8E headless runs requested 250,000 cycles and completed at
   841.51-936.51 simulated cycles/ms, with a median of 915.47 cycles/ms. This
   is a machine-specific baseline, not a universal performance promise.

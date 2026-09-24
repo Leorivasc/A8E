@@ -1484,7 +1484,7 @@ static IoInitValue_t m_aIoInitValues[] =
 		{IO_SKCTL_SKSTAT, 0x00, 0xff, Pokey_SKCTL_SKSTAT},
 
 		{IO_PORTA, 0xff, 0xff, Pia_PORTA},
-		{IO_PORTB, 0xfd, 0xfd, Pia_PORTB},
+		{IO_PORTB, 0xff, 0xff, Pia_PORTB},
 		{IO_PACTL, 0x00, 0x3c, Pia_PACTL},
 		{IO_PBCTL, 0x00, 0x3c, Pia_PBCTL},
 
@@ -5552,6 +5552,11 @@ void AtariIoOpenWithMemory(
 	}
 	pContext->pIoData = pIoData;
 	memset(pIoData, 0, sizeof(IoData_t));
+	/* AHRM: DDRB resets to inputs and the ORB latch starts low. The XL/XE
+	 * pull-ups make the effective PORTB pins read high until software drives
+	 * selected bits through DDRB. */
+	pIoData->cOutputPortB = 0x00;
+	pIoData->cDirectionPortB = 0x00;
 	pIoData->eVideoStandard = eVideoStandard;
 	pIoData->eMemoryExpansion = eMemoryExpansion;
 	if(eMemoryExpansion == ATARI_MEMORY_ULTIMATE1MB)

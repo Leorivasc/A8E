@@ -179,7 +179,8 @@ typedef struct
 	u8 bModeLineExitDli;
 	u8 bModeLineEndsThisLine;
 	u8 cValuePortA;
-	u8 cValuePortB;
+	u8 cOutputPortB;
+	u8 cDirectionPortB;
 	AtariMemoryExpansion_t eMemoryExpansion;
 	u8 *pExtendedMemory;
 	u8 *pMainWindowShadow;
