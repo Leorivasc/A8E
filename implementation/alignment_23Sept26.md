@@ -356,6 +356,8 @@ Open cases:
 - Character-data DMA fetches on blank extended rows in modes 2/3.
 - Native VSCROL deadline sampling relative to an atomic 6502 instruction.
 - Broader chained-DLI and wide-playfield validation.
+- The `playfield_dynamic_geometry.test.js` fixture uses a stale renderer mock
+  without `drawModeLine`, so its assertions are currently not reached.
 
 Benefits:
 
@@ -368,19 +370,24 @@ Benefits:
 
 Steps:
 
-1. Add minimal synthetic 6502 fixtures that place the relevant register write,
+1. Update `playfield_dynamic_geometry.test.js` to provide the current renderer
+   contract, then verify that its HSCROL and DMA enable/disable assertions are
+   actually executed and pass.
+2. Add minimal synthetic 6502 fixtures that place the relevant register write,
    IRQ acknowledge, or DMA request at each boundary cycle.
-2. Capture `NMIST`, `NMIEN`, CPU PC, beam cycle, DMA schedule, and bus value in
+3. Capture `NMIST`, `NMIEN`, CPU PC, beam cycle, DMA schedule, and bus value in
    both cores.
-3. Compare each result with the corresponding AHRM timing example and, where
+4. Compare each result with the corresponding AHRM timing example and, where
    possible, an Altirra trace.
-4. Implement one timing rule at a time in JS and native code.
-5. Add regression tests before moving to the next corner case.
-6. Run real raster content such as Atomix Plus! and GTIA 9++ examples only
+5. Implement one timing rule at a time in JS and native code.
+6. Add regression tests before moving to the next corner case.
+7. Run real raster content such as Atomix Plus! and GTIA 9++ examples only
    after the synthetic tests pass.
 
 Acceptance criteria:
 
+- The dynamic-geometry test reaches and passes its assertions with the current
+  renderer API.
 - JS and native produce the same NMI, DMA-steal, bus-value, and visible-line
   results for every new boundary fixture.
 - No title-specific timing branch is introduced.

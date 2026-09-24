@@ -23,6 +23,11 @@ Simple implementation notes for this repository.
   The alignment document records the Linux baseline and the one remaining
   stale playfield test adapter.
 
+- 2026-09-24: `implementation/alignment_23Sept26.md`: added the stale
+  `playfield_dynamic_geometry.test.js` renderer mock as the first action of
+  AHRM-06. The test must use the current `drawModeLine` contract and reach its
+  HSCROL/DMA assertions before ANTIC timing work proceeds.
+
 - 2026-09-24: `ATR/world_karate_championship_v1_ed.md` and
   `ATR/animal_party.md`: added title-level investigation records for the
   World Karate Championship (v1,ED) DLI/NMI case and Animal Party SIO
