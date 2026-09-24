@@ -57,6 +57,17 @@ Viability: **high**. The JavaScript implementation already contains the
 required state split and effective-value calculation, so it can be used as a
 behavioral reference. The change is localized to PIA state and mapping tests.
 
+Benefits:
+
+- Makes native XL/XE memory mapping follow the AHRM electrical model instead
+  of depending on the last raw register write.
+- Keeps A8E and jsA8E consistent when software changes DDRB and ORB at
+  runtime, including during bank-switching sequences.
+- Improves compatibility with operating systems, memory tests, and software
+  that uses partial PORTB direction masks.
+- Establishes a reliable foundation for every later RAM expansion and U1MB
+  correction.
+
 Problem:
 
 - `A8E/Pia.c` uses one `cValuePortB` field for DDRB access and does not retain
@@ -121,6 +132,16 @@ Steps:
 5. Revalidate BASIC, Self-Test, and the validated title startup paths without
    the default hack.
 
+Benefits:
+
+- Restores normal GTIA CONSOL behavior for all software, not only programs
+  that happen to use the hard-coded address.
+- Prevents false keyboard, console-key, and self-test results caused by a
+  program-counter-specific override.
+- Makes compatibility behavior explicit and reproducible when a legacy title
+  genuinely needs an opt-in workaround.
+- Removes a hidden difference between the native and browser cores.
+
 Acceptance criteria:
 
 - A normal CONSOL read depends only on console input and GTIA state.
@@ -165,6 +186,17 @@ Steps:
    read acknowledgement, output-mode clearing, and spurious CB2 interrupts.
 8. Add a small peripheral test fixture before attempting modem emulation.
 
+Benefits:
+
+- Allows PIA-driven peripherals and software to use the documented interrupt
+  path instead of relying on POKEY-only behavior.
+- Improves compatibility with modems, serial accessories, and programs that
+  poll or acknowledge PIA status registers directly.
+- Makes SIO command and motor-line transitions observable and testable without
+  changing the existing response protocol.
+- Reduces the risk that an incomplete interrupt model masks or invents device
+  activity.
+
 Acceptance criteria:
 
 - PACTL/PBCTL status and IRQ behavior matches the AHRM register examples.
@@ -188,6 +220,17 @@ Problem:
 - The project currently advertises a subset of AHRM configurations without a
   clear distinction between implemented, intentionally omitted, and planned
   profiles.
+
+Benefits:
+
+- Gives users an accurate view of which Atari memory configurations are
+  actually supported.
+- Prevents silent differences between the native and browser memory
+  selectors, bank decoders, and documentation.
+- Makes future RAM upgrades safer by turning each profile into a testable,
+  explicit contract.
+- Avoids spending debugging effort on a profile that is only partially
+  implemented or intentionally outside the project scope.
 
 Steps:
 
@@ -223,6 +266,17 @@ Current gap:
 - UCTL, UAUX, COLDF, and the 1MB extended-memory geometry are modeled.
 - U1MB BIOS, selectable OS/BASIC/Game ROMs, flash command state, RTC, PBI,
   cartridge control, and configuration-dependent I/O RAM are not modeled.
+
+Benefits:
+
+- Prevents users from mistaking the current memory-only model for a complete
+  U1MB implementation.
+- If the full model is implemented, enables software that depends on U1MB
+  boot selection, flash, RTC, PBI, and cartridge configuration behavior.
+- A clearly named partial mode preserves useful extended-memory testing while
+  keeping unsupported firmware behavior honest.
+- Provides a controlled path for adding U1MB features without coupling them to
+  ordinary 130XE/RAMBO/COMPY behavior.
 
 Steps if full U1MB is required:
 
@@ -266,6 +320,15 @@ Open cases:
 - Native VSCROL deadline sampling relative to an atomic 6502 instruction.
 - Broader chained-DLI and wide-playfield validation.
 
+Benefits:
+
+- Improves compatibility with raster effects, display-list tricks, and demos
+  that depend on exact cycle boundaries.
+- Prevents false positives where a title appears to work but has incorrect
+  NMI timing, character fetches, or bus contention.
+- Gives both cores a shared timing reference for future PAL/NTSC and display
+  mode work.
+
 Steps:
 
 1. Add minimal synthetic 6502 fixtures that place the relevant register write,
@@ -294,6 +357,17 @@ Difficulty: **high**
 Viability: **medium**. The current shift-register model handles the common PMG
 path, but exact mid-line replay requires preserving more register-write and
 fetch history than the current first-visible-span reconstruction.
+
+Benefits:
+
+- Corrects player/missile graphics and collision results for raster effects
+  that change registers during a scanline.
+- Improves compatibility with demos and games that use PMG animation,
+  multiplexing, VDELAY, or mid-line priority changes.
+- Makes visible pixels depend on the actual event history rather than on the
+  final state of the scanline, which is closer to the AHRM hardware model.
+- Reduces unexplained differences between native rendering, browser rendering,
+  and hardware captures.
 
 Steps:
 
@@ -328,6 +402,17 @@ Current gap:
 - The audio mixer, DAC curve, DC blocker, clipping, and paddle model are
   approximations rather than a complete analog POKEY model.
 
+Benefits:
+
+- Preserves exact digital timer and SIO behavior while clearly separating it
+  from host-dependent audio output.
+- Improves compatibility with software that depends on paddle timing,
+  ALLPOT reads, timer IRQs, or high-speed serial behavior.
+- Produces more consistent music and sound effects across native and browser
+  builds by documenting and calibrating the same mixer assumptions.
+- Makes remaining audio differences diagnosable instead of conflating DAC,
+  buffering, clipping, and emulator-core errors.
+
 Steps:
 
 1. Build shared timer/SIO fixtures for STIMER, AUDCTL-linked timers, IRQEN,
@@ -355,6 +440,17 @@ Difficulty: **medium**
 
 Viability: **high**. The public jsA8E automation and native probes already
 provide most of the required inspection points.
+
+Benefits:
+
+- Detects native/browser divergence before it appears as a title-specific
+  compatibility bug.
+- Turns AHRM requirements into repeatable evidence instead of manual testing
+  alone.
+- Makes boundary-cycle regressions easier to locate by showing the first
+  differing register or event.
+- Lowers the cost and risk of future refactors in memory, PIA, ANTIC, GTIA,
+  POKEY, and SIO code.
 
 Steps:
 
@@ -397,4 +493,3 @@ The project can be described as AHRM-aligned for a feature only when:
 - A focused regression test covers reset, normal operation, and boundary cases.
 - No PC-specific title workaround is required.
 - Real-content validation is used as confirmation, not as the only evidence.
-
