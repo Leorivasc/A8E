@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 
 project(A8E LANGUAGES C)
 
+include(CTest)
+
 # --- Configuration ---
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -140,7 +142,7 @@ if(BUILD_TESTING)
   a8e_configure_target(antic_timing_probe)
 
   add_test(NAME antic_timing_probe COMMAND antic_timing_probe)
-  set_tests_properties(antic_timing_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(antic_timing_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
   add_executable(antic_dma_probe
     tests/antic_dma_probe.c
@@ -151,7 +153,7 @@ if(BUILD_TESTING)
   a8e_configure_target(antic_dma_probe)
 
   add_test(NAME antic_dma_probe COMMAND antic_dma_probe)
-  set_tests_properties(antic_dma_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(antic_dma_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
   add_executable(antic_graphics_modes_probe
     tests/antic_graphics_modes_probe.c
@@ -162,7 +164,7 @@ if(BUILD_TESTING)
   a8e_configure_target(antic_graphics_modes_probe)
 
   add_test(NAME antic_graphics_modes_probe COMMAND antic_graphics_modes_probe)
-  set_tests_properties(antic_graphics_modes_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(antic_graphics_modes_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
   add_executable(pokey_pot_scan_probe
     tests/pokey_pot_scan_probe.c
@@ -173,7 +175,7 @@ if(BUILD_TESTING)
   a8e_configure_target(pokey_pot_scan_probe)
 
   add_test(NAME pokey_pot_scan_probe COMMAND pokey_pot_scan_probe)
-  set_tests_properties(pokey_pot_scan_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(pokey_pot_scan_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 
   add_executable(memory_expansion_probe
     tests/memory_expansion_probe.c
@@ -184,5 +186,5 @@ if(BUILD_TESTING)
   a8e_configure_target(memory_expansion_probe)
 
   add_test(NAME memory_expansion_probe COMMAND memory_expansion_probe)
-  set_tests_properties(memory_expansion_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(memory_expansion_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 endif()

@@ -12,6 +12,21 @@ The AHRM is the authority for hardware behavior. A game working in the
 emulator is useful validation, but it does not by itself prove that the
 implementation is hardware-compliant.
 
+## Confirmed project decisions
+
+- RAMBO 256K is part of the supported memory-expansion work and is added as a
+  concrete profile in AHRM-04.
+- U1MB is treated as a separate project. This alignment effort will document
+  the current boundary and will not block ordinary RAM expansion work on a
+  complete U1MB firmware model.
+- AHRM is the primary technical authority. Altirra and real hardware are
+  secondary validation references when a behavior needs confirmation.
+- Initial validation targets Linux native A8E and Chromium/jsA8E. Other hosts
+  remain regression targets after the core behavior is stable.
+- Test and trace instrumentation must be optional during development and
+  removed when it has no lasting emulation, diagnostics, or regression value.
+  It must not impose a normal-mode performance cost.
+
 ## Current baseline
 
 The following areas are substantially aligned and already have focused tests
@@ -217,6 +232,9 @@ Problem:
 
 - The AHRM lists a 256K RAMBO configuration, but the UI, JS profile table, and
   native enum do not expose it.
+- The 256K RAMBO profile shares the 320K RAMBO banking bits, but its `$8x`
+  banks alias motherboard RAM. It cannot be implemented safely by copying the
+  320K profile and changing only the label or capacity.
 - The project currently advertises a subset of AHRM configurations without a
   clear distinction between implemented, intentionally omitted, and planned
   profiles.
@@ -234,28 +252,36 @@ Benefits:
 
 Steps:
 
-1. Decide whether 256K RAMBO is a supported target for this project.
-2. If supported, add its storage, bank-bit mapping, main-memory alias rules,
-   UI label, native switch, and JS normalization entry.
-3. Add the profile to both memory probes, including alias behavior for banks
-   that map to motherboard RAM where required by AHRM.
-4. If not supported, mark it explicitly as omitted in the UI and memory
-   documentation rather than implying full AHRM matrix coverage.
-5. Add a generated profile table shared by native and JS tests to prevent
+1. Add the `rambo-256k` profile to native and JS with banking bits 2, 3, 5,
+   and 6, a shared CPU/ANTIC window, and the AHRM main-memory alias for banks
+   0-3 (`$8x`).
+2. Implement the alias in both window directions so reads and writes through
+   the aliased extended banks remain equivalent to motherboard RAM.
+3. Add the profile to both memory probes, including tests that distinguish
+   aliased banks 0-3 from independent banks 4-15.
+4. Update the UI label, native switch, JS normalization entries, and memory
+   documentation.
+5. If another AHRM profile is not supported, mark it explicitly as omitted in
+   the UI and memory documentation rather than implying full AHRM matrix
+   coverage.
+6. Add a generated profile table shared by native and JS tests to prevent
    future mapping drift.
 
 Acceptance criteria:
 
 - Every AHRM profile in the supported scope has the same bank bits, capacity,
   CPU window, ANTIC window, and ROM-overlay rules in both cores.
+- RAMBO 256K reports 16 bank selectors, aliases banks 0-3 to motherboard RAM,
+  and keeps banks 4-15 independent.
 - Unsupported profiles are clearly marked as unsupported.
 
-### AHRM-05: Define the U1MB support boundary and implement the minimum model
+### AHRM-05: Define the U1MB support boundary as a separate project
 
-Priority: **P1**
+Priority: **P3** for boundary documentation; full implementation is outside
+the current alignment scope.
 
-Difficulty: **high** for full support; **low** for documenting a strict partial
-boundary.
+Difficulty: **low** for documenting the boundary; **high** for the separate
+full-support project.
 
 Viability: **medium**. The memory-bank and initial UCTL/UAUX/COLDF behavior is
 already present, but full U1MB requires ROM/flash mapping and firmware-driven
@@ -278,7 +304,16 @@ Benefits:
 - Provides a controlled path for adding U1MB features without coupling them to
   ordinary 130XE/RAMBO/COMPY behavior.
 
-Steps if full U1MB is required:
+Steps for the current alignment branch:
+
+1. Keep the current U1MB behavior explicitly marked as partial in the UI and
+   documentation.
+2. Ensure RAM expansion tests do not claim to certify U1MB firmware, BIOS,
+   flash, RTC, PBI, or cartridge behavior.
+3. Record the separate U1MB project boundary and preserve the existing
+   memory-only compatibility mode.
+
+Steps for the separate full U1MB project:
 
 1. Add a separate flash-memory model with read, program, erase, autoselect,
    write-protect, and reset states.
@@ -296,10 +331,12 @@ Steps if full U1MB is required:
 
 Acceptance criteria:
 
-- The UI does not present the partial model as a complete U1MB computer.
-- A software reset and a cold reset produce the documented COLDF and BIOS
-  behavior.
-- The native and JS models agree on every implemented U1MB register and map.
+- The UI and documentation do not present the partial model as a complete
+  U1MB computer.
+- RAM expansion tests explicitly exclude U1MB firmware, BIOS, flash, RTC, PBI,
+  and cartridge certification.
+- The separate full-support project will require software and cold-reset
+  behavior to produce the documented COLDF and BIOS results.
 
 ### AHRM-06: Close ANTIC timing gaps
 
@@ -463,12 +500,16 @@ Steps:
 4. Compare traces at register and event boundaries, allowing only explicitly
    documented host-rendering differences.
 5. Run the harness in CI for every AHRM-sensitive change.
+6. Keep tracing behind a development/test switch and remove probes that do not
+   provide lasting emulation or regression value before merging production
+   code.
 
 Acceptance criteria:
 
 - A change to one core cannot silently alter the other core's documented
   behavior.
 - Every resolved alignment item has a reproducible regression trace.
+- Normal emulation has no measurable trace overhead when diagnostics are off.
 
 ## Recommended execution order
 
@@ -477,8 +518,8 @@ Acceptance criteria:
 3. AHRM-09: add the smallest cross-core trace fixtures needed by the first two
    items.
 4. AHRM-03: PIA control-line and IRQ model.
-5. AHRM-04: decide and close the supported memory-profile matrix.
-6. AHRM-05: explicitly bound or extend U1MB support.
+5. AHRM-04: add RAMBO 256K and close the supported memory-profile matrix.
+6. AHRM-05: document the U1MB boundary only; track full U1MB separately.
 7. AHRM-06: ANTIC timing corner cases.
 8. AHRM-07: PMG raster replay.
 9. AHRM-08: POKEY paddle and analog audio refinement.
@@ -493,3 +534,69 @@ The project can be described as AHRM-aligned for a feature only when:
 - A focused regression test covers reset, normal operation, and boundary cases.
 - No PC-specific title workaround is required.
 - Real-content validation is used as confirmation, not as the only evidence.
+
+## Preflight baseline
+
+Date: 2026-09-24
+
+The preflight was executed on Linux from branch `alignment23Sept26`, with
+diagnostic tracing disabled.
+
+### JavaScript baseline
+
+- 33 JavaScript test files were discovered and executed individually.
+- 32 passed, including the new `pia_ddrb_orb_contract.test.js` and
+  `ahrm_machine_matrix.test.js` fixtures.
+- One pre-existing test remains red: `playfield_dynamic_geometry.test.js`.
+  Its mock renderer does not provide the newer `rendererApi.drawModeLine`
+  method and fails before exercising the geometry assertions. It is tracked
+  separately from the AHRM-01 work.
+- The two previously stale baseline tests were repaired as test-infrastructure
+  fixes: the headless test now finds ROMs in `A8E/build`, and the standby test
+  no longer requires text removed from the current standby program.
+
+### Native baseline
+
+- CMake now enables CTest and runs probes from the build directory, where the
+  external ROM files are expected.
+- Five native probes passed: ANTIC timing, ANTIC DMA, graphics modes, POKEY
+  paddle scan, and memory expansion.
+- The native build emits existing format warnings in `A8E/Pokey.c` because
+  `%u` is used with the repository `u32` typedef. This is recorded but is not
+  part of the AHRM-01 change.
+- The probes require `SDL_AUDIODRIVER=dummy` in headless Linux environments;
+  this changes only the host audio backend, not emulated hardware behavior.
+
+### Executable machine matrix
+
+- `ahrm_machine_matrix.test.js` verifies PAL and NTSC timing constants and the
+  `$D014` PAL/NTSC detection value.
+- The same fixture verifies the currently supported memory profiles and bank
+  counts: 64K, 130XE 128K, RAMBO 192K/320K/576K/1088K, COMPY 320K/576K, and
+  the current partial U1MB memory map.
+- RAMBO 256K is intentionally not included as a passing profile yet; it is
+  the next AHRM-04 implementation target and will be added with explicit
+  alias checks for banks 0-3.
+
+### AHRM-01 fixture and performance baseline
+
+- `pia_ddrb_orb_contract.test.js` is the first executable contract fixture.
+  It covers pull-ups on input bits, independent DDRB/ORB latches, partial
+  direction masks, ORB-before-DDRB writes, and immediate MMU updates.
+- The fixture currently establishes the jsA8E expected behavior. A native
+  counterpart will become a required passing probe when AHRM-01 is
+  implemented; this avoids hiding the known native divergence in a green
+  preflight.
+- Five no-trace jsA8E headless runs requested 250,000 cycles and completed at
+  841.51-936.51 simulated cycles/ms, with a median of 915.47 cycles/ms. This
+  is a machine-specific baseline, not a universal performance promise.
+- Native CTest completed all five probes in 2.69 seconds with diagnostics
+  disabled. Future trace instrumentation must be compared against this mode
+  and must not remain active in normal emulation.
+
+### Tooling note
+
+`npm run lint` could not run because the environment exposes ESLint 6.4.0,
+while the project declares ESLint 9 configuration packages. This is a tooling
+environment issue, not an emulation result, and remains outside the AHRM-01
+scope.

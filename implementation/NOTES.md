@@ -8,6 +8,21 @@ Simple implementation notes for this repository.
   AHRM alignment study for A8E and jsA8E, including feasibility, difficulty,
   implementation steps, acceptance criteria, and recommended execution order.
 
+- 2026-09-24: `implementation/alignment_23Sept26.md`: incorporated the
+  confirmed project decisions: RAMBO 256K is in scope, U1MB is a separate
+  project, AHRM is the primary reference, Linux/Chromium are the initial
+  validation targets, and development tracing must not remain in normal-mode
+  emulation without lasting value.
+
+- 2026-09-24: `A8E/CMakeLists.txt`, `jsA8E/tests/{headless_automation,
+  startup_standby,pia_ddrb_orb_contract,ahrm_machine_matrix}.test.js`, and
+  `jsA8E/package.json`: completed the AHRM preflight infrastructure. CTest is
+  now enabled for native probes, ROM lookup is robust in the headless test,
+  the standby assertion matches the current guest program, and executable
+  PAL/NTSC, memory-profile, and PIA DDRB/ORB contract fixtures are included.
+  The alignment document records the Linux baseline and the one remaining
+  stale playfield test adapter.
+
 - 2026-09-24: `ATR/world_karate_championship_v1_ed.md` and
   `ATR/animal_party.md`: added title-level investigation records for the
   World Karate Championship (v1,ED) DLI/NMI case and Animal Party SIO
