@@ -4,6 +4,12 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-24: `ATR/world_karate_championship_v1_ed.md` and
+  `ATR/animal_party.md`: added title-level investigation records for the
+  World Karate Championship (v1,ED) DLI/NMI case and Animal Party SIO
+  response-phase case. Both titles are now documented with successful
+  jsA8E validation.
+
 - 2026-09-23: `jsA8E/style.css`: remove the generic flex layout from Disk
   Library cells. Use a nested grid for filenames and text alignment for the
   download action so its icon keeps its normal width in the shared final grid
@@ -253,7 +259,7 @@ Process rule: review this file before planning any improvement, and update it af
 Maintenance rule: temporary diagnostics and single-purpose test routines must be removed after the related bug is confirmed, unless they are generalized into reusable regression tests. Avoid accumulating one-off test hooks in the emulator.
 
 Keep reusable inspection points: the public `A8EAutomation` connection and general-purpose memory, CPU, state, trace, disassembly, breakpoint, and input controls may remain available for future investigations. Remove only game-specific wrappers, probes, counters, and cache-busters once their investigation is complete.
-- 2026-09-10: `jsA8E/js/core/{state,memory,io,pokey_sio}.js`: separated disk READ responses into the Acknowledgment and Complete/data phases described by AHRM SIO, preserving the pending phase through snapshots; this is the first Animal Party compatibility experiment and remains under verification.
+- 2026-09-24: `jsA8E/js/core/{state,memory,io,pokey_sio}.js`: the AHRM disk READ acknowledgment and Complete/data phase separation, first introduced as an Animal Party compatibility experiment, was validated by loading and playing Animal Party successfully in jsA8E. A focused automated title fixture remains optional.
 - 2026-09-10: `A8E/Pokey.c`, `jsA8E/js/core/pokey_sio.js`: added generic AHRM handling for disk `$3F` high-speed index queries and silent routing for absent Type 1/3/4 peripherals. Disk IDs use the high-speed query; non-disk devices do not receive fabricated responses.
 
 ## Project Paths
@@ -297,7 +303,7 @@ Keep reusable inspection points: the public `A8EAutomation` connection and gener
 ## Recent Improvements
 
 - 2026-09-10: `jsA8E/js/core/{state,cpu,antic,atari,app_proxy}.js`, `jsA8E/js/app/automation/utils.js`, `jsA8E/emulator_worker.js`: added non-invasive DLI/VBI/NMI timing diagnostics to `getDebugState()` and preserved them across the Worker boundary. The counters distinguish scheduled, latched, suppressed, requested, coalesced, and serviced NMIs, including the last event location, coalesced source classification, CPU pending/active state, and RTI/RTS return counts; emulation behavior is unchanged and the counters reset with the machine. A temporary Worker URL cache-buster is marked in `app_proxy.js` for live Chrome diagnostics.
-- 2026-09-10: `jsA8E/js/core/cpu.js`, `jsA8E/tests/cpu_interrupt_step_regression.test.js`: removed the software `nmiActive` mask from pending-NMI dispatch. A new edge can now be serviced while an earlier NMI handler is active, while the single pending flag still prevents an unbounded queue; this follows the 6502 NMI behavior and targets the DLI coalescing observed with Karate Champion.
+- 2026-09-10: `jsA8E/js/core/cpu.js`, `jsA8E/tests/cpu_interrupt_step_regression.test.js`: removed the software `nmiActive` mask from pending-NMI dispatch. A new edge can now be serviced while an earlier NMI handler is active, while the single pending flag still prevents an unbounded queue; this follows the 6502 NMI behavior and targets the DLI coalescing observed with World Karate Championship (v1,ED).
 
 - 2026-09-10: `jsA8E/js/core/{atari,state,antic,memory}.js`, `jsA8E/js/{core/app_proxy,app/automation/utils}.js`: extended `getDebugState()` with non-invasive POKEY timer-4 diagnostics (`IRQEN`, `IRQST`, timer configuration, deadline, IRQ count, and CPU IRQ state) to investigate Bosconian's digitized-voice wait loop. The field is now preserved across the worker/API boundary, the diagnostic counter is preserved in snapshots, and neither changes emulation behavior.
 - 2026-09-10: `jsA8E/js/core/{pokey,io,atari}.js`: arm inactive POKEY timers when valid AUDF/AUDCTL or SKCTL configuration arrives after an earlier STIMER, without resetting already-running timer phase. This covers software that configures a timer after initialization and is based on AHRM POKEY initialization behavior.
