@@ -463,6 +463,197 @@ static int TestMode7FetchesCharacterDataOnOddRepeatedScanlines(void)
 	return 1;
 }
 
+static int TestPmgHiddenPrefixReplaysMidLineHposHistory(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	DrawLineData_t *pDrawLine = &pIoData->tDrawLineData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetVideo(&tMachine);
+	pIoData->llCycle = 10;
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->tVideoData.lCurrentDisplayLine = 8;
+	pIoData->cCurrentDisplayListCommand = 0x02;
+	pIoData->bInDrawLine = 1;
+	pContext->cCurrentInstructionCycles = 1;
+	pContext->llCycleCounter = 10;
+	pContext->llIoBeamTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoMasterTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoCycleTimedEventCycle = CYCLE_NEVER;
+
+	SRAM[IO_PRIOR] = 0x00;
+	SRAM[IO_GRAFP0_P1PL] = 0xff;
+	SRAM[IO_HPOSP0_M0PF] = 24;
+	SRAM[IO_SIZEP0_M0PL] = 0x03;
+	SRAM[IO_COLPM0_TRIG2] = 0x66;
+	pDrawLine->cPmgFirstVisibleSpan = 1;
+	pDrawLine->aPmgInitialRegisters[0] = 60;
+	pDrawLine->aPmgInitialRegisters[8] = 0x03;
+	pDrawLine->aPmgInitialRegisters[13] = 0xff;
+
+	AtariIo_RecordPmgRegisterWrite(pContext, IO_HPOSP0_M0PF, 24);
+	REQUIRE(pDrawLine->cPmgEventCount == 1,
+			"mid-line HPOS write was not recorded");
+	REQUIRE(pDrawLine->aPmgEventCycles[0] == 10,
+			"HPOS write was recorded at cycle %u instead of 10",
+			pDrawLine->aPmgEventCycles[0]);
+
+	pIoData->llCycle = 18;
+	pContext->llCycleCounter = 18;
+	AtariIoTimingProbeStepClock(pContext);
+
+	REQUIRE(
+		ProbeMachine_PixelAt(&tMachine, 8, 96) == 0x00,
+		"PMG appeared at x96 after a late HPOS write; history was not replayed");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestPmgPmbaseChangeKeepsMixedLineDmaHistory(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	DrawLineData_t *pDrawLine = &pIoData->tDrawLineData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetVideo(&tMachine);
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->tVideoData.lCurrentDisplayLine = 8;
+	pIoData->bInDrawLine = 1;
+	pContext->llIoBeamTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoMasterTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoCycleTimedEventCycle = CYCLE_NEVER;
+
+	SRAM[IO_DMACTL] = 0x08;
+	SRAM[IO_GRACTL] = 0x02;
+	SRAM[IO_PMBASE] = 0x20;
+	RAM[0x2204] = 0x11;
+	RAM[0x2684] = 0x22;
+
+	pIoData->llCycle = 2;
+	pContext->llCycleCounter = 2;
+	AtariIoTimingProbeStepClock(pContext);
+
+	SRAM[IO_PMBASE] = 0x24;
+	pIoData->llCycle = 3;
+	pContext->llCycleCounter = 3;
+	AtariIoTimingProbeStepClock(pContext);
+
+	REQUIRE(SRAM[IO_GRAFP0_P1PL] == 0x11,
+			"player 0 did not use the old PMBASE in mixed-line DMA");
+	REQUIRE(SRAM[IO_GRAFP1_P2PL] == 0x22,
+			"player 1 did not use the new PMBASE in mixed-line DMA");
+	REQUIRE(pDrawLine->cPmgEventCount == 2,
+			"mixed-line PMG DMA events were not recorded");
+	REQUIRE(pDrawLine->aPmgEventCycles[0] == 2 &&
+			pDrawLine->aPmgEventCycles[1] == 3,
+			"mixed-line PMG DMA cycles were recorded incorrectly");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestPmgMidLinePriorWriteAffectsLaterPixels(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	DrawLineData_t *pDrawLine = &pIoData->tDrawLineData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetVideo(&tMachine);
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->tVideoData.lCurrentDisplayLine = 8;
+	pIoData->bInDrawLine = 1;
+	pIoData->llCycle = 18;
+	pContext->llCycleCounter = 18;
+	pContext->llIoBeamTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoMasterTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoCycleTimedEventCycle = CYCLE_NEVER;
+
+	SRAM[IO_PRIOR] = 0x04;
+	SRAM[IO_GRAFP0_P1PL] = 0xff;
+	SRAM[IO_HPOSP0_M0PF] = 0x30;
+	SRAM[IO_SIZEP0_M0PL] = 0x03;
+	SRAM[IO_COLPM0_TRIG2] = 0x66;
+	pIoData->tVideoData.pPriorityData[8 * PIXELS_PER_LINE + 96] = 0x01;
+	pIoData->tVideoData.pPriorityData[8 * PIXELS_PER_LINE + 97] = 0x01;
+	pDrawLine->cPmgFirstVisibleSpan = 1;
+	pDrawLine->aPmgInitialRegisters[0] = 0x30;
+	pDrawLine->aPmgInitialRegisters[8] = 0x03;
+	pDrawLine->aPmgInitialRegisters[13] = 0xff;
+
+	AtariIoTimingProbeStepClock(pContext);
+	SRAM[IO_PRIOR] = 0x00;
+	pIoData->llCycle = 19;
+	pContext->llCycleCounter = 19;
+	AtariIoTimingProbeStepClock(pContext);
+
+	REQUIRE(
+		ProbeMachine_PixelAt(&tMachine, 8, 96) == 0x00,
+		"PRIOR change rewrote a pixel from the earlier span");
+	REQUIRE(
+		ProbeMachine_PixelAt(&tMachine, 8, 100) == 0x66,
+		"PRIOR change did not affect the later span");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestPmgPlayerCollisionSetsBothPlayerLatches(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	DrawLineData_t *pDrawLine = &pIoData->tDrawLineData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetVideo(&tMachine);
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->tVideoData.lCurrentDisplayLine = 8;
+	pIoData->bInDrawLine = 1;
+	pIoData->llCycle = 18;
+	pContext->llCycleCounter = 18;
+	pContext->llIoBeamTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoMasterTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoCycleTimedEventCycle = CYCLE_NEVER;
+
+	SRAM[IO_PRIOR] = 0x00;
+	SRAM[IO_GRAFP0_P1PL] = 0xff;
+	SRAM[IO_GRAFP1_P2PL] = 0xff;
+	SRAM[IO_HPOSP0_M0PF] = 0x30;
+	SRAM[IO_HPOSP1_M1PF] = 0x30;
+	SRAM[IO_SIZEP0_M0PL] = 0x00;
+	SRAM[IO_SIZEP1_M1PL] = 0x00;
+	SRAM[IO_COLPM0_TRIG2] = 0x66;
+	SRAM[IO_COLPM1_TRIG3] = 0x77;
+	pDrawLine->cPmgFirstVisibleSpan = 1;
+	pDrawLine->aPmgInitialRegisters[0] = 0x30;
+	pDrawLine->aPmgInitialRegisters[1] = 0x30;
+	pDrawLine->aPmgInitialRegisters[8] = 0x00;
+	pDrawLine->aPmgInitialRegisters[9] = 0x00;
+	pDrawLine->aPmgInitialRegisters[13] = 0xff;
+	pDrawLine->aPmgInitialRegisters[14] = 0xff;
+
+	AtariIoTimingProbeStepClock(pContext);
+
+	REQUIRE((RAM[IO_SIZEM_P0PL] & 0x02) != 0,
+			"P0PL did not latch the P0/P1 player collision");
+	REQUIRE((RAM[IO_GRAFP0_P1PL] & 0x01) != 0,
+			"P1PL did not latch the P0/P1 player collision");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
 int main(int argc, char *argv[])
 {
 	int bOk = 1;
@@ -486,6 +677,10 @@ int main(int argc, char *argv[])
 	bOk &= TestMode5UsesOneKilobyteChbaseAlignment();
 	bOk &= TestMode5FetchesCharacterDataOnOddRepeatedScanlines();
 	bOk &= TestMode7FetchesCharacterDataOnOddRepeatedScanlines();
+	bOk &= TestPmgHiddenPrefixReplaysMidLineHposHistory();
+	bOk &= TestPmgPmbaseChangeKeepsMixedLineDmaHistory();
+	bOk &= TestPmgMidLinePriorWriteAffectsLaterPixels();
+	bOk &= TestPmgPlayerCollisionSetsBothPlayerLatches();
 
 	SDL_Quit();
 

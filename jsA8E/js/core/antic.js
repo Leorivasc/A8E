@@ -11,6 +11,7 @@
     const CYCLE_NEVER = cfg.CYCLE_NEVER;
     const FIRST_VISIBLE_LINE = cfg.FIRST_VISIBLE_LINE;
     const LAST_VISIBLE_LINE = cfg.LAST_VISIBLE_LINE;
+    const PMG_REGISTER_ADDRESSES = cfg.PMG_REGISTER_ADDRESSES || [];
 
     const NMI_DLI = cfg.NMI_DLI;
     const NMI_VBI = cfg.NMI_VBI;
@@ -127,7 +128,7 @@
       return { enabled: false, delayOneCycle: false };
     }
 
-    function resetDrawLineState(drawLine) {
+    function resetDrawLineState(drawLine, sram) {
       drawLine.playfieldDmaStealCount = 0;
       drawLine.refreshDmaPending = 0;
       drawLine.displayListInstructionDmaPending = 0;
@@ -135,6 +136,11 @@
       drawLine.playerMissileClockActive = false;
       drawLine.playerMissileInterleaved = false;
       drawLine.pmgFirstVisibleSpan = true;
+      drawLine.pmgEventCount = 0;
+      drawLine.pmgEventOverflow = false;
+      for (let i = 0; i < PMG_REGISTER_ADDRESSES.length; i++) {
+        drawLine.pmgInitialRegisters[i] = sram[PMG_REGISTER_ADDRESSES[i]] & 0xff;
+      }
       drawLine.playerPmgShift.fill(0);
       drawLine.playerPmgState.fill(0);
       drawLine.missilePmgShift.fill(0);
@@ -418,7 +424,7 @@
         if (io.video.currentDisplayLine === 0) {
           io.clock = io.displayListFetchCycle;
         }
-        resetDrawLineState(io.drawLine);
+        resetDrawLineState(io.drawLine, ctx.sram);
         resetNmiTiming(ctx);
         fetchLine(ctx);
         io.inDrawLine = true;

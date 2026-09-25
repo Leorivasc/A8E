@@ -500,6 +500,30 @@ Acceptance criteria:
   register values of the line.
 - PMG pixels and collision registers match the AHRM/Altirra reference cases.
 
+Status: **implemented and probe-validated on 2026-09-25; real-content validation pending**.
+
+Implemented in both A8E and jsA8E:
+
+- Added bounded per-scanline history for HPOS, SIZE, GRAFP, GRAFM, and PM DMA
+  latch events.
+- Timestamped native writes at the final 6502 instruction cycle, matching the
+  existing CHBASE/VSCROL timing convention used by AHRM-sensitive code.
+- Replayed the hidden PMG prefix from the line-start register snapshot and
+  event history instead of using only the final register values.
+- Preserved the event log in JS snapshots and added a regression for a
+  mid-line HPOS change that must not retroactively start a sprite.
+- Added the matching native graphics probe and a JS PMBASE mixed-line test;
+  both verify the recorded event cycle and the non-retroactive HPOS result.
+- Kept an explicit legacy fallback when the bounded event log overflows.
+
+External AHRM-07 validation:
+
+- Run `implementation/AHRM07_PMG_TEST.XEX` on jsA8E, native A8E, Altirra, and
+  hardware. Confirm `P0/P1 COLLISION: PASS`, compare the alternating PMBASE
+  patterns, and observe stable DLI-driven HPOS/PRIOR changes.
+- Validate real raster-content titles and confirm parity between native A8E,
+  jsA8E, Altirra, and hardware where available.
+
 ### AHRM-08: Align POKEY serial, timer, paddle, and audio fidelity
 
 Priority: **P2**

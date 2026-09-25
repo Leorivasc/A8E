@@ -51,6 +51,11 @@
 #define COLOR_CLOCKS_PER_LINE (PIXELS_PER_LINE / 2)
 #define CYCLES_PER_LINE (COLOR_CLOCKS_PER_LINE / 2)
 
+/* AHRM 4.13: PMG replay needs the source register history for one line.
+ * Keep the log bounded; normal raster effects use only a small fraction of it. */
+#define PMG_REGISTER_COUNT 18
+#define PMG_EVENT_CAPACITY 64
+
 #define ATARI_CPU_HZ_NTSC 1789773u
 #define ATARI_CPU_HZ_PAL 1773447u
 
@@ -120,10 +125,16 @@ typedef struct
 	u8 cDisplayListInstructionDmaPending;
 	u8 cDisplayListAddressDmaRemaining;
 	u8 cPmgFirstVisibleSpan;
+	u8 cPmgEventCount;
+	u8 cPmgEventOverflow;
 	u8 aPlayerPmgShift[4];
 	u8 aPlayerPmgState[4];
 	u8 aMissilePmgShift[4];
 	u8 aMissilePmgState[4];
+	u8 aPmgInitialRegisters[PMG_REGISTER_COUNT];
+	u8 aPmgEventRegisters[PMG_EVENT_CAPACITY];
+	u8 aPmgEventValues[PMG_EVENT_CAPACITY];
+	u8 aPmgEventCycles[PMG_EVENT_CAPACITY];
 	u8 aPlayfieldLineBuffer[48];
 	u8 aScheduledPlayfieldDma[CYCLES_PER_LINE];
 } DrawLineData_t;
@@ -256,6 +267,15 @@ void AtariIoClose(_6502_Context_t *pContext);
 
 void AtariIoCycleTimedEventUpdate(_6502_Context_t *pContext);
 void AtariIoStatus(_6502_Context_t *pContext);
+void AtariIo_RecordPmgRegisterWrite(
+	_6502_Context_t *pContext,
+	u16 sAddress,
+	u8 cValue);
+void AtariIo_RecordPmgDmaWrite(
+	_6502_Context_t *pContext,
+	u16 sAddress,
+	u8 cValue,
+	u32 lCycleInLine);
 
 #ifdef A8E_ENABLE_TEST_PROBES
 void AtariIoTimingProbeStepClock(_6502_Context_t *pContext);

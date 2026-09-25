@@ -4,6 +4,7 @@
   function createApi(cfg) {
     const CPU = cfg.CPU;
     const CYCLES_PER_LINE = cfg.CYCLES_PER_LINE;
+    const recordPmgRegisterWrite = cfg.recordPmgRegisterWrite;
     const NMI_DLI = cfg.NMI_DLI;
     const NMI_VBI = cfg.NMI_VBI;
     const NMI_RESET = cfg.NMI_RESET;
@@ -447,6 +448,7 @@
           case IO_PRIOR:
           case IO_VDELAY:
             sram[addr] = v;
+            if (recordPmgRegisterWrite) recordPmgRegisterWrite(ctx, addr, v);
             break;
 
           case IO_GRACTL: {

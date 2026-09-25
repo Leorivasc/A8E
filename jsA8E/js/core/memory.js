@@ -1998,6 +1998,13 @@
                 playerMissileClockActive: !!io.drawLine.playerMissileClockActive,
                 playerMissileInterleaved: !!io.drawLine.playerMissileInterleaved,
                 pmgFirstVisibleSpan: !!io.drawLine.pmgFirstVisibleSpan,
+                pmgEventCount: io.drawLine.pmgEventCount | 0,
+                pmgEventOverflow: !!io.drawLine.pmgEventOverflow,
+                pmgInitialRegisters: new Uint8Array(io.drawLine.pmgInitialRegisters || 0),
+                pmgReplayRegisters: new Uint8Array(io.drawLine.pmgReplayRegisters || 0),
+                pmgEventRegisters: new Uint8Array(io.drawLine.pmgEventRegisters || 0),
+                pmgEventValues: new Uint8Array(io.drawLine.pmgEventValues || 0),
+                pmgEventCycles: new Uint8Array(io.drawLine.pmgEventCycles || 0),
                 playerPmgShift: new Uint8Array(io.drawLine.playerPmgShift || 0),
                 playerPmgState: new Uint8Array(io.drawLine.playerPmgState || 0),
                 missilePmgShift: new Uint8Array(io.drawLine.missilePmgShift || 0),
@@ -2115,6 +2122,13 @@
           io.drawLine.playerMissileClockActive = !!state.drawLine.playerMissileClockActive;
           io.drawLine.playerMissileInterleaved = !!state.drawLine.playerMissileInterleaved;
           io.drawLine.pmgFirstVisibleSpan = !!state.drawLine.pmgFirstVisibleSpan;
+          io.drawLine.pmgEventCount = state.drawLine.pmgEventCount | 0;
+          io.drawLine.pmgEventOverflow = !!state.drawLine.pmgEventOverflow;
+          copyBytesTo(io.drawLine.pmgInitialRegisters, state.drawLine.pmgInitialRegisters);
+          copyBytesTo(io.drawLine.pmgReplayRegisters, state.drawLine.pmgReplayRegisters);
+          copyBytesTo(io.drawLine.pmgEventRegisters, state.drawLine.pmgEventRegisters);
+          copyBytesTo(io.drawLine.pmgEventValues, state.drawLine.pmgEventValues);
+          copyBytesTo(io.drawLine.pmgEventCycles, state.drawLine.pmgEventCycles);
           if (state.drawLine.playerPmgShift) {
             io.drawLine.playerPmgShift = new Uint8Array(state.drawLine.playerPmgShift);
           }

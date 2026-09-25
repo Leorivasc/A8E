@@ -3,6 +3,7 @@
 
   function createApi(cfg) {
     const PIXELS_PER_LINE = cfg.PIXELS_PER_LINE;
+    const CYCLES_PER_LINE = cfg.CYCLES_PER_LINE || 114;
 
     const IO_COLPF3 = cfg.IO_COLPF3;
     const IO_COLPM0_TRIG2 = cfg.IO_COLPM0_TRIG2;
@@ -34,6 +35,64 @@
     const IO_VDELAY = cfg.IO_VDELAY;
     const PLAYFIELD_SCRATCH_VIEW_X = cfg.PLAYFIELD_SCRATCH_VIEW_X || 0;
     const PMG_POSITION_BIAS_PIXELS = 0;
+
+    function pmgRegisterIndex(address) {
+      switch (address) {
+        case IO_HPOSP0_M0PF: return 0;
+        case IO_HPOSP1_M1PF: return 1;
+        case IO_HPOSP2_M2PF: return 2;
+        case IO_HPOSP3_M3PF: return 3;
+        case IO_HPOSM0_P0PF: return 4;
+        case IO_HPOSM1_P1PF: return 5;
+        case IO_HPOSM2_P2PF: return 6;
+        case IO_HPOSM3_P3PF: return 7;
+        case IO_SIZEP0_M0PL: return 8;
+        case IO_SIZEP1_M1PL: return 9;
+        case IO_SIZEP2_M2PL: return 10;
+        case IO_SIZEP3_M3PL: return 11;
+        case IO_SIZEM_P0PL: return 12;
+        case IO_GRAFP0_P1PL: return 13;
+        case IO_GRAFP1_P2PL: return 14;
+        case IO_GRAFP2_P3PL: return 15;
+        case IO_GRAFP3_TRIG0: return 16;
+        case IO_GRAFM_TRIG1: return 17;
+        default: return -1;
+      }
+    }
+
+    function recordPmgRegisterEvent(ctx, address, value, lineCycle) {
+      const drawLine = ctx.ioData.drawLine;
+      const registerIndex = pmgRegisterIndex(address);
+      if (
+        !drawLine ||
+        !drawLine.pmgEventRegisters ||
+        !drawLine.pmgEventValues ||
+        !drawLine.pmgEventCycles ||
+        registerIndex < 0 ||
+        lineCycle < 0 ||
+        lineCycle >= CYCLES_PER_LINE
+      ) return;
+      if (drawLine.pmgEventCount >= drawLine.pmgEventRegisters.length) {
+        drawLine.pmgEventOverflow = true;
+        return;
+      }
+      const eventIndex = drawLine.pmgEventCount++;
+      drawLine.pmgEventRegisters[eventIndex] = registerIndex;
+      drawLine.pmgEventValues[eventIndex] = value & 0xff;
+      drawLine.pmgEventCycles[eventIndex] = lineCycle & 0xff;
+    }
+
+    function recordPmgRegisterWrite(ctx, address, value) {
+      const io = ctx.ioData;
+      const writeCycle =
+        (io.clock | 0) + Math.max((ctx.currentInstructionCycles | 0) - 1, 0);
+      recordPmgRegisterEvent(
+        ctx,
+        address,
+        value,
+        writeCycle - (io.displayListFetchCycle | 0),
+      );
+    }
 
     const PRIO_PF0 = cfg.PRIO_PF0;
     const PRIO_PF1 = cfg.PRIO_PF1;
@@ -505,6 +564,7 @@
         if (!vdelayAllowsFetch(0x08)) return 0;
         if (pmReceiveMissiles) {
           sram[IO_GRAFM_TRIG1] = ctx.ram[fetchPmAddr(hires ? 768 : 384)];
+          recordPmgRegisterEvent(ctx, IO_GRAFM_TRIG1, sram[IO_GRAFM_TRIG1], lineCycle);
         }
         return 1;
       }
@@ -513,24 +573,28 @@
           if (!vdelayAllowsFetch(0x10)) return 0;
           if (pmReceivePlayers) {
             sram[IO_GRAFP0_P1PL] = ctx.ram[fetchPmAddr(hires ? 1024 : 512)];
+            recordPmgRegisterEvent(ctx, IO_GRAFP0_P1PL, sram[IO_GRAFP0_P1PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 3) {
           if (!vdelayAllowsFetch(0x20)) return 0;
           if (pmReceivePlayers) {
             sram[IO_GRAFP1_P2PL] = ctx.ram[fetchPmAddr(hires ? 1280 : 640)];
+            recordPmgRegisterEvent(ctx, IO_GRAFP1_P2PL, sram[IO_GRAFP1_P2PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 4) {
           if (!vdelayAllowsFetch(0x40)) return 0;
           if (pmReceivePlayers) {
             sram[IO_GRAFP2_P3PL] = ctx.ram[fetchPmAddr(hires ? 1536 : 768)];
+            recordPmgRegisterEvent(ctx, IO_GRAFP2_P3PL, sram[IO_GRAFP2_P3PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 5) {
           if (!vdelayAllowsFetch(0x80)) return 0;
           if (pmReceivePlayers) {
             sram[IO_GRAFP3_TRIG0] = ctx.ram[fetchPmAddr(hires ? 1792 : 896)];
+            recordPmgRegisterEvent(ctx, IO_GRAFP3_TRIG0, sram[IO_GRAFP3_TRIG0], lineCycle);
           }
           return 1;
         }
@@ -623,16 +687,65 @@
         advanceMissileShift(missileShift, missileState, index, size);
       }
 
+      function primePlayerClockFromRegisters(index, x, registers) {
+        const data = registers[13 + index] & 0xff;
+        const hpos = pmgStartX(registers[index] & 0xff);
+        const size = registers[8 + index] & 0xff;
+        if (x === hpos && data) reloadPlayerShift(playerShift, playerState, index, data);
+        advancePlayerShift(playerShift, playerState, index, size);
+      }
+
+      function primeMissileClockFromRegisters(index, x, registers) {
+        const data = (registers[17] & missileMasks[index]) >> (index * 2);
+        const hpos = pmgStartX(registers[4 + index] & 0xff);
+        const size = registers[12] & 0xff;
+        if (x === hpos && data) reloadMissileShift(missileShift, missileState, index, data);
+        advanceMissileShift(missileShift, missileState, index, size);
+      }
+
       if (io.drawLine.pmgFirstVisibleSpan) {
-        for (let x = 0; x < visibleSpanStart; x += 2) {
-          primePlayerClock(3, x);
-          primePlayerClock(2, x);
-          primePlayerClock(1, x);
-          primePlayerClock(0, x);
-          primeMissileClock(3, x);
-          primeMissileClock(2, x);
-          primeMissileClock(1, x);
-          primeMissileClock(0, x);
+        const drawLine = io.drawLine;
+        const canReplayPmgHistory =
+          !drawLine.pmgEventOverflow &&
+          drawLine.pmgInitialRegisters &&
+          drawLine.pmgReplayRegisters &&
+          drawLine.pmgEventRegisters &&
+          drawLine.pmgEventValues &&
+          drawLine.pmgEventCycles;
+        if (canReplayPmgHistory) {
+          const replayRegisters = drawLine.pmgReplayRegisters;
+          replayRegisters.set(drawLine.pmgInitialRegisters);
+          let eventIndex = 0;
+          for (let x = 0; x < visibleSpanStart; x += 2) {
+            const lineCycle = Math.floor((x - 24) / 4);
+            while (
+              eventIndex < drawLine.pmgEventCount &&
+              drawLine.pmgEventCycles[eventIndex] <= lineCycle
+            ) {
+              replayRegisters[drawLine.pmgEventRegisters[eventIndex]] =
+                drawLine.pmgEventValues[eventIndex];
+              eventIndex++;
+            }
+            primePlayerClockFromRegisters(3, x, replayRegisters);
+            primePlayerClockFromRegisters(2, x, replayRegisters);
+            primePlayerClockFromRegisters(1, x, replayRegisters);
+            primePlayerClockFromRegisters(0, x, replayRegisters);
+            primeMissileClockFromRegisters(3, x, replayRegisters);
+            primeMissileClockFromRegisters(2, x, replayRegisters);
+            primeMissileClockFromRegisters(1, x, replayRegisters);
+            primeMissileClockFromRegisters(0, x, replayRegisters);
+          }
+        } else {
+          for (let x = 0; x < visibleSpanStart; x += 2) {
+            primePlayerClock(3, x);
+            primePlayerClock(2, x);
+            primePlayerClock(1, x);
+            primePlayerClock(0, x);
+            primeMissileClock(3, x);
+            primeMissileClock(2, x);
+            primeMissileClock(1, x);
+            primeMissileClock(0, x);
+          }
         }
         io.drawLine.pmgFirstVisibleSpan = false;
       }
@@ -1063,6 +1176,8 @@
       drawPlayerMissilesClock: drawPlayerMissilesClock,
       fetchPmgDmaCycle: fetchPmgDmaCycle,
       drawPlayerMissiles: drawPlayerMissiles,
+      recordPmgRegisterEvent: recordPmgRegisterEvent,
+      recordPmgRegisterWrite: recordPmgRegisterWrite,
     };
   }
 

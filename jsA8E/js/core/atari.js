@@ -427,6 +427,9 @@
           pokeySeroutWrite: pokeySeroutWrite,
           pokeySerinRead: pokeySerinRead,
           pokeyPotUpdate: pokeyPotUpdate,
+          recordPmgRegisterWrite: function (ctx, address, value) {
+            return gtiaApi.recordPmgRegisterWrite(ctx, address, value);
+          },
         })
       : null;
   if (!ioApi) throw new Error("A8EIo is not loaded");
@@ -435,6 +438,7 @@
     window.A8EGtia && window.A8EGtia.createApi
       ? window.A8EGtia.createApi({
           PIXELS_PER_LINE: PIXELS_PER_LINE,
+          CYCLES_PER_LINE: CYCLES_PER_LINE,
           IO_COLPF3: IO_COLPF3,
           IO_COLPM0_TRIG2: IO_COLPM0_TRIG2,
           IO_COLPM1_TRIG3: IO_COLPM1_TRIG3,
@@ -518,6 +522,14 @@
           IO_COLPM0_TRIG2: IO_COLPM0_TRIG2,
           IO_PRIOR: IO_PRIOR,
           IO_HSCROL: IO_HSCROL,
+          PMG_REGISTER_ADDRESSES: [
+            IO_HPOSP0_M0PF, IO_HPOSP1_M1PF, IO_HPOSP2_M2PF, IO_HPOSP3_M3PF,
+            IO_HPOSM0_P0PF, IO_HPOSM1_P1PF, IO_HPOSM2_P2PF, IO_HPOSM3_P3PF,
+            IO_SIZEP0_M0PL, IO_SIZEP1_M1PL, IO_SIZEP2_M2PL, IO_SIZEP3_M3PL,
+            IO_SIZEM_P0PL,
+            IO_GRAFP0_P1PL, IO_GRAFP1_P2PL, IO_GRAFP2_P3PL, IO_GRAFP3_TRIG0,
+            IO_GRAFM_TRIG1,
+          ],
           ANTIC_MODE_INFO: ANTIC_MODE_INFO,
           drawPlayerMissilesClock: drawPlayerMissilesClock,
           fetchPmgDmaCycle: gtiaApi.fetchPmgDmaCycle,
