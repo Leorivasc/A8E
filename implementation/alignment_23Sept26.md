@@ -263,7 +263,7 @@ Status: **implemented and validated on 2026-09-24**.
 
 ### AHRM-04: Make the supported memory-expansion matrix explicit
 
-Status: **implemented in native and JS; awaiting real-content validation**
+Status: **PASS - implemented and validated on 2026-09-25**
 
 Priority: **P1**
 
@@ -311,9 +311,9 @@ Steps:
    documentation. **Implemented.**
 5. If another AHRM profile is not supported, mark it explicitly as omitted in
    the UI and memory documentation rather than implying full AHRM matrix
-   coverage.
+   coverage. **Implemented for the current supported scope.**
 6. Add a generated profile table shared by native and JS tests to prevent
-   future mapping drift.
+   future mapping drift. **Follow-up hardening item.**
 
 Acceptance criteria:
 
@@ -322,8 +322,12 @@ Acceptance criteria:
 - RAMBO 256K reports 16 bank selectors, aliases banks 0-3 to motherboard RAM,
   and keeps banks 4-15 independent.
 - Unsupported profiles are clearly marked as unsupported.
+- Representative software loads and runs in jsA8E and Altirra with RAMBO 256K
+  selected.
 
 ### AHRM-05: Define the U1MB support boundary as a separate project
+
+Status: **boundary documented; full U1MB implementation remains out of scope**
 
 Priority: **P3** for boundary documentation; full implementation is outside
 the current alignment scope.
@@ -388,6 +392,8 @@ Acceptance criteria:
 
 ### AHRM-06: Close ANTIC timing gaps
 
+Status: **implemented and validated on 2026-09-25**
+
 Priority: **P2**
 
 Difficulty: **medium** for individual cases; **high** for complete raster
@@ -397,15 +403,20 @@ Viability: **medium-high**. Both cores already use cycle-oriented scanline
 logic and have focused probes, but the remaining cases require carefully
 controlled instruction/bus timing tests.
 
-Open cases:
+Closed cases:
 
-- AHRM 4.8 missed-NMI condition when an IRQ is acknowledged at the critical
-  cycle.
-- Character-data DMA fetches on blank extended rows in modes 2/3.
-- Native VSCROL deadline sampling relative to an atomic 6502 instruction.
-- Broader chained-DLI and wide-playfield validation.
-- The `playfield_dynamic_geometry.test.js` fixture uses a stale renderer mock
-  without `drawModeLine`, so its assertions are currently not reached.
+- Character-data DMA fetches on blank extended rows in modes 2/3 now occur
+  three cycles after the name fetch and are discarded only at the display
+  stage.
+- Native and JS VSCROL deadline sampling now uses the final 6502 write cycle;
+  writes completing on cycle 5 or 108 are accepted and later writes are not.
+- Chained JVB+DLI replay through VBL and wide mode-2 playfield geometry have
+  native and JS regression coverage.
+- The new ANTIC boundary fixtures are covered in both cores without adding
+  tracing or title-specific timing branches.
+- The guest-level `AHRM06_ANTIC_TEST.XEX` passed visual validation in jsA8E:
+  `DLI1` and `DLI2` appeared, all three ANTIC sections remained stable, and
+  no blink, corruption, or visible displacement was observed.
 
 Benefits:
 
@@ -420,25 +431,35 @@ Steps:
 
 1. Update `playfield_dynamic_geometry.test.js` to provide the current renderer
    contract, then verify that its HSCROL and DMA enable/disable assertions are
-   actually executed and pass.
+   actually executed and pass. **Implemented; included in the automation
+   regression command.**
 2. Add minimal synthetic 6502 fixtures that place the relevant register write,
-   IRQ acknowledge, or DMA request at each boundary cycle.
+   IRQ acknowledge, or DMA request at each boundary cycle. **The cycle-4
+   missed-NMI and cycle-5/cycle-108 VSCROL fixtures are implemented in JS and
+   native.**
 3. Capture `NMIST`, `NMIEN`, CPU PC, beam cycle, DMA schedule, and bus value in
-   both cores.
+   both cores. **The boundary probes cover the actionable fields for these
+   cases.**
 4. Compare each result with the corresponding AHRM timing example and, where
-   possible, an Altirra trace.
-5. Implement one timing rule at a time in JS and native code.
-6. Add regression tests before moving to the next corner case.
+   possible, an Altirra trace. **The synthetic results match the AHRM rules;
+   Altirra remains a useful secondary validation reference.**
+5. Implement one timing rule at a time in JS and native code. **Completed for
+   the identified AHRM-06 gaps.**
+6. Add regression tests before moving to the next corner case. **Completed in
+   the native graphics/timing probes and JS automation suite.**
 7. Run real raster content such as Atomix Plus! and GTIA 9++ examples only
-   after the synthetic tests pass.
+   after the synthetic tests pass. **Synthetic gates pass; title-level raster
+   validation remains a broader post-AHRM-06 regression activity.**
 
 Acceptance criteria:
 
 - The dynamic-geometry test reaches and passes its assertions with the current
   renderer API.
-- JS and native produce the same NMI, DMA-steal, bus-value, and visible-line
-  results for every new boundary fixture.
+- JS and native produce the same NMI, DMA-steal, VSCROL deadline, and
+  visible-line results for every new boundary fixture.
 - No title-specific timing branch is introduced.
+- The visual XEX exposes both DLI transitions and remains stable during a
+  sustained run.
 
 ### AHRM-07: Improve GTIA/PMG raster replay fidelity
 
@@ -576,14 +597,16 @@ Acceptance criteria:
 
 ## Recommended execution order
 
-1. AHRM-01: native DDRB/ORB correction.
+1. AHRM-01: native DDRB/ORB correction (completed).
 2. AHRM-02: remove or gate `CONSOL_HACK` (completed).
 3. AHRM-09: add the smallest cross-core trace fixtures needed by the first two
-   items.
-4. AHRM-03: PIA control-line and IRQ model.
-5. AHRM-04: add RAMBO 256K and close the supported memory-profile matrix.
-6. AHRM-05: document the U1MB boundary only; track full U1MB separately.
-7. AHRM-06: ANTIC timing corner cases.
+   items (foundation completed; expand incrementally).
+4. AHRM-03: PIA control-line and IRQ model (completed).
+5. AHRM-04: add RAMBO 256K and close the supported memory-profile matrix
+   (completed and validated).
+6. AHRM-05: document the U1MB boundary only; track full U1MB separately
+   (completed for the current alignment scope).
+7. AHRM-06: ANTIC timing corner cases (completed).
 8. AHRM-07: PMG raster replay.
 9. AHRM-08: POKEY paddle and analog audio refinement.
 

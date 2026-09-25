@@ -159,6 +159,14 @@ typedef struct
 	u8 cChbasePendingValue;
 	u64 llChbasePendingCycle;
 
+	/* VSCROL bus-write timing (AHRM 4.7/4.8: deadline samples must see
+	 * the value on the final 6502 write cycle, not at instruction start). */
+	u8 bVscrolTimingInitialized;
+	u8 cVscrolRawValue;
+	u8 cVscrolActiveValue;
+	u8 cVscrolPendingValue;
+	u64 llVscrolPendingCycle;
+
 	void *pPokey;
 
 	u8 cCurrentDisplayListCommand;

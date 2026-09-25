@@ -244,6 +244,65 @@ static int TestMode2BlankAndInvertProducesInvertedSpace(void)
 	return 1;
 }
 
+static int TestMode23FetchesBlankExtendedRows(void)
+{
+	static const struct
+	{
+		u8 cMode;
+		u8 cRow;
+		u8 cCharacter;
+	} aCases[] =
+		{
+			{0x02, 8, 0x00}, /* mode 2 non-descender blank row */
+			{0x03, 0, 0x60}, /* mode 3 descender blank row */
+		};
+	u32 i;
+
+	for(i = 0; i < sizeof(aCases) / sizeof(aCases[0]); i++)
+	{
+		ProbeMachine_t tMachine = ProbeMachine_Open();
+		_6502_Context_t *pContext = tMachine.pContext;
+		IoData_t *pIoData = tMachine.pIoData;
+		u32 lFetchCount;
+
+		REQUIRE(pContext != NULL, "machine open failed");
+
+		ProbeMachine_ResetVideo(&tMachine);
+		ProbeMachine_PrepareModeLine(
+			&tMachine,
+			aCases[i].cMode,
+			8,
+			8 + (aCases[i].cMode == 0x02 ? 8 : 10),
+			0);
+		pIoData->cModeLineRowCounter = aCases[i].cRow;
+		SRAM[IO_CHACTL] = 0x00;
+		SRAM[IO_CHBASE] = 0x20;
+		pIoData->tDrawLineData.lBytesPerLine = 40;
+		memset(
+			pIoData->tDrawLineData.aPlayfieldLineBuffer,
+			aCases[i].cCharacter,
+			40);
+
+		AtariIoDrawLine(pContext);
+		lFetchCount = ProbeMachine_ScheduledPlayfieldDmaCount(&tMachine);
+
+		REQUIRE(
+			lFetchCount == 40,
+			"mode %X blank row scheduled %lu character fetches instead of 40",
+			aCases[i].cMode,
+			(unsigned long)lFetchCount);
+		REQUIRE(
+			ProbeMachine_PixelAt(&tMachine, 8, 96) == SRAM[IO_COLPF2],
+			"mode %X blank row displayed non-background data $%02X",
+			aCases[i].cMode,
+			ProbeMachine_PixelAt(&tMachine, 8, 96));
+
+		ProbeMachine_Close(&tMachine);
+	}
+
+	return 1;
+}
+
 static int TestMode2MidScanlineChbaseLatchSwitchesCharacterSet(void)
 {
 	ProbeMachine_t tMachine = ProbeMachine_Open();
@@ -288,6 +347,37 @@ static int TestMode2MidScanlineChbaseLatchSwitchesCharacterSet(void)
 	REQUIRE(
 		pIoData->llChbasePendingCycle == CYCLE_NEVER,
 		"CHBASE pending cycle was not cleared after latching");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestWideMode2UsesWideFetchWindow(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetVideo(&tMachine);
+	ProbeMachine_PrepareModeLine(&tMachine, 0x02, 8, 16, 0);
+	SRAM[IO_DMACTL] = 0x23; /* playfield DMA enabled, wide width */
+	SRAM[IO_CHBASE] = 0x20;
+	RAM[0x2000] = 0xff;
+
+	AtariIoDrawLine(pContext);
+
+	REQUIRE(pIoData->tDrawLineData.lBytesPerLine == 48,
+			"wide mode 2 used %lu bytes instead of 48",
+			(unsigned long)pIoData->tDrawLineData.lBytesPerLine);
+	REQUIRE(
+		ProbeMachine_PixelAt(&tMachine, 8, 64) == 0xab,
+		"wide mode 2 did not begin at the wide playfield origin (pixel $%02X)",
+		ProbeMachine_PixelAt(&tMachine, 8, 64));
+	REQUIRE(
+		ProbeMachine_PixelAt(&tMachine, 8, 63) == SRAM[IO_COLBK],
+		"wide mode 2 drew before its playfield origin");
 
 	ProbeMachine_Close(&tMachine);
 	return 1;
@@ -390,7 +480,9 @@ int main(int argc, char *argv[])
 
 	bOk &= TestCharacterModeOriginsUseGtiaClock30();
 	bOk &= TestMode2BlankAndInvertProducesInvertedSpace();
+	bOk &= TestMode23FetchesBlankExtendedRows();
 	bOk &= TestMode2MidScanlineChbaseLatchSwitchesCharacterSet();
+	bOk &= TestWideMode2UsesWideFetchWindow();
 	bOk &= TestMode5UsesOneKilobyteChbaseAlignment();
 	bOk &= TestMode5FetchesCharacterDataOnOddRepeatedScanlines();
 	bOk &= TestMode7FetchesCharacterDataOnOddRepeatedScanlines();

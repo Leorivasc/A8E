@@ -639,9 +639,21 @@
             break;
 
           case IO_HSCROL:
-          case IO_VSCROL:
             sram[addr] = v & 0x0f;
             break;
+
+          case IO_VSCROL: {
+            sram[addr] = v & 0x0f;
+            const vscrolTiming = io.vscrolTiming;
+            vscrolTiming.initialized = true;
+            vscrolTiming.rawValue = v & 0x0f;
+            vscrolTiming.pendingValue = v & 0x0f;
+            // The write is placed on the final 6502 cycle of the atomic
+            // instruction, which is the deadline-visible bus cycle.
+            vscrolTiming.pendingClock =
+              (io.clock | 0) + Math.max((ctx.currentInstructionCycles | 0) - 1, 0);
+            break;
+          }
 
           case IO_WSYNC: {
             // Stall until cycle 105 of the current scanline (0-indexed: cycle 104).

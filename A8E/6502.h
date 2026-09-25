@@ -83,6 +83,10 @@ typedef struct _6502_Context
 	u8 cNmiPendingFlag;
 	u8 cNmiActiveFlag;
 	u8 cIrqPendingFlag;
+	/* AHRM 4.8: an IRQ acknowledged at cycle 4 can lose an ANTIC NMI
+	 * asserted at cycle 8. This is a one-boundary CPU condition, not a
+	 * persistent interrupt mask. */
+	u8 cIrqNmiLossWindow;
 
 	void *pIoData;
 } _6502_Context_t;

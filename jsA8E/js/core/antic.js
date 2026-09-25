@@ -79,6 +79,31 @@
     const ANTIC_CMD_MASK_DLI_JMP = 0x4f; // Isolates DLI, LMS, and instruction bits
     const ANTIC_CMD_MASK_JVB_DLI = 0xcf; // Isolates replayed JVB+DLI pattern
 
+    function currentVscrolRegister(ctx) {
+      const io = ctx.ioData;
+      const sram = ctx.sram;
+      const timing = io.vscrolTiming;
+      const rawValue = sram[IO_VSCROL] & 0x0f;
+      if (!timing) return rawValue;
+      if (!timing.initialized) {
+        timing.initialized = true;
+        timing.rawValue = rawValue;
+        timing.activeValue = rawValue;
+        timing.pendingValue = rawValue;
+        timing.pendingClock = -1;
+      } else if (rawValue !== timing.rawValue) {
+        timing.rawValue = rawValue;
+        timing.activeValue = rawValue;
+        timing.pendingValue = rawValue;
+        timing.pendingClock = -1;
+      }
+      if (timing.pendingClock >= 0 && (io.clock | 0) > timing.pendingClock) {
+        timing.activeValue = timing.pendingValue & 0x0f;
+        timing.pendingClock = -1;
+      }
+      return timing.activeValue & 0x0f;
+    }
+
     function resetNmiTiming(ctx) {
       const timing = ctx.ioData.nmiTiming;
       const nmien = ctx.sram[IO_NMIEN] & (NMI_DLI | NMI_VBI);
@@ -229,7 +254,7 @@
             // Region entry: the counter starts at VSCROL (deadline cycle
             // 0).  Values above the natural end row wrap the 4-bit counter
             // and extend the mode line (GTIA 9++).
-            startRow = sram[IO_VSCROL] & 0x0f;
+            startRow = currentVscrolRegister(ctx);
           } else if ((oldCmd & 0x2f) >= 0x22 && (cmd & 0x2f) < 0x22) {
             // Region exit: this line ends when the counter matches the
             // live VSCROL value instead of the static end row.
@@ -246,7 +271,7 @@
           io.modeLineEndsThisLine = false;
 
           const modeLineRows = scrollExit
-            ? (((sram[IO_VSCROL] & 0x0f) - startRow) & 0x0f) + 1
+            ? ((currentVscrolRegister(ctx) - startRow) & 0x0f) + 1
             : ((endRow - startRow) & 0x0f) + 1;
           io.nextDisplayListLine = io.video.currentDisplayLine + modeLineRows;
 

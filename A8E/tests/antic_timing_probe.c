@@ -65,6 +65,7 @@ static void ProbeMachine_ResetTiming(ProbeMachine_t *pMachine)
 	pContext->cNmiPendingFlag = 0;
 	pContext->cNmiActiveFlag = 0;
 	pContext->cIrqPendingFlag = 0;
+	pContext->cIrqNmiLossWindow = 0;
 
 	pIoData->llCycle = 0;
 	pIoData->llDisplayListFetchCycle = CYCLE_NEVER;
@@ -77,6 +78,8 @@ static void ProbeMachine_ResetTiming(ProbeMachine_t *pMachine)
 	pIoData->llTimer2Cycle = CYCLE_NEVER;
 	pIoData->llTimer4Cycle = CYCLE_NEVER;
 	pIoData->bInDrawLine = 0;
+	pIoData->bVscrolTimingInitialized = 0;
+	pIoData->llVscrolPendingCycle = CYCLE_NEVER;
 	pIoData->cNmienEnabledByCycle7 = 0;
 	pIoData->cNmienEnabledByCycle8 = 0;
 	pIoData->cNmienEnabledOnCycle7Mask = 0;
@@ -156,6 +159,47 @@ static int TestDliTriggersAtCycle8(void)
 	REQUIRE(pIoData->llDliCycle == CYCLE_NEVER, "DLI cycle was not cleared after firing");
 	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_DLI) != 0,
 			"NMIST DLI bit missing after cycle-8 trigger");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestCycle4IrqLosesAnticNmi(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetTiming(&tMachine);
+
+	pContext->pMemory[0xfffe] = 0x78;
+	pContext->pMemory[0xffff] = 0x56;
+	pContext->pMemory[0xfffa] = 0x34;
+	pContext->pMemory[0xfffb] = 0x12;
+	pContext->pMemory[0x2000] = 0xea;
+	pContext->tCpu.pc = 0x2000;
+	pContext->tCpu.ps.i = 0;
+	pContext->cIrqPendingFlag = 1;
+	pContext->llCycleCounter = 4;
+	pIoData->llDliCycle = 7;
+	pIoData->cNmienEnabledByCycle7 = NMI_DLI;
+	pIoData->cNmienEnabledByCycle8 = NMI_DLI;
+	AtariIoCycleTimedEventUpdate(pContext);
+
+	_6502_Execute(pContext);
+	REQUIRE(pContext->tCpu.pc == 0x5678,
+			"IRQ did not start at the critical cycle");
+	REQUIRE(pContext->llCycleCounter == 11,
+			"IRQ acknowledge did not consume 7 cycles");
+
+	ProbeMachine_TriggerBeamEvent(&tMachine, 7, 11);
+	ProbeMachine_TriggerBeamEvent(&tMachine, 8, 11);
+	REQUIRE(pContext->cNmiPendingFlag == 0,
+			"cycle-4 IRQ incorrectly preserved the cycle-8 NMI edge");
+	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_DLI) != 0,
+			"lost NMI did not leave NMIST latched");
 
 	ProbeMachine_Close(&tMachine);
 	return 1;
@@ -678,6 +722,57 @@ static int TestDliDisableOnCycle8SuppressesCurrentLine(void)
 	return 1;
 }
 
+static int TestVscrolDeadlineUsesAtomicWriteCycle(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetTiming(&tMachine);
+	pIoData->bInDrawLine = 1;
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->bModeLineScrollExit = 1;
+	pIoData->cModeLineRowCounter = 3;
+	SRAM[IO_VSCROL] = 3;
+	pIoData->bVscrolTimingInitialized = 1;
+	pIoData->cVscrolRawValue = 3;
+	pIoData->cVscrolPendingValue = 3;
+	pIoData->cVscrolActiveValue = 0;
+
+	/* A bus write completing on cycle 108 counts for the cycle-109 sample. */
+	pIoData->llVscrolPendingCycle = 108;
+	while(pIoData->llCycle < 110)
+	{
+		AtariIoTimingProbeStepClock(pContext);
+	}
+	REQUIRE(pIoData->bModeLineEndsThisLine == 1,
+			"VSCROL write on cycle 108 was not visible to cycle-109 sampling");
+
+	/* A bus write completing on cycle 109 is too late for that sample. */
+	ProbeMachine_ResetTiming(&tMachine);
+	pIoData->bInDrawLine = 1;
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->bModeLineScrollExit = 1;
+	pIoData->cModeLineRowCounter = 3;
+	SRAM[IO_VSCROL] = 3;
+	pIoData->bVscrolTimingInitialized = 1;
+	pIoData->cVscrolRawValue = 3;
+	pIoData->cVscrolPendingValue = 3;
+	pIoData->cVscrolActiveValue = 0;
+	pIoData->llVscrolPendingCycle = 109;
+	while(pIoData->llCycle < 110)
+	{
+		AtariIoTimingProbeStepClock(pContext);
+	}
+	REQUIRE(pIoData->bModeLineEndsThisLine == 0,
+			"VSCROL write on cycle 109 incorrectly affected cycle-109 sampling");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
 int main(int argc, char *argv[])
 {
 	int lPassed = 1;
@@ -687,6 +782,7 @@ int main(int argc, char *argv[])
 	_6502_Init();
 
 	lPassed &= TestDliTriggersAtCycle8();
+	lPassed &= TestCycle4IrqLosesAnticNmi();
 	lPassed &= TestVbiTriggersAtLine248();
 	lPassed &= TestVbiEnableOnCycle7DelaysByOneCycle();
 	lPassed &= TestVbiDisableOnCycle8SuppressesCurrentLine();
@@ -698,6 +794,7 @@ int main(int argc, char *argv[])
 	lPassed &= TestDliEnableOnCycle7DelaysByOneCycle();
 	lPassed &= TestDliEnableOnCycle8IsTooLate();
 	lPassed &= TestDliDisableOnCycle8SuppressesCurrentLine();
+	lPassed &= TestVscrolDeadlineUsesAtomicWriteCycle();
 
 	SDL_Quit();
 

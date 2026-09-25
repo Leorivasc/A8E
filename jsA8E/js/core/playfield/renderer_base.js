@@ -200,7 +200,8 @@
       if (
         lineCycle === 6 &&
         io.modeLineExitDli &&
-        (io.modeLineRowCounter & 0x0f) === (ctx.sram[IO_VSCROL] & 0x0f)
+        (io.modeLineRowCounter & 0x0f) ===
+          currentVscrolRegister(io, ctx.sram)
       ) {
         io.dliCycle = lineStartClock + 7;
         if (io.dliCycle < ctx.ioBeamTimedEventCycle) {
@@ -213,7 +214,8 @@
       // beam reaches cycle 109.
       if (lineCycle === 109 && io.modeLineScrollExit) {
         io.modeLineEndsThisLine =
-          (io.modeLineRowCounter & 0x0f) === (ctx.sram[IO_VSCROL] & 0x0f);
+          (io.modeLineRowCounter & 0x0f) ===
+          currentVscrolRegister(io, ctx.sram);
       }
 
       const drawLine = io.drawLine;
@@ -330,6 +332,30 @@
       return timing.activeValue & 0xff;
     }
 
+    function currentVscrolRegister(io, sram) {
+      const timing = io.vscrolTiming;
+      const rawValue = sram[IO_VSCROL] & 0x0f;
+      if (!timing) return rawValue;
+      if (!timing.initialized) {
+        timing.initialized = true;
+        timing.rawValue = rawValue;
+        timing.activeValue = rawValue;
+        timing.pendingValue = rawValue;
+        timing.pendingClock = -1;
+      } else if (rawValue !== timing.rawValue) {
+        // Direct test-probe writes are already complete bus writes.
+        timing.rawValue = rawValue;
+        timing.activeValue = rawValue;
+        timing.pendingValue = rawValue;
+        timing.pendingClock = -1;
+      }
+      if (timing.pendingClock >= 0 && (io.clock | 0) > timing.pendingClock) {
+        timing.activeValue = timing.pendingValue & 0x0f;
+        timing.pendingClock = -1;
+      }
+      return timing.activeValue & 0x0f;
+    }
+
     function resolveCharacterRow(row, chactl) {
       const glyphRow = row & 0xff;
       if (glyphRow >= 8) return -1;
@@ -406,6 +432,7 @@
       currentBackgroundColor,
       currentBackgroundPriority,
       currentCharacterBaseRegister,
+      currentVscrolRegister,
       fetchCharacterRow8,
       fetchCharacterRow10,
       fetchCharacterRow16,

@@ -4,6 +4,63 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-25: `A8E/6502.{h,c}`, `A8E/tests/antic_timing_probe.c`,
+  `jsA8E/js/core/cpu.js`, and
+  `jsA8E/{js/core/atari_snapshot.js,tests/cpu_interrupt_step_regression.test.js}`:
+  implemented the AHRM
+  4.8 missed-NMI boundary. An IRQ acknowledged with the next ANTIC status
+  event three cycles ahead loses the cycle-8 NMI edge while NMIST remains
+  latched; the one-boundary condition expires without affecting later NMIs,
+  and is preserved across jsA8E snapshots.
+
+- 2026-09-25: `jsA8E/tests/playfield_dynamic_geometry.test.js` now uses the
+  current `drawModeLine(mode, ctx)` renderer contract instead of the removed
+  mode-stepper hook. Its HSCROL and DMA enable/disable assertions execute in
+  the standard automation suite, establishing AHRM-06's first fixture without
+  adding title-specific timing behavior.
+
+- 2026-09-25: `A8E/{AtariIo.h,AtariIo.c,Antic.c}` and
+  `jsA8E/js/core/{state,io,antic}.js`,
+  `jsA8E/js/core/playfield/renderer_base.js`: completed the remaining
+  AHRM-06 ANTIC timing gaps. Modes 2/3 now perform character-data DMA on
+  visually blank extended rows and discard only the displayed byte; VSCROL
+  deadline decisions sample the final 6502 write cycle in both cores. The
+  native graphics probe adds wide mode-2 coverage, while JS/native timing
+  probes cover the atomic VSCROL boundaries and existing chained JVB+DLI
+  replay. Snapshot state includes the JS VSCROL timing latch.
+
+- 2026-09-25: `implementation/AHRM06_ANTIC_TEST.{asm,md}` and
+  `implementation/AHRM06_ANTIC_TEST.XEX`: added a guest-level visual
+  diagnostic for AHRM-06. It chains normal mode 2, DLI-selected wide mode 2,
+  and mode 3 with VSCROL, with visible color changes at the section boundaries.
+  It complements, but does not replace, the cycle-accurate native and JS
+  probes because ANTIC's internal DMA/deadline state is not CPU-readable.
+
+- 2026-09-25: `implementation/AHRM06_ANTIC_TEST.asm`: made the visual
+  diagnostic's DLI phase transition saturating so the 8-bit phase counter
+  cannot wrap after roughly 85 frames and reapply the width/scroll changes.
+  The mode-3 label now starts on a full-height row; the partial first row is
+  retained as the intentional VSCROL observation point.
+
+- 2026-09-25: `implementation/AHRM06_ANTIC_TEST.{asm,md}`: clarified that
+  the diagnostic's mode 2 and mode 3 labels refer to ANTIC display-list modes,
+  not Atari BASIC `GRAPHICS 2` and `GRAPHICS 3` modes.
+
+- 2026-09-25: `implementation/AHRM06_ANTIC_TEST.{asm,md}`: added persistent
+  `DLI1` and `DLI2` screen markers written by the DLI handler. This makes the
+  guest-level DLI result observable even when the OS VBI restores GTIA color
+  registers after the interrupt.
+
+- 2026-09-25: AHRM-06 visual validation passed in jsA8E with
+  `AHRM06_ANTIC_TEST.XEX`. The three ANTIC sections remained stable, both
+  `DLI1`/`DLI2` markers appeared, and no blink, corruption, or displacement
+  was observed. AHRM-06 is now certified PASS for the current alignment scope.
+
+- 2026-09-25: AHRM-04 RAMBO 256K was validated with representative software
+  in jsA8E and Altirra. Bank aliasing, independent expanded banks, and the
+  diagnostic XEX behavior are now considered validated; the generated
+  cross-core profile-table hardening remains a future follow-up.
+
 - 2026-09-25: `implementation/{memory_stress_test.asm,MEMORY_STRESS_TEST.XEX,
   u1mb_memory_test.asm,U1MB_MEMORY_TEST.XEX}` and `implementation/memory_tests.md`:
   updated the standalone memory diagnostics for AHRM RAMBO 256K. Detection now

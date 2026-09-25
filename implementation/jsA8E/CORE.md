@@ -76,9 +76,9 @@ XEX mount preflight simulates the file's writes in load order, so a segment that
 XL/XE `TRIG3` is RD5 cartridge sense, not a released third joystick. It reads low with no external cartridge and internal BASIC does not assert it. PORTB keeps separate DDRB and ORB state; its effective MMU value is `(ORB & DDRB) | ~DDRB`, so a DDRB change updates ROM and extended-memory selection immediately.
 
 ## Issues
-- Broader real-content raster verification (chained DLIs, PMG priority ladders, wide-playfield artifacts) is still incomplete.
-- The AHRM 4.8 missed-NMI case (an IRQ acknowledged at exactly cycle 4 swallowing the cycle-8 NMI) is not modeled.
-- Blanked extended text rows (modes 2/3 rows 8-9 for non-descender characters) skip the character-data bus fetch instead of fetching and discarding, so their DMA steal timing is approximated.
+- Broader real-content raster verification (chained DLIs, PMG priority ladders, and wide-playfield artifacts) remains a post-AHRM-06 sweep.
+- The AHRM 4.8 missed-NMI case, blank extended-row character-data DMA, and
+  atomic VSCROL deadline sampling are covered by the current JS/native probes.
 - The interleaved PMG path still reconstructs the hidden part of a scanline from current register state at the first visible span, rather than replaying every earlier same-line write cycle by cycle.
 
 ## Todo

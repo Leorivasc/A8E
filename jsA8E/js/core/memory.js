@@ -1975,6 +1975,15 @@
                 initialized: !!io.chbaseTiming.initialized,
               }
             : null,
+          vscrolTiming: io.vscrolTiming
+            ? {
+                rawValue: io.vscrolTiming.rawValue | 0,
+                activeValue: io.vscrolTiming.activeValue | 0,
+                pendingValue: io.vscrolTiming.pendingValue | 0,
+                pendingClock: io.vscrolTiming.pendingClock | 0,
+                initialized: !!io.vscrolTiming.initialized,
+              }
+            : null,
           drawLine: io.drawLine
             ? {
                 displayMemoryAddress: io.drawLine.displayMemoryAddress | 0,
@@ -2083,6 +2092,13 @@
           io.chbaseTiming.pendingValue = state.chbaseTiming.pendingValue | 0;
           io.chbaseTiming.pendingClock = state.chbaseTiming.pendingClock | 0;
           io.chbaseTiming.initialized = !!state.chbaseTiming.initialized;
+        }
+        if (state.vscrolTiming && typeof state.vscrolTiming === "object") {
+          io.vscrolTiming.rawValue = state.vscrolTiming.rawValue | 0;
+          io.vscrolTiming.activeValue = state.vscrolTiming.activeValue | 0;
+          io.vscrolTiming.pendingValue = state.vscrolTiming.pendingValue | 0;
+          io.vscrolTiming.pendingClock = state.vscrolTiming.pendingClock | 0;
+          io.vscrolTiming.initialized = !!state.vscrolTiming.initialized;
         }
         if (state.drawLine && typeof state.drawLine === "object") {
           io.drawLine.displayMemoryAddress = state.drawLine.displayMemoryAddress | 0;

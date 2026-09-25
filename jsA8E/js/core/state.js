@@ -97,6 +97,13 @@
           pendingClock: -1,
           initialized: false,
         },
+        vscrolTiming: {
+          rawValue: 0,
+          activeValue: 0,
+          pendingValue: 0,
+          pendingClock: -1,
+          initialized: false,
+        },
         drawLine: {
           displayMemoryAddress: 0,
           bytesPerLine: 0,
