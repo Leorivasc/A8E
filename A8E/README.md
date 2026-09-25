@@ -70,8 +70,8 @@ A8E -320C game.atr
 
 The main `$4000-$7FFF` RAM window is preserved while the CPU window is
 switched. RAMBO and COMPY profiles use the AHRM bank-bit layouts and shared or
-separate ANTIC windows. The supported profiles are `-128K`, `-192R`, `-320R`,
-`-320C`, `-576R`, `-576C`, and `-1088R`. `-U1MB` provides the UCTL-controlled
+separate ANTIC windows. The supported profiles are `-128K`, `-192R`, `-256R`,
+`-320R`, `-320C`, `-576R`, `-576C`, and `-1088R`. `-U1MB` provides the UCTL-controlled
 64K, 320K, 576K, and 1088K-compatible modes plus the core U1MB register
 surface; BIOS/flash, RTC, and PBI device images are not bundled with A8E yet.
 
@@ -87,6 +87,8 @@ A8E [options] [disk.atr|program.xex]
 * `-o` / `-O` / `--option-on-start`: Explicitly simulate holding OPTION during the OS boot check to disable BASIC. The compatibility behavior is disabled by default.
 * `-n` / `-N`: Start an NTSC machine. PAL is the default. NTSC uses 262 scanlines, its native CPU clock, `$D014 = $0F`, a separate NTSC palette, and the NTSC pixel aspect ratio.
 * `-128K`: Enable the 128K 130XE memory expansion.
+* `-256R`: Enable the 256K RAMBO memory expansion. Banks 0-3 alias the
+  motherboard window; banks 4-15 are independent expanded RAM.
 * `-192R`, `-320R`, `-320C`, `-576R`, `-576C`, `-1088R`: Select the matching
   AHRM RAMBO or COMPY memory map.
 * `-U1MB`: Select the Ultimate1MB memory model and its UCTL-controlled bank

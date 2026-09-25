@@ -5577,6 +5577,7 @@ void AtariIoOpenWithMemory(
 		switch(eMemoryExpansion)
 		{
 		case ATARI_MEMORY_RAMBO_192K: lExtendedBytes = 0x20000u; break;
+		case ATARI_MEMORY_RAMBO_256K: lExtendedBytes = 0x40000u; break;
 		case ATARI_MEMORY_RAMBO_320K:
 		case ATARI_MEMORY_COMPY_320K: lExtendedBytes = 0x40000u; break;
 		case ATARI_MEMORY_RAMBO_576K:

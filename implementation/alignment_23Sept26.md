@@ -263,6 +263,8 @@ Status: **implemented and validated on 2026-09-24**.
 
 ### AHRM-04: Make the supported memory-expansion matrix explicit
 
+Status: **implemented in native and JS; awaiting real-content validation**
+
 Priority: **P1**
 
 Difficulty: **medium**
@@ -297,13 +299,16 @@ Steps:
 
 1. Add the `rambo-256k` profile to native and JS with banking bits 2, 3, 5,
    and 6, a shared CPU/ANTIC window, and the AHRM main-memory alias for banks
-   0-3 (`$8x`).
+   0-3 (`$8x`). **Implemented.**
 2. Implement the alias in both window directions so reads and writes through
    the aliased extended banks remain equivalent to motherboard RAM.
+   **Implemented.**
 3. Add the profile to both memory probes, including tests that distinguish
-   aliased banks 0-3 from independent banks 4-15.
+   aliased banks 0-3 from independent banks 4-15. The native probe performs
+   the explicit alias/independence check; the JS matrix verifies the profile,
+   selector count, and alias-bank metadata. **Implemented.**
 4. Update the UI label, native switch, JS normalization entries, and memory
-   documentation.
+   documentation. **Implemented.**
 5. If another AHRM profile is not supported, mark it explicitly as omitted in
    the UI and memory documentation rather than implying full AHRM matrix
    coverage.
@@ -521,6 +526,8 @@ Acceptance criteria:
 
 ### AHRM-09: Build a cross-core AHRM differential harness
 
+Status: **foundation implemented; expand incrementally with each AHRM item**
+
 Priority: **P3**, but useful before completing P1/P2 work.
 
 Difficulty: **medium**
@@ -543,12 +550,16 @@ Steps:
 
 1. Define a compact trace schema for CPU cycle, PC, beam position, register
    writes, IRQ/NMI state, PORTB effective value, bank/window state, DMA steals,
-   and SIO events.
+   and SIO events. The initial JSONL contract is now established for the
+   CPU-visible PIA/PORTB subset.
 2. Add deterministic synthetic machine programs for one hardware feature per
-   fixture.
-3. Export equivalent traces from A8E and jsA8E.
+   fixture. The first deterministic register-boundary sequence covers DDRB,
+   ORB, pull-ups, and control readback.
+3. Export equivalent traces from A8E and jsA8E. Both cores now validate the
+   same `implementation/traces/pia_portb_contract.jsonl` fixture.
 4. Compare traces at register and event boundaries, allowing only explicitly
-   documented host-rendering differences.
+   documented host-rendering differences. The native CTest probe and JS test
+   fail on the first mismatching JSONL event.
 5. Run the harness in CI for every AHRM-sensitive change.
 6. Keep tracing behind a development/test switch and remove probes that do not
    provide lasting emulation or regression value before merging production
@@ -558,7 +569,9 @@ Acceptance criteria:
 
 - A change to one core cannot silently alter the other core's documented
   behavior.
-- Every resolved alignment item has a reproducible regression trace.
+- The implemented PIA/PORTB contract has a reproducible regression trace;
+  each subsequent AHRM item must add its own fixture before being marked
+  complete.
 - Normal emulation has no measurable trace overhead when diagnostics are off.
 
 ## Recommended execution order
@@ -622,11 +635,11 @@ diagnostic tracing disabled.
 - `ahrm_machine_matrix.test.js` verifies PAL and NTSC timing constants and the
   `$D014` PAL/NTSC detection value.
 - The same fixture verifies the currently supported memory profiles and bank
-  counts: 64K, 130XE 128K, RAMBO 192K/320K/576K/1088K, COMPY 320K/576K, and
+  counts: 64K, 130XE 128K, RAMBO 192K/256K/320K/576K/1088K, COMPY 320K/576K, and
   the current partial U1MB memory map.
-- RAMBO 256K is intentionally not included as a passing profile yet; it is
-  the next AHRM-04 implementation target and will be added with explicit
-  alias checks for banks 0-3.
+- The RAMBO 256K fixture verifies its 16-bank selector and the native probe
+  distinguishes its banks 0-3 motherboard aliases from independent banks
+  4-15.
 
 ### AHRM-01 fixture and performance baseline
 

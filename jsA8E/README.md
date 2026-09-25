@@ -33,6 +33,7 @@ The Memory selector and automation API support the AHRM profiles below:
 | 64K | `none` |
 | 128K (130XE) | `130xe-128k` |
 | 192K (RAMBO) | `rambo-192k` |
+| 256K (RAMBO) | `rambo-256k` |
 | 320K (RAMBO) | `rambo-320k` |
 | 320K (COMPY) | `compy-320k` |
 | 576K (RAMBO) | `rambo-576k` |

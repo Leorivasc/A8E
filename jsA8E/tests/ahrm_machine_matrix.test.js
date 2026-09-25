@@ -54,6 +54,7 @@ async function testMemoryProfileMatrix() {
     ["none", false, 0],
     ["130xe-128k", true, 4],
     ["rambo-192k", true, 8],
+    ["rambo-256k", true, 16, 4],
     ["rambo-320k", true, 16],
     ["compy-320k", true, 16],
     ["rambo-576k", true, 32],
@@ -62,7 +63,7 @@ async function testMemoryProfileMatrix() {
     ["ultimate1mb", true, 64],
   ];
 
-  for (const [profile, enabled, bankCount] of expected) {
+  for (const [profile, enabled, bankCount, mainMemoryAliasBanks] of expected) {
     const runtime = await createHeadlessAutomation({
       roms: {
         os: path.join(romDir, "ATARIXL.ROM"),
@@ -78,6 +79,7 @@ async function testMemoryProfileMatrix() {
       assert.equal(state.memoryExpansion.profile, profile);
       assert.equal(state.memoryExpansion.enabled, enabled);
       assert.equal(state.memoryExpansion.bankCount, bankCount);
+      assert.equal(state.memoryExpansion.mainMemoryAliasBanks, mainMemoryAliasBanks || 0);
     } finally {
       await runtime.dispose();
     }

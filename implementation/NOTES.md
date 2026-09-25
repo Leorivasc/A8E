@@ -4,6 +4,35 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-25: `implementation/{memory_stress_test.asm,MEMORY_STRESS_TEST.XEX,
+  u1mb_memory_test.asm,U1MB_MEMORY_TEST.XEX}` and `implementation/memory_tests.md`:
+  updated the standalone memory diagnostics for AHRM RAMBO 256K. Detection now
+  distinguishes its motherboard aliases in banks 0-3 from independent banks
+  4-15; full-bank and stress signatures share the alias pattern, window checks
+  account for motherboard-backed bank 0, and ANTIC validation selects the
+  detected highest bank instead of assuming bank 63. Both sources were
+  reassembled with the project assembler.
+
+- 2026-09-25: `A8E/{AtariIo.h,AtariIo.c,Pia.c,A8E.c}`,
+  `A8E/tests/memory_expansion_probe.c`, `jsA8E/{index.html,js/core/{memory,
+  atari,app_proxy}.js,js/app/ui.js,emulator_worker.js,tests/ahrm_machine_matrix.test.js}`,
+  and the memory documentation: implemented the AHRM RAMBO 256K profile in
+  both cores. It uses the 320K RAMBO selector bits and shared CPU/ANTIC window,
+  while banks 0-3 alias the motherboard window and banks 4-15 retain
+  independent expanded storage. Native and JS profile matrices now expose 16
+  banks, and the native probe verifies alias versus independent-bank behavior.
+
+- 2026-09-25: `implementation/traces/pia_portb_contract.jsonl`,
+  `A8E/tests/differential_pia_trace_probe.c`,
+  `jsA8E/tests/differential_pia_trace.test.js`, and the native/JS test
+  manifests: added the first AHRM-09 cross-core contract fixture. Both cores
+  now compare their CPU-visible PIA/PORTB state at the same deterministic
+  register boundaries, including DDRB/ORB latches, effective PORTB value,
+  control readback, and PIA IRQ state. The fixture is test-only and does not
+  install tracing hooks or add work to normal emulation. More AHRM-sensitive
+  peripherals can add fixtures to the same JSONL contract as their alignment
+  work is completed.
+
 - 2026-09-24: `A8E/{Pia.c,Pia.h,AtariIo.c,AtariIo.h,Pokey.c}`,
   `A8E/tests/pia_control_probe.c`, and
   `jsA8E/js/core/{cpu,io,state,atari,memory,pokey_sio,antic}.js`: completed

@@ -26,6 +26,7 @@ typedef struct
 	u8 cBankMask;
 	u8 cBankCount;
 	u8 bSeparateAnticWindow;
+	u8 cMainMemoryAliasBankCount;
 } MemoryProfileTest_t;
 
 static void WritePortB(_6502_Context_t *pContext, u8 cValue)
@@ -178,7 +179,10 @@ static int TestMemoryProfile(const MemoryProfileTest_t *pTest)
 	for(u8 cBank = pTest->cBankCount; cBank-- > 0;)
 	{
 		WritePortB(pContext, PortBForBank(pTest->cBankMask, cBank));
-		REQUIRE(pContext->pMemory[0x4000] == (u8)(0x40 + cBank),
+		const u8 cExpected = cBank < pTest->cMainMemoryAliasBankCount
+			? (u8)(0x40 + pTest->cMainMemoryAliasBankCount - 1)
+			: (u8)(0x40 + cBank);
+		REQUIRE(pContext->pMemory[0x4000] == cExpected,
 				"bank %u was not retained (%02X)", cBank, pContext->pMemory[0x4000]);
 	}
 	WritePortB(pContext, PortBForBank(pTest->cBankMask, 0));
@@ -186,10 +190,13 @@ static int TestMemoryProfile(const MemoryProfileTest_t *pTest)
 	/* Closing the CPU window restores motherboard RAM. COMPY/130XE keep
 	 * ANTIC's independent bank view; shared profiles return motherboard RAM. */
 	WritePortB(pContext, 0x10);
-	REQUIRE(pContext->pMemory[0x4000] == 0xa5,
+	const u8 cExpectedMain = pTest->cMainMemoryAliasBankCount
+		? (u8)(0x40 + pTest->cMainMemoryAliasBankCount - 1)
+		: 0xa5;
+	REQUIRE(pContext->pMemory[0x4000] == cExpectedMain,
 			"motherboard RAM was not restored (%02X)", pContext->pMemory[0x4000]);
 	cValue = ReadAnticByte(pContext);
-	REQUIRE(cValue == (pTest->bSeparateAnticWindow ? 0x40 : 0xa5),
+	REQUIRE(cValue == (pTest->bSeparateAnticWindow ? 0x40 : cExpectedMain),
 			"ANTIC window returned %02X", cValue);
 
 	AtariIoClose(pContext);
@@ -235,14 +242,15 @@ int main(int argc, char *argv[])
 {
 	static const MemoryProfileTest_t aTests[] =
 	{
-		{ATARI_MEMORY_130XE_128K, 0x0c, 4, 1},
-		{ATARI_MEMORY_RAMBO_192K, 0x4c, 8, 0},
-		{ATARI_MEMORY_RAMBO_320K, 0x6c, 16, 0},
-		{ATARI_MEMORY_COMPY_320K, 0xcc, 16, 1},
-		{ATARI_MEMORY_RAMBO_576K, 0x6e, 32, 0},
-		{ATARI_MEMORY_COMPY_576K, 0xce, 32, 1},
-		{ATARI_MEMORY_RAMBO_1088K, 0xee, 64, 0},
-		{ATARI_MEMORY_ULTIMATE1MB, 0xee, 64, 0}
+		{ATARI_MEMORY_130XE_128K, 0x0c, 4, 1, 0},
+		{ATARI_MEMORY_RAMBO_192K, 0x4c, 8, 0, 0},
+		{ATARI_MEMORY_RAMBO_256K, 0x6c, 16, 0, 4},
+		{ATARI_MEMORY_RAMBO_320K, 0x6c, 16, 0, 0},
+		{ATARI_MEMORY_COMPY_320K, 0xcc, 16, 1, 0},
+		{ATARI_MEMORY_RAMBO_576K, 0x6e, 32, 0, 0},
+		{ATARI_MEMORY_COMPY_576K, 0xce, 32, 1, 0},
+		{ATARI_MEMORY_RAMBO_1088K, 0xee, 64, 0, 0},
+		{ATARI_MEMORY_ULTIMATE1MB, 0xee, 64, 0, 0}
 	};
 	unsigned int lIndex;
 	(void)argc;

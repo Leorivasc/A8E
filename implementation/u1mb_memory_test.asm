@@ -48,7 +48,7 @@ START:
 
 NEXT_BANK:
         JSR SELECT_BANK
-        LDA BANK
+        JSR MAKE_BANK_PATTERN
         CLC
         ADC #$55
         STA PATTERN
@@ -129,6 +129,9 @@ TRY_MODE:
         LDA #$00
         STA ERRORS
         STA BANK
+        LDA MODE
+        CMP #$06
+        BEQ DETECT_256
 PROBE_WRITE:
         JSR SELECT_BANK
         LDA BANK
@@ -158,7 +161,7 @@ PROBE_OK:
         BEQ MODE_FOUND
         INC MODE
         LDA MODE
-        CMP #$08
+        CMP #$09
         BNE TRY_MODE
 NO_MODE:
         LDA #$00
@@ -168,6 +171,49 @@ MODE_FOUND:
         LDA #$00
         STA BANK
         RTS
+
+; RAMBO 256K shares the 320K RAMBO selector bits, but banks 0-3 alias
+; motherboard RAM. Verify the alias group and an independent bank explicitly.
+DETECT_256:
+        LDA #$00
+        STA BANK
+        JSR SELECT_BANK
+        LDA #$A1
+        STA $4000
+        STA $7FFF
+        LDA #$01
+        STA BANK
+        JSR SELECT_BANK
+        LDA $4000
+        CMP #$A1
+        BEQ DETECT_256_BANK3
+        INC ERRORS
+DETECT_256_BANK3:
+        LDA #$03
+        STA BANK
+        JSR SELECT_BANK
+        LDA $7FFF
+        CMP #$A1
+        BEQ DETECT_256_BANK4
+        INC ERRORS
+DETECT_256_BANK4:
+        LDA #$04
+        STA BANK
+        JSR SELECT_BANK
+        LDA #$C3
+        STA $4000
+        LDA #$00
+        STA BANK
+        JSR SELECT_BANK
+        LDA $4000
+        CMP #$A1
+        BEQ DETECT_256_RESULT
+        INC ERRORS
+DETECT_256_RESULT:
+        LDA ERRORS
+        BEQ MODE_FOUND
+        INC MODE
+        JMP TRY_MODE
 
 SET_BANK_COUNT:
         LDA MODE
@@ -196,18 +242,24 @@ SET_COUNT_320C:
         RTS
 SET_COUNT_320R:
         CMP #$05
+        BNE SET_COUNT_256
+        LDA #$10
+        STA COUNT
+        RTS
+SET_COUNT_256:
+        CMP #$06
         BNE SET_COUNT_192
         LDA #$10
         STA COUNT
         RTS
 SET_COUNT_192:
-        CMP #$06
+        CMP #$07
         BNE SET_COUNT_128
         LDA #$08
         STA COUNT
         RTS
 SET_COUNT_128:
-        CMP #$07
+        CMP #$08
         BNE SET_COUNT_NONE
         LDA #$04
         STA COUNT
@@ -215,6 +267,23 @@ SET_COUNT_128:
 SET_COUNT_NONE:
         LDA #$00
         STA COUNT
+        RTS
+
+; Return the bank number used for signatures. RAMBO 256K banks 0-3 are
+; motherboard aliases, so they must share the bank-3 signature in tests that
+; write every selector and then read it back.
+MAKE_BANK_PATTERN:
+        LDA BANK
+        CMP #$04
+        BCS MAKE_BANK_PATTERN_DONE
+        LDA MODE
+        CMP #$06
+        BNE MAKE_BANK_PATTERN_BANK
+        LDA #$03
+        RTS
+MAKE_BANK_PATTERN_BANK:
+        LDA BANK
+MAKE_BANK_PATTERN_DONE:
         RTS
 
 ; Stage 2 checks bank retention and the CPU window transition.
@@ -248,7 +317,7 @@ STAGE2:
         STA BANK
 S2_WRITE:
         JSR SELECT_BANK
-        LDA BANK
+        JSR MAKE_BANK_PATTERN
         EOR #$A5
         STA PATTERN
         LDA PATTERN
@@ -262,7 +331,7 @@ S2_WRITE:
         DEC BANK
 S2_READ:
         JSR SELECT_BANK
-        LDA BANK
+        JSR MAKE_BANK_PATTERN
         EOR #$A5
         CMP $4000
         BEQ S2_READ_OK
@@ -275,6 +344,9 @@ S2_READ_OK:
 
         ; Verify that the hidden motherboard RAM survives a window toggle.
 S2_WINDOW:
+        LDA MODE
+        CMP #$06
+        BEQ S2_WINDOW_ALIAS
         JSR SELECT_BANK
         LDA $4000
         STA PATTERN
@@ -302,6 +374,33 @@ S2_WINDOW_BASE_2:
         BEQ S2_DONE
         INC S2ERRORS
 S2_DONE:
+        RTS
+
+; In RAMBO 256K bank 0 is the motherboard alias. Disabling and re-enabling
+; the shared window must therefore preserve the value written to motherboard
+; RAM, rather than restore an independent expanded-bank signature.
+S2_WINDOW_ALIAS:
+        JSR SELECT_BANK
+        LDA PORTB
+        STA TEMP
+        ORA #$10
+        STA PORTB
+        LDA #$A5
+        STA $4000
+        LDA #$5A
+        STA $7FFF
+        LDA TEMP
+        AND #$EF
+        STA PORTB
+        LDA $4000
+        CMP #$A5
+        BEQ S2_WINDOW_ALIAS_2
+        INC S2ERRORS
+S2_WINDOW_ALIAS_2:
+        LDA $7FFF
+        CMP #$5A
+        BEQ S2_DONE
+        INC S2ERRORS
         RTS
 
 ; Verify the AHRM 1088K RAMBO PORTB map independently. Bank bits are
@@ -399,7 +498,7 @@ STAGE3:
         BEQ S3_SEPARATE
         CMP #$04
         BEQ S3_SEPARATE
-        CMP #$07
+        CMP #$08
         BEQ S3_SEPARATE
 
         ; RAMBO and 1088K use a shared CPU+ANTIC window: bit 4 = 0.
@@ -429,8 +528,9 @@ S3_RESTORE:
         RTS
 
 ; Stage 4 presents short visual ANTIC DMA tests using the first and last
-; expanded banks. Testing both endpoints exercises the low and high 1088K
-; bank bits instead of only proving that bank zero can be displayed.
+; expanded banks. Testing both endpoints exercises the low and high bank
+; selectors; for RAMBO 256K the high endpoint is bank 15, while bank 0 is the
+; motherboard alias.
 ; The CPU cannot read back ANTIC DMA data, so this is intentionally reported
 ; after the user confirms each displayed pattern with START or SELECT.
 STAGE4:
@@ -456,7 +556,7 @@ STAGE4:
         BEQ S4_ANTIC_ONLY
         CMP #$04
         BEQ S4_ANTIC_ONLY
-        CMP #$07
+        CMP #$08
         BNE S4_SET_DISPLAY
 S4_ANTIC_ONLY:
         LDA TEMP
@@ -499,14 +599,15 @@ S4_FAIL_KEY:
         STA S4ERRORS
 
 S4_START_HIGH_BANK:
-        ; Repeat the visual check in bank 63, the endpoint that exercises
-        ; PORTB bits 5-7 in the 1088K map.
+        ; Repeat the visual check in the last detected bank.
 S4_RELEASE_KEY:
         LDA $D01F
         AND #$03
         CMP #$03
         BNE S4_RELEASE_KEY
-        LDA #$3F
+        LDA COUNT
+        SEC
+        SBC #$01
         STA BANK
         JSR S4_PREPARE_BANK
         LDA PORTB
@@ -516,7 +617,7 @@ S4_RELEASE_KEY:
         BEQ S4_HIGH_ANTIC_ONLY
         CMP #$04
         BEQ S4_HIGH_ANTIC_ONLY
-        CMP #$07
+        CMP #$08
         BNE S4_HIGH_SET_DISPLAY
 S4_HIGH_ANTIC_ONLY:
         LDA TEMP
@@ -611,7 +712,7 @@ SELECT_BANK:
 
 SELECT_TABLE:
         .WORD SELECT_1088-1, SELECT_576-1, SELECT_576_RAMBO-1, SELECT_320_COMPY-1
-        .WORD SELECT_320-1, SELECT_192-1, SELECT_128-1
+        .WORD SELECT_320-1, SELECT_256-1, SELECT_192-1, SELECT_128-1
 
 SELECT_1088:
         LDA BANK
@@ -640,7 +741,7 @@ SHOW_MODE:
         RTS
 SHOW_TABLE:
         .WORD SHOW_1088-1, SHOW_576-1, SHOW_576_RAMBO-1, SHOW_320_COMPY-1
-        .WORD SHOW_320-1, SHOW_192-1, SHOW_128-1
+        .WORD SHOW_320-1, SHOW_256-1, SHOW_192-1, SHOW_128-1
 SHOW_1088:
         LDA #$11
         STA SCREEN+20
@@ -689,6 +790,16 @@ SHOW_320:
         LDA #$12
         STA SCREEN+21
         LDA #$10
+        STA SCREEN+22
+        LDA #$32
+        STA SCREEN+23
+        RTS
+SHOW_256:
+        LDA #$12
+        STA SCREEN+20
+        LDA #$15
+        STA SCREEN+21
+        LDA #$16
         STA SCREEN+22
         LDA #$32
         STA SCREEN+23
@@ -787,6 +898,22 @@ SELECT_576:
         STA PORTB
         RTS
 SELECT_320:
+        LDA BANK
+        AND #$03
+        ASL A
+        ASL A
+        STA TEMP
+        LDA BANK
+        AND #$0C
+        ASL A
+        ASL A
+        ASL A
+        ORA TEMP
+        ORA #$81
+        ORA BASE_PORTB
+        STA PORTB
+        RTS
+SELECT_256:
         LDA BANK
         AND #$03
         ASL A

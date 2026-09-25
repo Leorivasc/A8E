@@ -108,6 +108,7 @@
     if (text === "" || text === "none" || text === "64k" || text === "64kb" || text === "no-expansion") return "none";
     if (text === "130xe" || text === "128k" || text === "128kb" || text === "130xe-128k") return "130xe-128k";
     if (text === "192k" || text === "192kb" || text === "rambo-192k") return "rambo-192k";
+    if (text === "256k" || text === "256kb" || text === "rambo-256k") return "rambo-256k";
     if (text === "320k" || text === "320kb" || text === "rambo-320k") return "rambo-320k";
     if (text === "compy-320k" || text === "320k-compy") return "compy-320k";
     if (text === "576k" || text === "576kb" || text === "rambo-576k") return "rambo-576k";

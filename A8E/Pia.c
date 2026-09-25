@@ -245,6 +245,7 @@ static void Pia_ApplyPortBValue(_6502_Context_t *pContext, u8 cEffectivePortB)
 		switch(eProfile)
 		{
 		case ATARI_MEMORY_RAMBO_192K: cBankMask = 0x4c; cBankBits = 3; bSharedWindow = 1; break;
+		case ATARI_MEMORY_RAMBO_256K: cBankMask = 0x6c; cBankBits = 4; bSharedWindow = 1; break;
 		case ATARI_MEMORY_RAMBO_320K: cBankMask = 0x6c; cBankBits = 4; bSharedWindow = 1; break;
 		case ATARI_MEMORY_COMPY_320K: cBankMask = 0xcc; cBankBits = 4; break;
 		case ATARI_MEMORY_RAMBO_576K: cBankMask = 0x6e; cBankBits = 5; bSharedWindow = 1; break;
@@ -264,7 +265,12 @@ static void Pia_ApplyPortBValue(_6502_Context_t *pContext, u8 cEffectivePortB)
 		if(!bOldCpu && bNewCpu)
 			memcpy(pIoData->pMainWindowShadow, &RAM[0x4000], 0x4000);
 		if(bOldCpu)
-			memcpy(&pIoData->pExtendedMemory[cOldBank * 0x4000u], &RAM[0x4000], 0x4000);
+		{
+			if(eProfile == ATARI_MEMORY_RAMBO_256K && cOldBank < 4)
+				memcpy(pIoData->pMainWindowShadow, &RAM[0x4000], 0x4000);
+			else
+				memcpy(&pIoData->pExtendedMemory[cOldBank * 0x4000u], &RAM[0x4000], 0x4000);
+		}
 		pIoData->cExtendedBank = cNewBank;
 		pIoData->bCpuExtendedWindow = bNewCpu;
 		pIoData->bAnticExtendedWindow = bU1mbSharedWindow || bSharedWindow
@@ -276,7 +282,12 @@ static void Pia_ApplyPortBValue(_6502_Context_t *pContext, u8 cEffectivePortB)
 		if(bOldCpu && !bNewCpu)
 			memcpy(&RAM[0x4000], pIoData->pMainWindowShadow, 0x4000);
 		else if(bNewCpu)
-			memcpy(&RAM[0x4000], &pIoData->pExtendedMemory[pIoData->cExtendedBank * 0x4000u], 0x4000);
+		{
+			if(eProfile == ATARI_MEMORY_RAMBO_256K && pIoData->cExtendedBank < 4)
+				memcpy(&RAM[0x4000], pIoData->pMainWindowShadow, 0x4000);
+			else
+				memcpy(&RAM[0x4000], &pIoData->pExtendedMemory[pIoData->cExtendedBank * 0x4000u], 0x4000);
+		}
 	}
 	else
 		cNewPortB = cEffectivePortB;

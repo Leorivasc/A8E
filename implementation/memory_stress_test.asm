@@ -1,6 +1,6 @@
 ; Extended-memory bank-switch stress test for 130XE, RAMBO, COMPY, and U1MB.
 ; This is intentionally separate from U1MB_MEMORY_TEST.XEX: it performs
-; repeated bank changes and is aimed at software such as Mikie.
+        ; repeated bank changes and is aimed at software such as Mikie.
 
 .ORG $2000
 
@@ -80,6 +80,17 @@ STRESS_REVERSE:
 STRESS_BASE_CHECK:
         LDA #$FF
         STA PORTB
+        LDA MODE
+        CMP #$06
+        BNE BASE_CHECK_A5
+        LDA #$03
+        EOR ITER
+        EOR #$5A
+        CMP $4000
+        BEQ BASE_CHECK_2
+        INC ERRORS
+        JMP BASE_CHECK_2
+BASE_CHECK_A5:
         LDA $4000
         CMP #$A5
         BEQ BASE_CHECK_2
@@ -104,7 +115,7 @@ NEXT_STRESS_PASS:
         JMP DONE
 
 ; Profile-specific PORTB control probe. For 1088K RAMBO, bit 7 is a bank bit;
-; for the smaller RAMBO profiles below, it selects the Self-Test overlay.
+        ; for the smaller RAMBO profiles below, it selects the Self-Test overlay.
 TEST_RAMBO_SELFTEST:
         LDA MODE
         CMP #$01
@@ -114,6 +125,8 @@ TEST_RAMBO_SELFTEST:
         CMP #$05
         BEQ CONTROL_TEST
         CMP #$06
+        BEQ CONTROL_TEST
+        CMP #$07
         BEQ CONTROL_TEST
         LDA #$02
         STA CTRL_STATUS
@@ -236,6 +249,9 @@ TRY_MODE:
         LDA #$00
         STA ERRORS
         STA BANK
+        LDA MODE
+        CMP #$06
+        BEQ DETECT_256
 DETECT_WRITE:
         JSR SELECT_BANK
         LDA BANK
@@ -265,7 +281,7 @@ DETECT_NEXT:
         BEQ MODE_FOUND
         INC MODE
         LDA MODE
-        CMP #$08
+        CMP #$09
         BNE TRY_MODE
 NO_MODE:
         LDA #$00
@@ -277,6 +293,52 @@ MODE_FOUND:
         LDA #$00
         STA BANK
         RTS
+
+; RAMBO 256K uses the 320K RAMBO selector bits, but banks 0-3 are aliases
+; of motherboard RAM. Banks 4-15 remain independent, so a unique signature
+; per bank would incorrectly reject this valid profile.
+DETECT_256:
+        LDA #$00
+        STA BANK
+        JSR SELECT_BANK
+        LDA #$A1
+        STA $4000
+        STA $7FFF
+
+        LDA #$01
+        STA BANK
+        JSR SELECT_BANK
+        LDA $4000
+        CMP #$A1
+        BEQ DETECT_256_BANK3
+        INC ERRORS
+DETECT_256_BANK3:
+        LDA #$03
+        STA BANK
+        JSR SELECT_BANK
+        LDA $7FFF
+        CMP #$A1
+        BEQ DETECT_256_BANK4
+        INC ERRORS
+DETECT_256_BANK4:
+        LDA #$04
+        STA BANK
+        JSR SELECT_BANK
+        LDA #$C3
+        STA $4000
+
+        LDA #$00
+        STA BANK
+        JSR SELECT_BANK
+        LDA $4000
+        CMP #$A1
+        BEQ DETECT_256_RESULT
+        INC ERRORS
+DETECT_256_RESULT:
+        LDA ERRORS
+        BEQ MODE_FOUND
+        INC MODE
+        JMP TRY_MODE
 
 SET_BANK_COUNT:
         LDA MODE
@@ -305,18 +367,24 @@ COUNT_320C:
         RTS
 COUNT_320R:
         CMP #$05
+        BNE COUNT_256
+        LDA #$10
+        STA COUNT
+        RTS
+COUNT_256:
+        CMP #$06
         BNE COUNT_192
         LDA #$10
         STA COUNT
         RTS
 COUNT_192:
-        CMP #$06
+        CMP #$07
         BNE COUNT_128
         LDA #$08
         STA COUNT
         RTS
 COUNT_128:
-        CMP #$07
+        CMP #$08
         BNE COUNT_NONE
         LDA #$04
         STA COUNT
@@ -340,7 +408,7 @@ SELECT_BANK:
         RTS
 SELECT_TABLE:
         .WORD SELECT_1088-1,SELECT_576C-1,SELECT_576R-1,SELECT_320C-1
-        .WORD SELECT_320R-1,SELECT_192-1,SELECT_128-1
+        .WORD SELECT_320R-1,SELECT_256-1,SELECT_192-1,SELECT_128-1
 
 SELECT_1088:
         LDA BANK
@@ -417,6 +485,22 @@ SELECT_320R:
         ORA BASE_PORTB
         STA PORTB
         RTS
+SELECT_256:
+        LDA BANK
+        AND #$03
+        ASL A
+        ASL A
+        STA TEMP
+        LDA BANK
+        AND #$0C
+        ASL A
+        ASL A
+        ASL A
+        ORA TEMP
+        ORA #$81
+        ORA BASE_PORTB
+        STA PORTB
+        RTS
 SELECT_192:
         LDA BANK
         AND #$03
@@ -446,6 +530,17 @@ SELECT_128:
 
 MAKE_PATTERN:
         LDA BANK
+        CMP #$04
+        BCS MAKE_PATTERN_NORMAL
+        LDA MODE
+        CMP #$06
+        BNE MAKE_PATTERN_BANK
+        LDA #$03
+        JMP MAKE_PATTERN_APPLY
+MAKE_PATTERN_NORMAL:
+MAKE_PATTERN_BANK:
+        LDA BANK
+MAKE_PATTERN_APPLY:
         EOR ITER
         EOR #$5A
         STA PATTERN
@@ -531,7 +626,7 @@ SHOW_MODE:
         RTS
 SHOW_TABLE:
         .WORD SHOW_1088-1,SHOW_576C-1,SHOW_576R-1,SHOW_320C-1
-        .WORD SHOW_320R-1,SHOW_192-1,SHOW_128-1
+        .WORD SHOW_320R-1,SHOW_256-1,SHOW_192-1,SHOW_128-1
 SHOW_1088:
         LDX #$00
         JMP SHOW_1088_TEXT
@@ -547,6 +642,9 @@ SHOW_320C:
 SHOW_320R:
         LDX #$00
         JMP SHOW_320R_TEXT
+SHOW_256:
+        LDX #$00
+        JMP SHOW_256_TEXT
 SHOW_192:
         LDX #$00
         JMP SHOW_192_TEXT
@@ -591,6 +689,16 @@ SHOW_320C_TEXT:
         RTS
 SHOW_320R_TEXT:
         JSR SHOW_320C_TEXT
+        LDA #$32
+        STA SCREEN+23
+        RTS
+SHOW_256_TEXT:
+        LDA #$12
+        STA SCREEN+20
+        LDA #$15
+        STA SCREEN+21
+        LDA #$16
+        STA SCREEN+22
         LDA #$32
         STA SCREEN+23
         RTS

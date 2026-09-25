@@ -106,6 +106,19 @@
       forceBasicOffWhenExpanded: false,
       forceSelfTestOffWhenExpanded: false,
     },
+    "rambo-256k": {
+      key: "rambo-256k",
+      label: "256K (RAMBO)",
+      enabled: true,
+      extendedBytes: 0x40000,
+      bankBits: [2, 3, 5, 6],
+      cpuEnableBit: 4,
+      anticEnableBit: 4,
+      sharedWindow: true,
+      mainMemoryAliasBanks: 4,
+      forceBasicOffWhenExpanded: false,
+      forceSelfTestOffWhenExpanded: false,
+    },
     "rambo-320k": {
       key: "rambo-320k",
       label: "320K (RAMBO)",
@@ -205,6 +218,9 @@
     if (text === "192k" || text === "192kb" || text === "rambo-192k") {
       return "rambo-192k";
     }
+    if (text === "256k" || text === "256kb" || text === "rambo-256k") {
+      return "rambo-256k";
+    }
     if (text === "320k" || text === "320kb" || text === "rambo-320k") {
       return "rambo-320k";
     }
@@ -243,6 +259,7 @@
       cpuEnableBit: spec.cpuEnableBit | 0,
       anticEnableBit: spec.anticEnableBit | 0,
       sharedWindow: !!spec.sharedWindow,
+      mainMemoryAliasBanks: spec.mainMemoryAliasBanks | 0,
       forceBasicOffWhenExpanded: !!spec.forceBasicOffWhenExpanded,
       forceSelfTestOffWhenExpanded: !!spec.forceSelfTestOffWhenExpanded,
       ultimate1mb: !!spec.ultimate1mb,
@@ -275,6 +292,7 @@
       cpuEnableBit: source.cpuEnableBit | 0,
       anticEnableBit: source.anticEnableBit | 0,
       sharedWindow: !!source.sharedWindow,
+      mainMemoryAliasBanks: source.mainMemoryAliasBanks | 0,
       forceBasicOffWhenExpanded: !!source.forceBasicOffWhenExpanded,
       forceSelfTestOffWhenExpanded: !!source.forceSelfTestOffWhenExpanded,
       ultimate1mb: !!source.ultimate1mb,
@@ -1199,8 +1217,18 @@
         return bank << 14;
       }
 
+      function isMainMemoryAliasBank(bankIndex, state) {
+        const mem = state || getMemoryExpansionState();
+        return (mem.mainMemoryAliasBanks | 0) > 0 &&
+          (bankIndex | 0) < (mem.mainMemoryAliasBanks | 0);
+      }
+
       function copyWindowFromStorage(ctx, state, bankIndex) {
         const mem = state || getMemoryExpansionState();
+        if (isMainMemoryAliasBank(bankIndex, mem)) {
+          ctx.ram.set(mem.mainWindowShadow.subarray(0, 0x4000), 0x4000);
+          return true;
+        }
         const offset = getMemoryStorageOffset(bankIndex, mem);
         if (offset < 0) return false;
         ctx.ram.set(mem.bankStorage.subarray(offset, offset + 0x4000), 0x4000);
@@ -1209,6 +1237,10 @@
 
       function storeWindowToStorage(ctx, state, bankIndex) {
         const mem = state || getMemoryExpansionState();
+        if (isMainMemoryAliasBank(bankIndex, mem)) {
+          mem.mainWindowShadow.set(ctx.ram.subarray(0x4000, 0x8000), 0);
+          return true;
+        }
         const offset = getMemoryStorageOffset(bankIndex, mem);
         if (offset < 0) return false;
         mem.bankStorage.set(ctx.ram.subarray(0x4000, 0x8000), offset);
@@ -1855,6 +1887,7 @@
             label: mem.label,
             enabled: !!mem.enabled,
             bankCount: mem.bankCount | 0,
+            mainMemoryAliasBanks: mem.mainMemoryAliasBanks | 0,
             currentBank: mem.currentBank | 0,
             cpuWindowEnabled: !!mem.cpuWindowEnabled,
             anticWindowEnabled: !!mem.anticWindowEnabled,

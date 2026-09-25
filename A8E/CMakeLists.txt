@@ -209,4 +209,18 @@ if(BUILD_TESTING)
 
   add_test(NAME pia_control_probe COMMAND pia_control_probe)
   set_tests_properties(pia_control_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+  add_executable(differential_pia_trace_probe
+    tests/differential_pia_trace_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(differential_pia_trace_probe PRIVATE
+    A8E_ENABLE_TEST_PROBES=1
+    A8E_TRACE_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../implementation/traces/pia_portb_contract.jsonl"
+  )
+  a8e_configure_target(differential_pia_trace_probe)
+
+  add_test(NAME differential_pia_trace_probe COMMAND differential_pia_trace_probe)
+  set_tests_properties(differential_pia_trace_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 endif()
