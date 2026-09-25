@@ -609,9 +609,8 @@
           return ram[addr] & 0xff;
 
         case IO_CONSOL:
-          // Shim from the C/SDL version (CONSOL_HACK):
-          // OS ROM reads CONSOL at $C49A (PC will be $C49D during the read) to
-          // decide whether to disable BASIC. Optionally force OPTION held there.
+          // Explicit Option-on-Start compatibility behavior. Normal CONSOL
+          // reads depend only on the emulated input register.
           if (io.optionOnStart && (ctx.cpu.pc & 0xffff) === 0xc49d) return 0x03;
           return ram[addr] & 0xff;
 

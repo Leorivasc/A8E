@@ -71,6 +71,11 @@ int main(int argc, char *argv[])
 	{
 		if(argv[lIndex][0] == '-')
 		{
+			if(strcmp(argv[lIndex], "--option-on-start") == 0)
+			{
+				lMode |= ATARI_MODE_OPTION_ON_START;
+				continue;
+			}
 			if(strcmp(argv[lIndex], "-128K") == 0 || strcmp(argv[lIndex], "-128k") == 0)
 			{
 				eMemoryExpansion = ATARI_MEMORY_130XE_128K;
@@ -87,7 +92,15 @@ int main(int argc, char *argv[])
 			{
 			case 'b':
 			case 'B':
-				lMode = 1;
+				/* Retained as a compatibility alias: BASIC is now the normal
+				 * hardware state, so this option needs no runtime flag. */
+				lMode &= ~ATARI_MODE_OPTION_ON_START;
+
+				break;
+
+			case 'o':
+			case 'O':
+				lMode |= ATARI_MODE_OPTION_ON_START;
 
 				break;
 

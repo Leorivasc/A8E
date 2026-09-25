@@ -75,7 +75,7 @@ typedef enum
 
 #define CYCLE_NEVER 0xffffffffffffffffLL
 
-#define CONSOL_HACK
+#define ATARI_MODE_OPTION_ON_START 0x04
 
 #define SERIAL_OUTPUT_DATA_NEEDED_CYCLES 900
 #define SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES 1500
@@ -179,6 +179,8 @@ typedef struct
 	u8 bModeLineExitDli;
 	u8 bModeLineEndsThisLine;
 	u8 cValuePortA;
+	u8 bOptionOnStart;
+	u8 cConsolReadValue;
 	u8 cOutputPortB;
 	u8 cDirectionPortB;
 	AtariMemoryExpansion_t eMemoryExpansion;

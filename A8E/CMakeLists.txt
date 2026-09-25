@@ -187,4 +187,15 @@ if(BUILD_TESTING)
 
   add_test(NAME memory_expansion_probe COMMAND memory_expansion_probe)
   set_tests_properties(memory_expansion_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+  add_executable(gtia_consol_probe
+    tests/gtia_consol_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(gtia_consol_probe PRIVATE A8E_ENABLE_TEST_PROBES=1)
+  a8e_configure_target(gtia_consol_probe)
+
+  add_test(NAME gtia_consol_probe COMMAND gtia_consol_probe)
+  set_tests_properties(gtia_consol_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 endif()

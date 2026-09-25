@@ -146,7 +146,8 @@ silently changing hardware reads based on the program counter.
 
 Problem:
 
-- `A8E/Gtia.c` returns `m_cConsolHack` for a read of `$D01F` at PC `$C49D`.
+- `A8E/Gtia.c` currently contains a PC-dependent `m_cConsolHack` path for
+  a read of `$D01F` at PC `$C49D`.
 - `A8E/AtariIo.h` enables this behavior unconditionally at compile time.
 - This is not a GTIA/AHRM rule and can affect any software that happens to
   perform the same read at that address.
@@ -177,6 +178,18 @@ Acceptance criteria:
 - A normal CONSOL read depends only on console input and GTIA state.
 - No emulator behavior depends on a hard-coded PC address unless an explicit
   compatibility option is selected.
+
+Status: **implemented and validated on 2026-09-24**.
+
+- Removed the global `CONSOL_HACK` macro and `m_cConsolHack` state.
+- Native A8E now stores `Option-on-Start` in the machine's `IoData_t`.
+  The new `-o`/ `-O`/ `--option-on-start` option is opt-in; `-b`/ `-B` remains a
+  compatibility alias for the normal BASIC-enabled state.
+- jsA8E keeps the same explicit `optionOnStart` contract and no longer
+  describes it as a C-side hack; its UI toggle is now off by default.
+- Native `gtia_consol_probe` and JS
+  `consol_startup_option.test.js` cover default reads, the explicit startup
+  override, and reads at nearby PC values.
 
 ### AHRM-03: Implement PIA control-line state and IRQ behavior
 
@@ -536,7 +549,7 @@ Acceptance criteria:
 ## Recommended execution order
 
 1. AHRM-01: native DDRB/ORB correction.
-2. AHRM-02: remove or gate `CONSOL_HACK`.
+2. AHRM-02: remove or gate `CONSOL_HACK` (completed).
 3. AHRM-09: add the smallest cross-core trace fixtures needed by the first two
    items.
 4. AHRM-03: PIA control-line and IRQ model.
@@ -613,6 +626,15 @@ diagnostic tracing disabled.
 - Native CTest completed all five probes in 2.69 seconds with diagnostics
   disabled. Future trace instrumentation must be compared against this mode
   and must not remain active in normal emulation.
+
+### AHRM-02 validation
+
+- Native CTest now includes `gtia_consol_probe`, for six passing probes in
+  total with `SDL_AUDIODRIVER=dummy`.
+- The JS automation suite includes
+  `consol_startup_option.test.js`; it verifies that the default
+  `$D01F` read is `$07`, while the explicit option returns `$03` only
+  at the documented OS startup sample.
 
 ### Tooling note
 

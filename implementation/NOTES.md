@@ -4,6 +4,17 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-24: `A8E/{A8E.c,AtariIo.c,AtariIo.h,Gtia.c}`,
+  `A8E/tests/gtia_consol_probe.c`, and
+  `jsA8E/{js/core/io.js,tests/consol_startup_option.test.js}`: completed
+  AHRM-02. Removed the unconditional `CONSOL_HACK` global/compile path and
+  made Option-on-Start an explicit per-machine compatibility option. Native
+  A8E exposes it through `-o`/ `-O`/ `--option-on-start` with BASIC-enabled behavior as the
+  default; `-b`/ `-B` remains a compatibility alias. Normal `$D01F`
+  reads now depend only on emulated console state, and both cores validate
+  the startup override at the OS sample address. The browser UI toggle is
+  also off by default.
+
 - 2026-09-24: `A8E/{AtariIo.c,AtariIo.h,Pia.c}` and
   `A8E/tests/memory_expansion_probe.c`: completed AHRM-01 native PIA
   DDRB/ORB alignment. A8E now retains independent PORTB direction/output

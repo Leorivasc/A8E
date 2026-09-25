@@ -109,7 +109,7 @@ Additional browser-only triggers:
 - On-screen joystick panel toggle
 - On-screen Atari keyboard toggle
 - Keyboard map toggle (translated symbol mapping for local keyboard layouts vs. original Atari layout)
-- Option-on-Start toggle (hold OPTION during boot, BASIC-off style boot behavior)
+- Option-on-Start toggle (off by default; hold OPTION during boot for BASIC-off style boot behavior)
 
 On smaller/mobile layouts, the virtual keyboard starts hidden by default.
 

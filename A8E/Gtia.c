@@ -27,8 +27,6 @@
 *
 ********************************************************************/
 
-u8 m_cConsolHack = 0x03;
-
 /********************************************************************
 *
 *
@@ -533,12 +531,16 @@ u8 *Gtia_HITCLR(_6502_Context_t *pContext, u8 *pValue)
 /* $D01F CONSOL */
 u8 *Gtia_CONSOL(_6502_Context_t *pContext, u8 *pValue)
 {
-#ifdef CONSOL_HACK
-	if(pValue == NULL && pContext->tCpu.pc == 0xc49d)
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+
+	/* The OS samples CONSOL at this address during its BASIC/OPTION startup
+	 * check. Keep the compatibility behavior behind explicit machine state;
+	 * normal CONSOL reads always use the emulated input register. */
+	if(pValue == NULL && pIoData->bOptionOnStart && pContext->tCpu.pc == 0xc49d)
 	{
-		return &m_cConsolHack;
+		pIoData->cConsolReadValue = 0x03;
+		return &pIoData->cConsolReadValue;
 	}
-#endif
 	if(pValue)
 	{
 		/* Only bit 3 (speaker) is writable; key bits are read-only. */

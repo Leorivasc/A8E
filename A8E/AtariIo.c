@@ -1001,8 +1001,6 @@ typedef struct
 *
 ********************************************************************/
 
-extern u8 m_cConsolHack;
-
 static void AtariIo_DrawLineMode2(_6502_Context_t *pContext);
 static void AtariIo_DrawLineMode3(_6502_Context_t *pContext);
 static void AtariIo_DrawLineMode4(_6502_Context_t *pContext);
@@ -5520,11 +5518,6 @@ void AtariIoOpenWithMemory(
 	IoData_t *pIoData;
 	SDL_Surface *pSdlAtariSurface;
 
-	if(lMode & 0x1)
-	{
-		m_cConsolHack = 0x07;
-	}
-
 	/* create an 8-bit indexed surface; masks must be zero or SDL will
 	   refuse the format.  the previous masks were intended for a
 	   32-bit surface and caused SDL_CreateRGBSurface to fail with ""
@@ -5557,6 +5550,8 @@ void AtariIoOpenWithMemory(
 	 * selected bits through DDRB. */
 	pIoData->cOutputPortB = 0x00;
 	pIoData->cDirectionPortB = 0x00;
+	pIoData->bOptionOnStart = (u8)((lMode & ATARI_MODE_OPTION_ON_START) != 0);
+	pIoData->cConsolReadValue = 0x07;
 	pIoData->eVideoStandard = eVideoStandard;
 	pIoData->eMemoryExpansion = eMemoryExpansion;
 	if(eMemoryExpansion == ATARI_MEMORY_ULTIMATE1MB)
