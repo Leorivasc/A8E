@@ -17,6 +17,7 @@
     const IO_AUDCTL_ALLPOT = cfg.IO_AUDCTL_ALLPOT;
     const IO_STIMER_KBCODE = cfg.IO_STIMER_KBCODE;
     const IO_SKCTL_SKSTAT = cfg.IO_SKCTL_SKSTAT;
+    const IO_IRQEN_IRQST = cfg.IO_IRQEN_IRQST;
 
     const CYCLE_NEVER = cfg.CYCLE_NEVER;
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
@@ -31,9 +32,13 @@
             SERIAL_INPUT_FIRST_DATA_READY_CYCLES:
               cfg.SERIAL_INPUT_FIRST_DATA_READY_CYCLES,
             SERIAL_INPUT_DATA_READY_CYCLES: cfg.SERIAL_INPUT_DATA_READY_CYCLES,
+            IO_IRQEN_IRQST: IO_IRQEN_IRQST,
+            CYCLE_NEVER: CYCLE_NEVER,
+            serialOutputClockAvailable: pokeySerialOutputClockAvailable,
             serialOutputClockPeriod: function (ctx) {
-              const period = pokeyTimerPeriodCpuCycles(ctx, 4);
-              return period || cfg.SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
+              const timer = pokeySerialOutputClockTimer(ctx);
+              const period = timer ? pokeyTimerPeriodCpuCycles(ctx, timer) : 0;
+              return period;
             },
             cycleTimedEventUpdate: cycleTimedEventUpdate,
           })
@@ -1120,6 +1125,21 @@
       }
 
       return 0;
+    }
+
+    function pokeySerialOutputClockTimer(ctx) {
+      const mode = ((ctx.sram[IO_SKCTL_SKSTAT] & 0xff) >> 4) & 0x07;
+      // AHRM 5.6: modes 010 and 100 use timer 4 synchronously; mode 110
+      // uses timer 2; mode 111 uses timer 2 while async input holds only
+      // timers 3+4. Modes 001/011/101/000 have no usable output clock here.
+      if (mode === 2 || mode === 4) return 4;
+      if (mode === 6 || mode === 7) return 2;
+      return 0;
+    }
+
+    function pokeySerialOutputClockAvailable(ctx) {
+      const timer = pokeySerialOutputClockTimer(ctx);
+      return timer !== 0 && pokeyTimerPeriodCpuCycles(ctx, timer) > 0;
     }
 
     function pokeyRestartTimers(ctx) {

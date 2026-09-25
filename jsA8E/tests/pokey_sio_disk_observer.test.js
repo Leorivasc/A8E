@@ -14,7 +14,7 @@ function checksum(bytes) {
   return value & 0xff;
 }
 
-function loadApi(serialOutputClockPeriod) {
+function loadApi(serialOutputClockPeriod, serialOutputClockAvailable) {
   const source = fs.readFileSync(
     path.join(__dirname, "..", "js", "core", "pokey_sio.js"),
     "utf8",
@@ -36,6 +36,9 @@ function loadApi(serialOutputClockPeriod) {
     SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES: 1,
     SERIAL_INPUT_FIRST_DATA_READY_CYCLES: 1,
     SERIAL_INPUT_DATA_READY_CYCLES: 1,
+    IO_IRQEN_IRQST: 0xd20e,
+    CYCLE_NEVER: Number.POSITIVE_INFINITY,
+    serialOutputClockAvailable: serialOutputClockAvailable,
     serialOutputClockPeriod: serialOutputClockPeriod,
     cycleTimedEventUpdate: function () {},
   });
@@ -114,7 +117,18 @@ function main() {
   clockedCtx.cycleCounter = 100;
   clockedApi.seroutWrite(clockedCtx, 0x55);
   assert.equal(clockedCtx.ioData.serialOutputNeedDataCycle, 147);
-  assert.equal(clockedCtx.ioData.serialOutputTransmissionDoneCycle, 1040);
+  assert.equal(clockedCtx.ioData.serialOutputTransmissionDoneCycle, 1087);
+
+  // AHRM 5.6: no synthetic output deadlines are created when the selected
+  // serial mode has no internal output clock. XMTDONE remains inactive while
+  // the output shift register has no clock source.
+  const unclockedApi = loadApi(function () { return 47; }, function () { return false; });
+  const unclockedCtx = makeContext(function () {}, function () {});
+  unclockedCtx.cycleCounter = 100;
+  unclockedApi.seroutWrite(unclockedCtx, 0x55);
+  assert.equal(unclockedCtx.ioData.serialOutputNeedDataCycle, Number.POSITIVE_INFINITY);
+  assert.equal(unclockedCtx.ioData.serialOutputTransmissionDoneCycle, Number.POSITIVE_INFINITY);
+  assert.equal(unclockedCtx.ram[0xd20e] & 0x08, 0);
   console.log("pokey_sio_disk_observer.test.js passed");
 }
 

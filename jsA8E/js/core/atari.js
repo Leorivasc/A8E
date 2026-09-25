@@ -319,6 +319,7 @@
           IO_AUDCTL_ALLPOT: IO_AUDCTL_ALLPOT,
           IO_STIMER_KBCODE: IO_STIMER_KBCODE,
           IO_SKCTL_SKSTAT: IO_SKCTL_SKSTAT,
+          IO_IRQEN_IRQST: IO_IRQEN_IRQST,
           IO_SEROUT_SERIN: IO_SEROUT_SERIN,
           cycleTimedEventUpdate: cycleTimedEventUpdate,
         })
@@ -352,6 +353,7 @@
       ? window.A8EIo.createApi({
           CPU: CPU,
           CYCLES_PER_LINE: CYCLES_PER_LINE,
+          CYCLE_NEVER: CYCLE_NEVER,
           NMI_DLI: NMI_DLI,
           NMI_VBI: NMI_VBI,
           NMI_RESET: NMI_RESET,
@@ -396,6 +398,11 @@
           IO_HPOSP3_M3PF: IO_HPOSP3_M3PF,
           IO_HSCROL: IO_HSCROL,
           IO_IRQEN_IRQST: IO_IRQEN_IRQST,
+          IRQ_TIMER_1: IRQ_TIMER_1,
+          IRQ_TIMER_2: IRQ_TIMER_2,
+          IRQ_TIMER_4: IRQ_TIMER_4,
+          IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE:
+            IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE,
           IO_NMIEN: IO_NMIEN,
           IO_NMIRES_NMIST: IO_NMIRES_NMIST,
           IO_PACTL: IO_PACTL,

@@ -4,6 +4,8 @@
   function createApi(cfg) {
     const CPU = cfg.CPU;
     const CYCLES_PER_LINE = cfg.CYCLES_PER_LINE;
+    const CYCLE_NEVER =
+      cfg.CYCLE_NEVER !== undefined ? cfg.CYCLE_NEVER : Infinity;
     const recordPmgRegisterWrite = cfg.recordPmgRegisterWrite;
     const NMI_DLI = cfg.NMI_DLI;
     const NMI_VBI = cfg.NMI_VBI;
@@ -49,6 +51,11 @@
     const IO_HPOSP3_M3PF = cfg.IO_HPOSP3_M3PF;
     const IO_HSCROL = cfg.IO_HSCROL;
     const IO_IRQEN_IRQST = cfg.IO_IRQEN_IRQST;
+    const IRQ_TIMER_1 = cfg.IRQ_TIMER_1;
+    const IRQ_TIMER_2 = cfg.IRQ_TIMER_2;
+    const IRQ_TIMER_4 = cfg.IRQ_TIMER_4;
+    const IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE =
+      cfg.IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
     const IO_NMIEN = cfg.IO_NMIEN;
     const IO_NMIRES_NMIST = cfg.IO_NMIRES_NMIST;
     const IO_PACTL = cfg.IO_PACTL;
@@ -531,6 +538,11 @@
             if (io.pokeyAudio)
               {pokeyAudioOnRegisterWrite(io.pokeyAudio, addr, v);}
             pokeyRestartTimers(ctx);
+            // AHRM 5.3/5.7: STIMER reloads the countdown timers without
+            // firing them. Their latched IRQST flags therefore become idle.
+            ram[IO_IRQEN_IRQST] |= IRQ_TIMER_1 | IRQ_TIMER_2 | IRQ_TIMER_4;
+            if (io.serialOutputTransmissionDoneCycle === CYCLE_NEVER)
+              ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
             break;
 
           case IO_SKREST_RANDOM:
@@ -540,10 +552,10 @@
 
           case IO_SEROUT_SERIN:
             sram[addr] = v;
-            // On real POKEY, writing SEROUT fills the output shift register:
-            // bit 3 (XMTDON) → 1: transmission now in progress
-            // bit 4 (output data needed) → 1: buffer now full
-            ram[IO_IRQEN_IRQST] |= 0x18;
+            // AHRM 5.6: SEROUT fills the holding register first. The shift
+            // register and DATA NEEDED state change only on the next clock
+            // edge; XMTDONE stays active until that load occurs.
+            ram[IO_IRQEN_IRQST] |= 0x10;
             pokeySeroutWrite(ctx, v);
             break;
 
@@ -551,6 +563,10 @@
             sram[addr] = v;
             // IRQST bits read as 1 for disabled sources.
             ram[addr] |= ~v & 0xff;
+            // XMTDONE is level-sensitive and remains active while the
+            // output shift register is idle, even when IRQEN bit 3 is off.
+            if (io.serialOutputTransmissionDoneCycle === CYCLE_NEVER)
+              ram[addr] &= ~0x08;
             // POKEY IRQ is level-sensitive. Reconcile both disabling and
             // re-enabling so an already asserted source remains visible.
             if (CPU && typeof CPU.reconcileIrq === "function")

@@ -5546,6 +5546,8 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 		printf("             [%16llu] SERIAL_OUTPUT_DATA_NEEDED request!\n", pContext->llCycleCounter);
 #endif
 		RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+		/* The queued byte is now loaded into the output shift register. */
+		RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
 		if(SRAM[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED)
 		{
 			_6502_Irq(pContext);

@@ -497,6 +497,8 @@
 
       if (masterEff >= io.serialOutputNeedDataCycle) {
         ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+        // The queued byte is now loaded into the output shift register.
+        ram[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED) CPU.irq(ctx);
         io.serialOutputNeedDataCycle = CYCLE_NEVER;
       }

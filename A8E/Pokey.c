@@ -1944,6 +1944,14 @@ u8 *Pokey_STIMER_KBCODE(_6502_Context_t *pContext, u8 *pValue)
 		period = Pokey_TimerPeriodCpuCycles(pContext, 4);
 		pIoData->llTimer4Cycle = period ? (llNow + period) : CYCLE_NEVER;
 
+		/* AHRM 5.3/5.7: STIMER reloads the countdown timers without firing
+		 * them. Clear any stale timer IRQ flags at the same observable point. */
+		RAM[IO_IRQEN_IRQST] |= IRQ_TIMER_1 | IRQ_TIMER_2 | IRQ_TIMER_4;
+		if(pIoData->llSerialOutputTransmissionDoneCycle == CYCLE_NEVER)
+		{
+			RAM[IO_IRQEN_IRQST] &= (u8)~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
+		}
+
 		AtariIoCycleTimedEventUpdate(pContext);
 	}
 
@@ -2023,12 +2031,34 @@ static u8 cSioPendingCmd = 0;
 static u16 sSioPendingSector = 0;
 static u16 sSioPendingBytes = 0;
 
-/* AHRM 5.6: standard SIO output uses timer 4 as its internal clock. Keep the
- * fixed virtual delay only for external-clock or otherwise unconfigured modes. */
+/* AHRM 5.6: modes 010 and 100 use timer 4; modes 110-111 use timer 2.
+ * Modes 000/001/011/101 do not provide a usable output clock here: the first
+ * two are externally clocked and the latter two hold timers 3+4 in reset for
+ * asynchronous input until a start bit arrives. */
+static u8 Pokey_SerialOutputClockAvailable(_6502_Context_t *pContext)
+{
+	u8 cMode;
+
+	if(!pContext)
+	{
+		return 0;
+	}
+	cMode = (u8)((SRAM[IO_SKCTL_SKSTAT] >> 4) & 0x07);
+	if(cMode != 2 && cMode != 4 && cMode != 6 && cMode != 7)
+	{
+		return 0;
+	}
+
+	/* A selected timer with no armed period cannot clock the shift register. */
+	cMode = (u8)((cMode == 2 || cMode == 4) ? 4 : 2);
+	return Pokey_TimerPeriodCpuCycles(pContext, cMode) ? 1 : 0;
+}
+
 static u64 Pokey_SerialOutputClockPeriod(_6502_Context_t *pContext)
 {
 	u8 cSkctl;
 	u8 cMode;
+	u8 cTimer;
 	u64 period;
 
 	if(!pContext)
@@ -2037,12 +2067,20 @@ static u64 Pokey_SerialOutputClockPeriod(_6502_Context_t *pContext)
 	}
 	cSkctl = SRAM[IO_SKCTL_SKSTAT];
 	cMode = (u8)((cSkctl >> 4) & 0x07);
-	if(cMode != 2 && cMode != 3)
+	if(cMode == 2 || cMode == 4)
+	{
+		cTimer = 4;
+	}
+	else if(cMode == 6 || cMode == 7)
+	{
+		cTimer = 2;
+	}
+	else
 	{
 		return SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
 	}
-	period = Pokey_TimerPeriodCpuCycles(pContext, 4);
-	return period ? period : SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
+	period = Pokey_TimerPeriodCpuCycles(pContext, cTimer);
+	return period;
 }
 
 static u8 AtariIo_SioChecksum(u8 *pBuffer, u32 lSize)
@@ -2124,15 +2162,27 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		 * electrical transition separate from the response-byte model. */
 		Pia_SetCb2Line(pContext, 0);
 		u64 llNow = PokeyMasterReferenceCycle(pContext);
+		u8 cClockAvailable = Pokey_SerialOutputClockAvailable(pContext);
 		u64 llSerialClockPeriod = Pokey_SerialOutputClockPeriod(pContext);
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SEROUT ", pContext->llCycleCounter);
 		printf("(%02X)!\n", *pValue);
 #endif
-		pIoData->llSerialOutputNeedDataCycle =
-			llNow + llSerialClockPeriod;
-		pIoData->llSerialOutputTransmissionDoneCycle =
-			llNow + llSerialClockPeriod * 20;
+		if(cClockAvailable)
+		{
+			pIoData->llSerialOutputNeedDataCycle =
+				llNow + llSerialClockPeriod;
+			pIoData->llSerialOutputTransmissionDoneCycle =
+				llNow + llSerialClockPeriod * 21;
+			RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+		}
+		else
+		{
+			pIoData->llSerialOutputNeedDataCycle = CYCLE_NEVER;
+			pIoData->llSerialOutputTransmissionDoneCycle = CYCLE_NEVER;
+		RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+			RAM[IO_IRQEN_IRQST] &= (u8)~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
+		}
 
 		AtariIoCycleTimedEventUpdate(pContext);
 
@@ -2153,8 +2203,15 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 				u8 provided = aSioBuffer[SIO_DATA_OFFSET + sSioPendingBytes];
 				u8 calculated = AtariIo_SioChecksum(&aSioBuffer[SIO_DATA_OFFSET], sSioPendingBytes);
 
-				pIoData->llSerialOutputTransmissionDoneCycle =
-					llNow + Pokey_SerialOutputClockPeriod(pContext) * 20;
+				if(cClockAvailable)
+				{
+					pIoData->llSerialOutputTransmissionDoneCycle =
+						llNow + Pokey_SerialOutputClockPeriod(pContext) * 20;
+				}
+				else
+				{
+					pIoData->llSerialOutputTransmissionDoneCycle = CYCLE_NEVER;
+				}
 				AtariIoCycleTimedEventUpdate(pContext);
 
 				Pokey_SioSectorBytesAndOffset(sSioPendingSector, sSectorSize, &sBytesToRead, &lOffset);
@@ -2237,8 +2294,15 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						printf("\n");
 					}
 #endif
+					if(cClockAvailable)
+					{
 						pIoData->llSerialOutputTransmissionDoneCycle =
 							llNow + Pokey_SerialOutputClockPeriod(pContext) * 20;
+					}
+					else
+					{
+						pIoData->llSerialOutputTransmissionDoneCycle = CYCLE_NEVER;
+					}
 
 					AtariIoCycleTimedEventUpdate(pContext);
 
@@ -2491,6 +2555,8 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 /* $D20E IRQEN/IRQST */
 u8 *Pokey_IRQEN_IRQST(_6502_Context_t *pContext, u8 *pValue)
 {
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+
 	if(pValue)
 	{
 		Pokey_Sync(pContext, pContext->llCycleCounter);
@@ -2556,6 +2622,12 @@ u8 *Pokey_IRQEN_IRQST(_6502_Context_t *pContext, u8 *pValue)
 #endif
 		SRAM[IO_IRQEN_IRQST] = *pValue;
 		RAM[IO_IRQEN_IRQST] |= ~SRAM[IO_IRQEN_IRQST];
+		/* XMTDONE is active whenever the output shift register is idle,
+		 * including while its source is disabled in IRQEN. */
+		if(pIoData->llSerialOutputTransmissionDoneCycle == CYCLE_NEVER)
+		{
+			RAM[IO_IRQEN_IRQST] &= (u8)~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
+		}
 		/* AHRM 5.7: IRQ follows the currently enabled, active POKEY
 		 * sources. Disabling the last source removes a masked request. */
 		_6502_ReconcileIrq(

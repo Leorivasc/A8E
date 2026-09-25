@@ -615,6 +615,37 @@ Completion boundary requiring external reference:
   certified mismatch.
 - Until those references exist, the current digital fixes are safe to merge,
   but AHRM-08 must remain **in progress** rather than being marked complete.
+- Serial output clock routing now matches the AHRM mode table in both cores:
+  modes 010 and 100 select timer 4, modes 110 and 111 select timer 2, while
+  modes 000/001 are externally clocked and modes 011/101 hold timers 3+4 for
+  asynchronous input. The latter four cases no longer receive synthetic SIO
+  output deadlines, and `XMTDONE` remains inactive until a real output clock
+  exists. This removes the JS-only event/status divergence without changing
+  disk response bytes or host-audio behavior.
+- Added `implementation/AHRM08_POKEY_STAGE2_TEST.XEX` to compare all eight
+  serial clock modes, the immediate `STIMER`/`IRQST` state, and timer-1 IRQ
+  polling across jsA8E, native A8E, Altirra, and hardware. Its output is
+  intentionally observational; an external-clock timeout is preserved as
+  evidence rather than classified as a synthetic failure.
+- The first guest comparison also exposed stale timer flags after `STIMER`
+  and synthetic SIO completion timing. Both cores now clear timer IRQST flags
+  at `STIMER` and model the holding-register-to-shift-register transition
+  before `DATA NEEDED` and the ten-bit completion deadline. A new guest result
+  is still required to validate the remaining timer/SIO phase against Altirra
+  and hardware; AHRM-08 remains in progress.
+- The first Stage 2 captures provide cross-core evidence: jsA8E and native A8E
+  both report `IRQST=F7` immediately after `STIMER`, the same timeout behavior
+  for external/asynchronous-input modes, and the same timer-4 versus timer-2
+  grouping. Their N/D values were collected with ANTIC DMA active, so they
+  measure serial timing plus CPU-bus contention and cannot certify the exact
+  POKEY phase. The diagnostic now disables playfield DMA during measurement
+  and restores it before showing the final screen.
+- The fresh DMA-isolated run on jsA8E, native A8E, Altirra, and hardware
+  confirmed `IRQST=F7`, timer-1 polling `03`, `FF/00` for unclocked or
+  asynchronous-input cases, and completion groups near `D:32/33` for timer 4
+  and `D:4E/4F` for timer 2. This certifies the AHRM-08 Stage 2 guest-level
+  digital contract. The N-field differences are polling-boundary variation,
+  while DAC/audio calibration remains outside this certification.
 
 ### AHRM-09: Build a cross-core AHRM differential harness
 

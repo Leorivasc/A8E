@@ -25,9 +25,17 @@ function loadPokeyApi() {
   };
   context.window = context;
   context.A8EPokeySio = {
-    createApi: function () {
+    createApi: function (cfg) {
       return {
-        seroutWrite: function () {},
+        seroutWrite: function (ctx) {
+          // Exercise the real POKEY clock-selection callback without pulling
+          // the complete disk state machine into this timer-period fixture.
+          const selected = cfg.serialOutputClockPeriod(ctx) | 0;
+          const period = selected > 0
+            ? selected
+            : cfg.SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
+          ctx.ioData.serialOutputNeedDataCycle = ctx.cycleCounter + period;
+        },
         serinRead: function () {
           return 0;
         },
@@ -74,6 +82,32 @@ function makeContext() {
   };
 }
 
+function testSerialClockModeSelection() {
+  const api = loadPokeyApi();
+  const ctx = makeContext();
+  ctx.cycleCounter = 100;
+  ctx.sram[IO_AUDF4_POT6] = 1;
+  ctx.sram[IO_AUDF2_POT2] = 2;
+
+  // Timer 4: 28 * (1 + 1) = 56 CPU cycles.
+  ctx.sram[IO_SKCTL_SKSTAT] = 0x23;
+  api.seroutWrite(ctx, 0x55);
+  assert.equal(ctx.ioData.serialOutputNeedDataCycle, 156);
+
+  // Timer 2: 28 * (2 + 1) = 84 CPU cycles in modes 110/111.
+  ctx.ioData.serialOutputNeedDataCycle = 0;
+  ctx.sram[IO_SKCTL_SKSTAT] = 0x63;
+  api.seroutWrite(ctx, 0x55);
+  assert.equal(ctx.ioData.serialOutputNeedDataCycle, 184);
+
+  // The fixture stub applies its legacy fallback when the clock callback
+  // returns zero; the full SIO path now suppresses the event entirely.
+  ctx.ioData.serialOutputNeedDataCycle = 0;
+  ctx.sram[IO_SKCTL_SKSTAT] = 0x03;
+  api.seroutWrite(ctx, 0x55);
+  assert.equal(ctx.ioData.serialOutputNeedDataCycle, 101);
+}
+
 function testZeroIsTheMinimumValidDivisor() {
   const api = loadPokeyApi();
   const fixture = fs
@@ -102,4 +136,5 @@ function testZeroIsTheMinimumValidDivisor() {
 }
 
 testZeroIsTheMinimumValidDivisor();
+testSerialClockModeSelection();
 console.log("pokey_timer_period.test.js passed");

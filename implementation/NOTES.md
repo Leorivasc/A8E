@@ -761,4 +761,45 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   full-worker fix: `potStepCycles=114`, `potCounter=228`, `ALLPOT=00`, and
   `POT0=228` (`$E4`). The jsA8e guest-visible POT result now matches Altirra
   and hardware.
+- 2026-09-25: `A8E/Pokey.c`, `jsA8E/js/core/{pokey,pokey_sio,io}.js`, and
+  `jsA8E/tests/{pokey_timer_period,pokey_sio_disk_observer}.test.js`: aligned
+  AHRM 5.6 serial-output clock selection across cores. Modes 010/100 use timer
+  4, modes 110/111 use timer 2, and external-clock/asynchronous-input modes
+  000/001/011/101 do not receive synthetic output deadlines. `XMTDONE` now
+  remains inactive while no output clock exists, including the idle state after
+  `IRQEN` writes. Added regressions for timer routing, unclocked output, and
+  the resulting status bit.
+- 2026-09-25: `A8E/Pokey.c` and `jsA8E/js/core/{io,atari}.js`: aligned the
+  observable `STIMER` contract with AHRM 5.3/5.7. Timer reload no longer
+  preserves stale timer IRQST flags from an earlier setup; the three timer
+  status bits are idle immediately after the strobe while the serial complete
+  bit retains its independent idle-shifter state. This removes the common
+  `IRQST=F0` result from the Stage 2 diagnostic and leaves the remaining timer
+  phase/IRQ latency measurable rather than contaminated by old flags.
+- 2026-09-25: `implementation/AHRM08_POKEY_STAGE2_TEST.{asm,XEX,md}` and
+  `jsA8E/tests/ahrm08_pokey_stage2_xex.test.js`: added a portable guest-level
+  diagnostic for all eight SKCTL serial clock modes, immediate post-STIMER
+  IRQST state, and the first timer IRQ polling result. It records observations
+  without converting external-clock timeouts into application-specific PASS or
+  FAIL values.
+- 2026-09-25: `A8E/{Pokey,AtariIo}.c` and
+  `jsA8E/js/core/{pokey_sio,io,antic}.js`: modeled the AHRM serial output
+  holding-register delay. `SEROUT` no longer makes `DATA NEEDED` appear at the
+  write itself; the queued byte is loaded on the next output-clock edge,
+  `XMTDONE` is inactive during the ten-bit frame, and completion is scheduled
+  after that frame. Updated the direct SIO regression and rebuilt the native
+  test suite.
+- 2026-09-25: the Stage 2 diagnostic was changed to disable ANTIC playfield
+  DMA during POKEY/SIO measurements and restore `DMACTL=$22` before rendering
+  the final results. The earlier DMA-enabled captures still validate the
+  expected mode grouping and `STIMER=F7`, but their N/D counts combine serial
+  timing with ANTIC CPU contention and are not sufficient for exact timing
+  certification.
+- 2026-09-25: the DMA-isolated Stage 2 executable was run on jsA8E, native
+  A8E, Altirra, and hardware. All targets reported `IRQST=F7` after `STIMER`,
+  timer-1 polling `03`, `FF/00` for external/asynchronous-input modes, and
+  completion groups near `D:32/33` for timer 4 and `D:4E/4F` for timer 2.
+  The remaining N-field variation is a polling-boundary observation. The
+  Stage 2 guest-level digital test is therefore certified; DAC/audio
+  calibration remains a separate AHRM-08 completion item.
 - 2026-09-25: `implementation/AHRM07_PMG_TEST.{asm,XEX,md}` and `jsA8E/tests/ahrm07_pmg_xex.test.js`: added a standalone AHRM-07 executable. It exercises visible PMG DMA, PMBASE changes, DLI-driven HPOS/PRIOR changes, and real P0/P1 collision latches; each raster phase is held for 32 frames to make visual transitions deterministic, and the screen now explains the bars, phase timing, and real collision result. The assembler regression verifies that the checked-in XEX is reproducible from its source.
