@@ -31,6 +31,19 @@
         valuePortA: 0,
         valuePortB: 0,
         outputPortB: 0,
+        // PIA control-line levels and edge-latched interrupt state. The
+        // unconnected XL/XE control inputs are pulled high at reset.
+        piaCa1Level: 1,
+        piaCa2Level: 1,
+        piaCb1Level: 1,
+        piaCb2Level: 1,
+        piaStatusA: 0,
+        piaStatusB: 0,
+        piaCb2WasRaisedOutput: false,
+        piaCa2PulseUntilCycle: -1,
+        piaCb2PulseUntilCycle: -1,
+        piaSetControlLine: null,
+        piaCycleTimedEvent: null,
         // SIO state (ported from Pokey.c)
         // 850 handler downloads can be 1496 bytes (AHRM 9.10).
         sioBuffer: new Uint8Array(4096),

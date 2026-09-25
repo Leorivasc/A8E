@@ -198,4 +198,15 @@ if(BUILD_TESTING)
 
   add_test(NAME gtia_consol_probe COMMAND gtia_consol_probe)
   set_tests_properties(gtia_consol_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+
+  add_executable(pia_control_probe
+    tests/pia_control_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(pia_control_probe PRIVATE A8E_ENABLE_TEST_PROBES=1)
+  a8e_configure_target(pia_control_probe)
+
+  add_test(NAME pia_control_probe COMMAND pia_control_probe)
+  set_tests_properties(pia_control_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 endif()

@@ -407,7 +407,17 @@
     // both directions so re-enabling an asserted source cannot lose its IRQ.
     const irqst = ctx.ram[0xd20e] & 0xff;
     const irqen = ctx.sram[0xd20e] & 0xff;
-    ctx.irqPending = ((~irqst) & irqen & 0x7f) !== 0 ? 1 : 0;
+    const io = ctx.ioData || {};
+    const pactl = ctx.sram[0xd302] & 0xff;
+    const pbctl = ctx.sram[0xd303] & 0xff;
+    const modeA = (pactl >>> 3) & 0x07;
+    const modeB = (pbctl >>> 3) & 0x07;
+    const piaIrq =
+      ((io.piaStatusA & 0x80) && (pactl & 0x01)) ||
+      ((io.piaStatusA & 0x40) && modeA < 4 && (modeA & 0x01)) ||
+      ((io.piaStatusB & 0x80) && (pbctl & 0x01)) ||
+      ((io.piaStatusB & 0x40) && modeB < 4 && (modeB & 0x01));
+    ctx.irqPending = ((~irqst) & irqen & 0x7f) !== 0 || piaIrq ? 1 : 0;
   }
   function writeAccess(ctx, value) {
     const addr = ctx.accessAddress & 0xffff;

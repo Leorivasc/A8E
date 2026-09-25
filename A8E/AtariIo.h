@@ -183,6 +183,16 @@ typedef struct
 	u8 cConsolReadValue;
 	u8 cOutputPortB;
 	u8 cDirectionPortB;
+	/* PIA control-line levels and edge-latched interrupt state. */
+	u8 cPiaCa1Level;
+	u8 cPiaCa2Level;
+	u8 cPiaCb1Level;
+	u8 cPiaCb2Level;
+	u8 cPiaStatusA;
+	u8 cPiaStatusB;
+	u8 bPiaCb2WasRaisedOutput;
+	u64 llPiaCa2PulseEndCycle;
+	u64 llPiaCb2PulseEndCycle;
 	AtariMemoryExpansion_t eMemoryExpansion;
 	u8 *pExtendedMemory;
 	u8 *pMainWindowShadow;

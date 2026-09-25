@@ -246,6 +246,21 @@ Acceptance criteria:
 - Existing disk SIO behavior remains unchanged when PIA interrupt sources are
   disabled, as on the normal XL/XE OS path.
 
+Status: **implemented and validated on 2026-09-24**.
+
+- Native A8E and jsA8E now track the four PIA control-line levels and their
+  independent edge-latched status bits. Status remains pending while its IRQ
+  is masked, and CPU IRQ reconciliation combines PIA and POKEY sources.
+- ORA/ORB reads clear both status bits for the corresponding port; DDRA/DDRB
+  reads do not. CA2/CB2 output modes clear their status and implement the
+  documented read-handshake and pulse behavior.
+- CB2 follows the active-low SIO command-line transition around command/data
+  frames in both cores without changing the existing response-byte protocol.
+- `A8E/tests/pia_control_probe.c` and
+  `jsA8E/tests/pia_control_lines.test.js` cover edge polarity, masked status,
+  acknowledge behavior, output-mode clearing, and the documented spurious CB2
+  interrupt. Dedicated 1030 modem emulation remains outside AHRM-03.
+
 ### AHRM-04: Make the supported memory-expansion matrix explicit
 
 Priority: **P1**

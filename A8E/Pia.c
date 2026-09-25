@@ -16,6 +16,144 @@
 #include "6502.h"
 #include "AtariIo.h"
 #include "Pia.h"
+#include "Pokey.h"
+
+#define PIA_IRQ1_STATUS 0x80
+#define PIA_IRQ2_STATUS 0x40
+
+static u8 Pia_ControlMode(u8 cControl)
+{
+	return (u8)((cControl >> 3) & 0x07);
+}
+
+static u8 Pia_PokeyIrqAsserted(_6502_Context_t *pContext)
+{
+	return (u8)((~RAM[IO_IRQEN_IRQST] & SRAM[IO_IRQEN_IRQST] & 0x7f) != 0);
+}
+
+u8 Pia_IrqAsserted(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u8 cModeA = Pia_ControlMode(SRAM[IO_PACTL]);
+	u8 cModeB = Pia_ControlMode(SRAM[IO_PBCTL]);
+	u8 bIrqA = (u8)(((pIoData->cPiaStatusA & PIA_IRQ1_STATUS) && (SRAM[IO_PACTL] & 0x01)) ||
+		((pIoData->cPiaStatusA & PIA_IRQ2_STATUS) && cModeA < 4 && (cModeA & 0x01)));
+	u8 bIrqB = (u8)(((pIoData->cPiaStatusB & PIA_IRQ1_STATUS) && (SRAM[IO_PBCTL] & 0x01)) ||
+		((pIoData->cPiaStatusB & PIA_IRQ2_STATUS) && cModeB < 4 && (cModeB & 0x01)));
+
+	return (u8)(bIrqA || bIrqB);
+}
+
+static void Pia_ReconcileIrq(_6502_Context_t *pContext)
+{
+	_6502_ReconcileIrq(pContext, (u8)(Pia_PokeyIrqAsserted(pContext) ||
+		Pia_IrqAsserted(pContext)));
+}
+
+static void Pia_UpdateControlReadback(_6502_Context_t *pContext, u16 sAddress)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	if(sAddress == IO_PACTL)
+		RAM[IO_PACTL] = (u8)((SRAM[IO_PACTL] & 0x3f) | (pIoData->cPiaStatusA & 0xc0));
+	else
+		RAM[IO_PBCTL] = (u8)((SRAM[IO_PBCTL] & 0x3f) | (pIoData->cPiaStatusB & 0xc0));
+}
+
+static void Pia_LatchLineTransition(
+	_6502_Context_t *pContext,
+	u8 *pLevel,
+	u8 *pStatus,
+	u8 cControl,
+	u8 bControlLine2,
+	u16 sControlAddress,
+	u8 cLevel)
+{
+	u8 cOldLevel = *pLevel;
+	u8 cMode = Pia_ControlMode(cControl);
+	u8 bPositive = (u8)(cLevel > cOldLevel);
+	u8 bEdgePositive = (u8)(bControlLine2 ? (cMode >= 2) : ((cControl & 0x02) != 0));
+
+	*pLevel = cLevel ? 1 : 0;
+	if(cOldLevel == *pLevel)
+		return;
+
+	if(bControlLine2)
+	{
+		if(cMode < 4 && bPositive == bEdgePositive)
+			*pStatus |= PIA_IRQ2_STATUS;
+	}
+	else if(bPositive == bEdgePositive)
+	{
+		*pStatus |= PIA_IRQ1_STATUS;
+	}
+
+	Pia_UpdateControlReadback(pContext, sControlAddress);
+	if(bControlLine2 ? (cMode < 4 && (cMode & 0x01)) : (cControl & 0x01))
+		_6502_Irq(pContext);
+}
+
+static void Pia_WriteControl(_6502_Context_t *pContext, u16 sAddress, u8 cValue)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u8 *pStatus = sAddress == IO_PACTL ? &pIoData->cPiaStatusA : &pIoData->cPiaStatusB;
+	u8 *pLevel = sAddress == IO_PACTL ? &pIoData->cPiaCa2Level : &pIoData->cPiaCb2Level;
+	u8 cOldControl = SRAM[sAddress];
+	u8 cOldMode = Pia_ControlMode(cOldControl);
+	u8 cNewMode = Pia_ControlMode(cValue);
+
+	SRAM[sAddress] = cValue & 0x3f;
+	if(cNewMode >= 4)
+		*pStatus &= (u8)~PIA_IRQ2_STATUS;
+
+	/* AHRM 2.5 documents the CA2/CB2 input-mode transition glitches. */
+	if(sAddress == IO_PACTL && cOldMode == 6 && cNewMode >= 2 && cNewMode <= 3 &&
+	   *pLevel == 0)
+		*pStatus |= PIA_IRQ2_STATUS;
+	if(sAddress == IO_PBCTL && cOldMode == 7 && cNewMode < 4 &&
+	   pIoData->bPiaCb2WasRaisedOutput)
+		*pStatus |= PIA_IRQ2_STATUS;
+
+	if(cNewMode >= 4)
+	{
+		*pLevel = (u8)(cNewMode == 7);
+		if(sAddress != IO_PACTL)
+			pIoData->bPiaCb2WasRaisedOutput = (u8)(cNewMode == 7 && cOldMode == 6);
+	}
+
+	Pia_UpdateControlReadback(pContext, sAddress);
+	Pia_ReconcileIrq(pContext);
+}
+
+static void Pia_AcknowledgePortRead(_6502_Context_t *pContext, u8 bPortB)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u8 cControl = bPortB ? SRAM[IO_PBCTL] : SRAM[IO_PACTL];
+	u8 cMode = Pia_ControlMode(cControl);
+
+	if(bPortB)
+		pIoData->cPiaStatusB = 0;
+	else
+		pIoData->cPiaStatusA = 0;
+
+	/* Output handshake modes are driven by the corresponding port read. */
+	if(cMode == 4 || cMode == 5)
+	{
+		if(bPortB)
+		{
+			pIoData->cPiaCb2Level = 0;
+			pIoData->llPiaCb2PulseEndCycle = cMode == 5
+				? pContext->llCycleCounter + 1 : CYCLE_NEVER;
+		}
+		else
+		{
+			pIoData->cPiaCa2Level = 0;
+			pIoData->llPiaCa2PulseEndCycle = cMode == 5
+				? pContext->llCycleCounter + 1 : CYCLE_NEVER;
+		}
+	}
+	Pia_UpdateControlReadback(pContext, bPortB ? IO_PBCTL : IO_PACTL);
+	Pia_ReconcileIrq(pContext);
+}
 
 /********************************************************************
 *
@@ -43,6 +181,8 @@ u8 *Pia_PORTA(_6502_Context_t *pContext, u8 *pValue)
 
 		return &pIoData->cValuePortA;
 	}
+	if(!pValue)
+		Pia_AcknowledgePortRead(pContext, 0);
 
 	if(pValue)
 	{
@@ -262,6 +402,7 @@ u8 *Pia_PORTB(_6502_Context_t *pContext, u8 *pValue)
 	{
 		if(bDdrMode)
 			return &pIoData->cDirectionPortB;
+		Pia_AcknowledgePortRead(pContext, 1);
 		return &RAM[IO_PORTB];
 	}
 
@@ -279,8 +420,7 @@ u8 *Pia_PACTL(_6502_Context_t *pContext, u8 *pValue)
 {
 	if(pValue)
 	{
-		SRAM[IO_PACTL] = *pValue;
-		RAM[IO_PACTL] = (*pValue & 0x0d) | 0x30;
+		Pia_WriteControl(pContext, IO_PACTL, *pValue);
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" PACTL: %02X\n", *pValue);
@@ -295,8 +435,7 @@ u8 *Pia_PBCTL(_6502_Context_t *pContext, u8 *pValue)
 {
 	if(pValue)
 	{
-		SRAM[IO_PBCTL] = *pValue;
-		RAM[IO_PBCTL] = (*pValue & 0x0d) | 0x30;
+		Pia_WriteControl(pContext, IO_PBCTL, *pValue);
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" PBCTL: %02X\n", *pValue);
@@ -304,6 +443,59 @@ u8 *Pia_PBCTL(_6502_Context_t *pContext, u8 *pValue)
 	}
 
 	return &RAM[IO_PBCTL];
+}
+
+void Pia_SetCa1Line(_6502_Context_t *pContext, u8 cLevel)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u8 cOldLevel = pIoData->cPiaCa1Level;
+	Pia_LatchLineTransition(pContext, &pIoData->cPiaCa1Level,
+		&pIoData->cPiaStatusA, SRAM[IO_PACTL], 0, IO_PACTL, cLevel);
+	if(cOldLevel != pIoData->cPiaCa1Level && Pia_ControlMode(SRAM[IO_PACTL]) == 4)
+		pIoData->cPiaCa2Level = 1;
+	Pia_UpdateControlReadback(pContext, IO_PACTL);
+}
+
+void Pia_SetCa2Line(_6502_Context_t *pContext, u8 cLevel)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	Pia_LatchLineTransition(pContext, &pIoData->cPiaCa2Level,
+		&pIoData->cPiaStatusA, SRAM[IO_PACTL], 1, IO_PACTL, cLevel);
+}
+
+void Pia_SetCb1Line(_6502_Context_t *pContext, u8 cLevel)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u8 cOldLevel = pIoData->cPiaCb1Level;
+	Pia_LatchLineTransition(pContext, &pIoData->cPiaCb1Level,
+		&pIoData->cPiaStatusB, SRAM[IO_PBCTL], 0, IO_PBCTL, cLevel);
+	if(cOldLevel != pIoData->cPiaCb1Level && Pia_ControlMode(SRAM[IO_PBCTL]) == 4)
+		pIoData->cPiaCb2Level = 1;
+	Pia_UpdateControlReadback(pContext, IO_PBCTL);
+}
+
+void Pia_SetCb2Line(_6502_Context_t *pContext, u8 cLevel)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	Pia_LatchLineTransition(pContext, &pIoData->cPiaCb2Level,
+		&pIoData->cPiaStatusB, SRAM[IO_PBCTL], 1, IO_PBCTL, cLevel);
+}
+
+void Pia_CycleTimedEvent(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	if(pIoData->llPiaCa2PulseEndCycle != CYCLE_NEVER &&
+	   pContext->llCycleCounter >= pIoData->llPiaCa2PulseEndCycle)
+	{
+		pIoData->cPiaCa2Level = 1;
+		pIoData->llPiaCa2PulseEndCycle = CYCLE_NEVER;
+	}
+	if(pIoData->llPiaCb2PulseEndCycle != CYCLE_NEVER &&
+	   pContext->llCycleCounter >= pIoData->llPiaCb2PulseEndCycle)
+	{
+		pIoData->cPiaCb2Level = 1;
+		pIoData->llPiaCb2PulseEndCycle = CYCLE_NEVER;
+	}
 }
 
 /* U1MB configuration registers. Configuration writes are accepted only

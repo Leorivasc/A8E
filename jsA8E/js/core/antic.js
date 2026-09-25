@@ -387,6 +387,8 @@
       const ram = ctx.ram;
       const sram = ctx.sram;
 
+      if (typeof io.piaCycleTimedEvent === "function") io.piaCycleTimedEvent(ctx);
+
       if (!io.inDrawLine && ctx.cycleCounter >= io.displayListFetchCycle) {
         if (io.video.currentDisplayLine === 0) {
           io.clock = io.displayListFetchCycle;

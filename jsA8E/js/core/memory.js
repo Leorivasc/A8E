@@ -1021,6 +1021,8 @@
       const initHardwareDefaults = opts.initHardwareDefaults;
       const installIoHandlers = opts.installIoHandlers;
       const ioAccess = opts.ioAccess;
+      const piaSetControlLine = opts.piaSetControlLine;
+      const piaCycleTimedEvent = opts.piaCycleTimedEvent;
       const getOptionOnStart = opts.getOptionOnStart;
       const getSioTurbo = opts.getSioTurbo;
       const getTurbo = opts.getTurbo;
@@ -1615,6 +1617,8 @@
         machine.ctx.ioData = makeIoData(video);
         machine.ctx.ioData.optionOnStart = !!getOptionOnStart();
         machine.ctx.ioData.sioTurbo = !!getSioTurbo();
+        machine.ctx.ioData.piaSetControlLine = piaSetControlLine;
+        machine.ctx.ioData.piaCycleTimedEvent = piaCycleTimedEvent;
         copyMediaToIoData();
         machine.ctx.ioData.memoryExpansionRead = readExpansionMemoryByte;
         machine.ctx.ioData.memoryExpansionSync = syncMemoryExpansionWindow;

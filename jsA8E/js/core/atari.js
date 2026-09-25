@@ -778,6 +778,8 @@
       initHardwareDefaults: initHardwareDefaults,
       installIoHandlers: installIoHandlers,
       ioAccess: ioAccess,
+      piaSetControlLine: ioApi.piaSetControlLine,
+      piaCycleTimedEvent: ioApi.piaCycleTimedEvent,
       getOptionOnStart: function () {
         return optionOnStart;
       },
@@ -986,6 +988,8 @@
     machine.ctx.ioData = makeIoData(video);
     machine.ctx.ioData.optionOnStart = optionOnStart;
     machine.ctx.ioData.sioTurbo = sioTurbo;
+    machine.ctx.ioData.piaSetControlLine = ioApi.piaSetControlLine;
+    machine.ctx.ioData.piaCycleTimedEvent = ioApi.piaCycleTimedEvent;
     machine.ctx.ioCycleTimedEventFunction = ioCycleTimedEvent;
     cycleTimedEventUpdate(machine.ctx);
 

@@ -5275,6 +5275,8 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 	u64 llMasterCycle = pContext->llCycleCounter;
 	u64 llBeamCycle = pIoData->llCycle;
 
+	Pia_CycleTimedEvent(pContext);
+
 	if(!pIoData->bInDrawLine &&
 	   pContext->llCycleCounter >= pIoData->llDisplayListFetchCycle)
 	{
@@ -5550,6 +5552,14 @@ void AtariIoOpenWithMemory(
 	 * selected bits through DDRB. */
 	pIoData->cOutputPortB = 0x00;
 	pIoData->cDirectionPortB = 0x00;
+	/* PIA control inputs are pulled high while no peripheral is asserting
+	 * them. Control registers and interrupt status still start cleared. */
+	pIoData->cPiaCa1Level = 1;
+	pIoData->cPiaCa2Level = 1;
+	pIoData->cPiaCb1Level = 1;
+	pIoData->cPiaCb2Level = 1;
+	pIoData->llPiaCa2PulseEndCycle = CYCLE_NEVER;
+	pIoData->llPiaCb2PulseEndCycle = CYCLE_NEVER;
 	pIoData->bOptionOnStart = (u8)((lMode & ATARI_MODE_OPTION_ON_START) != 0);
 	pIoData->cConsolReadValue = 0x07;
 	pIoData->eVideoStandard = eVideoStandard;

@@ -24,6 +24,7 @@ extern SDL_Window *g_pSdlWindow;
 
 #include "6502.h"
 #include "AtariIo.h"
+#include "Pia.h"
 #include "Pokey.h"
 
 /********************************************************************
@@ -2076,6 +2077,9 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 	Pokey_Sync(pContext, pContext->llCycleCounter);
 	if(pValue)
 	{
+		/* AHRM 2.5: CB2 is the active-low SIO command line. Keep the
+		 * electrical transition separate from the response-byte model. */
+		Pia_SetCb2Line(pContext, 0);
 		u64 llNow = PokeyMasterReferenceCycle(pContext);
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SEROUT ", pContext->llCycleCounter);
@@ -2149,6 +2153,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 				sSioPendingSector = 0;
 				sSioPendingBytes = 0;
 				cSioOutIndex = 0;
+				Pia_SetCb2Line(pContext, 1);
 			}
 
 			return &RAM[IO_SEROUT_SERIN];
@@ -2407,6 +2412,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 				}
 #endif
 				cSioOutIndex = 0;
+				Pia_SetCb2Line(pContext, 1);
 			}
 		}
 	}
@@ -2508,7 +2514,8 @@ u8 *Pokey_IRQEN_IRQST(_6502_Context_t *pContext, u8 *pValue)
 		 * sources. Disabling the last source removes a masked request. */
 		_6502_ReconcileIrq(
 			pContext,
-			(u8)((~RAM[IO_IRQEN_IRQST] & SRAM[IO_IRQEN_IRQST] & 0x7f) != 0));
+			(u8)(((~RAM[IO_IRQEN_IRQST] & SRAM[IO_IRQEN_IRQST] & 0x7f) != 0) ||
+				 Pia_IrqAsserted(pContext)));
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" IRQEN: %02X\n", *pValue);

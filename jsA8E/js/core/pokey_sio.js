@@ -50,6 +50,12 @@
       return ctx.cycleCounter;
     }
 
+    function setSioCommandLine(ctx, level) {
+      const io = ctx.ioData;
+      if (io && typeof io.piaSetControlLine === "function")
+        io.piaSetControlLine(ctx, "cb2", level ? 1 : 0);
+    }
+
     function handleAbsentDevice(ctx) {
       const io = ctx.ioData;
       // An absent Type 1/2 device is electrically silent. The OS owns the
@@ -403,6 +409,10 @@
       const io = ctx.ioData;
       const now = effectiveEventCycle(ctx);
 
+      // CB2 is the active-low SIO command line. This electrical transition is
+      // intentionally independent of the response-byte state machine.
+      setSioCommandLine(ctx, 0);
+
       io.serialOutputNeedDataCycle = now + SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
       cycleTimedEventUpdate(ctx);
 
@@ -440,6 +450,7 @@
         io.sioPendingSector = 0;
         io.sioPendingBytes = 0;
         io.sioOutIndex = 0;
+        setSioCommandLine(ctx, 1);
         return;
       }
 
@@ -461,6 +472,7 @@
 
       // Reset outgoing command state (always, like the C emulator).
       io.sioOutIndex = 0;
+      setSioCommandLine(ctx, 1);
 
       if (sioChecksum(buf, 4) !== (buf[4] & 0xff)) {
         queueDeviceNack(ctx, now);

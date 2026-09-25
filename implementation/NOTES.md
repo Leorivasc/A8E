@@ -4,6 +4,17 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-24: `A8E/{Pia.c,Pia.h,AtariIo.c,AtariIo.h,Pokey.c}`,
+  `A8E/tests/pia_control_probe.c`, and
+  `jsA8E/js/core/{cpu,io,state,atari,memory,pokey_sio,antic}.js`: completed
+  AHRM-03's PIA control-line foundation. Both cores now track CA1/CA2/CB1/CB2
+  levels, latch status independently of IRQ enable, combine PIA IRQ with POKEY
+  IRQ, acknowledge both flags only on ORA/ORB reads, clear CA2/CB2 status in
+  output modes, model CA2/CB2 handshake output modes and the documented CB2
+  output-to-input spurious interrupt, and drive CB2 around SIO frames without
+  changing response bytes. Native and JS control-line probes pass; 1030 modem
+  behavior remains outside this item.
+
 - 2026-09-24: `A8E/{A8E.c,AtariIo.c,AtariIo.h,Gtia.c}`,
   `A8E/tests/gtia_consol_probe.c`, and
   `jsA8E/{js/core/io.js,tests/consol_startup_option.test.js}`: completed

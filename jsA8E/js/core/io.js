@@ -272,6 +272,128 @@
       sram[IO_PORTB] = v;
     }
 
+    const PIA_IRQ1_STATUS = 0x80;
+    const PIA_IRQ2_STATUS = 0x40;
+
+    function piaControlMode(value) {
+      return ((value >>> 3) & 0x07) | 0;
+    }
+
+    function piaIrqAsserted(ctx) {
+      const io = ctx.ioData;
+      const sram = ctx.sram;
+      const modeA = piaControlMode(sram[IO_PACTL]);
+      const modeB = piaControlMode(sram[IO_PBCTL]);
+      const irqA =
+        ((io.piaStatusA & PIA_IRQ1_STATUS) && (sram[IO_PACTL] & 0x01)) ||
+        ((io.piaStatusA & PIA_IRQ2_STATUS) && modeA < 4 && (modeA & 0x01));
+      const irqB =
+        ((io.piaStatusB & PIA_IRQ1_STATUS) && (sram[IO_PBCTL] & 0x01)) ||
+        ((io.piaStatusB & PIA_IRQ2_STATUS) && modeB < 4 && (modeB & 0x01));
+      return !!(irqA || irqB);
+    }
+
+    function piaUpdateControlReadback(ctx, address) {
+      const io = ctx.ioData;
+      const value = address === IO_PACTL ? io.piaStatusA : io.piaStatusB;
+      ctx.ram[address] = ((ctx.sram[address] & 0x3f) | (value & 0xc0)) & 0xff;
+    }
+
+    function piaReconcileIrq(ctx) {
+      if (CPU && typeof CPU.reconcileIrq === "function") CPU.reconcileIrq(ctx);
+    }
+
+    function piaLatchLineTransition(ctx, line, level) {
+      const io = ctx.ioData;
+      const isA = line === "ca1" || line === "ca2";
+      const isLine2 = line === "ca2" || line === "cb2";
+      const controlAddress = isA ? IO_PACTL : IO_PBCTL;
+      const mode = piaControlMode(ctx.sram[controlAddress]);
+      const levelKey =
+        line === "ca1" ? "piaCa1Level" :
+        line === "ca2" ? "piaCa2Level" :
+        line === "cb1" ? "piaCb1Level" : "piaCb2Level";
+      const statusKey = isA ? "piaStatusA" : "piaStatusB";
+      const oldLevel = io[levelKey] ? 1 : 0;
+      const newLevel = level ? 1 : 0;
+      io[levelKey] = newLevel;
+      if (oldLevel === newLevel) return;
+
+      const positive = newLevel > oldLevel;
+      const positiveEdge = isLine2 ? mode >= 2 : !!(ctx.sram[controlAddress] & 0x02);
+      if (isLine2) {
+        if (mode < 4 && positive === positiveEdge)
+          io[statusKey] |= PIA_IRQ2_STATUS;
+      } else if (positive === positiveEdge) {
+        io[statusKey] |= PIA_IRQ1_STATUS;
+      }
+
+      piaUpdateControlReadback(ctx, controlAddress);
+      const enabled = isLine2
+        ? mode < 4 && !!(mode & 0x01)
+        : !!(ctx.sram[controlAddress] & 0x01);
+      if (enabled && ((io[statusKey] & (isLine2 ? PIA_IRQ2_STATUS : PIA_IRQ1_STATUS)) !== 0))
+        CPU.irq(ctx);
+    }
+
+    function piaWriteControl(ctx, address, value) {
+      const io = ctx.ioData;
+      const isA = address === IO_PACTL;
+      const statusKey = isA ? "piaStatusA" : "piaStatusB";
+      const levelKey = isA ? "piaCa2Level" : "piaCb2Level";
+      const oldMode = piaControlMode(ctx.sram[address]);
+      const newValue = value & 0x3f;
+      const newMode = piaControlMode(newValue);
+      ctx.sram[address] = newValue;
+      if (newMode >= 4) io[statusKey] &= ~PIA_IRQ2_STATUS;
+
+      if (isA && oldMode === 6 && newMode >= 2 && newMode <= 3 && !io[levelKey])
+        io[statusKey] |= PIA_IRQ2_STATUS;
+      if (!isA && oldMode === 7 && newMode < 4 && io.piaCb2WasRaisedOutput)
+        io[statusKey] |= PIA_IRQ2_STATUS;
+
+      if (newMode >= 4) {
+        io[levelKey] = newMode === 7 ? 1 : 0;
+        if (!isA) io.piaCb2WasRaisedOutput = newMode === 7 && oldMode === 6;
+      }
+
+      piaUpdateControlReadback(ctx, address);
+      piaReconcileIrq(ctx);
+    }
+
+    function piaAcknowledgePortRead(ctx, portB) {
+      const io = ctx.ioData;
+      const address = portB ? IO_PBCTL : IO_PACTL;
+      const statusKey = portB ? "piaStatusB" : "piaStatusA";
+      const levelKey = portB ? "piaCb2Level" : "piaCa2Level";
+      const mode = piaControlMode(ctx.sram[address]);
+      io[statusKey] = 0;
+      if (mode === 4 || mode === 5) {
+        io[levelKey] = 0;
+        io[portB ? "piaCb2PulseUntilCycle" : "piaCa2PulseUntilCycle"] =
+          mode === 5 ? (ctx.cycleCounter | 0) + 1 : -1;
+      }
+      piaUpdateControlReadback(ctx, address);
+      piaReconcileIrq(ctx);
+    }
+
+    function piaSetControlLine(ctx, line, level) {
+      piaLatchLineTransition(ctx, line, level);
+    }
+
+    function piaCycleTimedEvent(ctx) {
+      const io = ctx.ioData;
+      const cycle = ctx.cycleCounter | 0;
+      if (io.piaCa2PulseUntilCycle >= 0 && cycle >= io.piaCa2PulseUntilCycle) {
+        io.piaCa2Level = 1;
+        io.piaCa2PulseUntilCycle = -1;
+      }
+      if (io.piaCb2PulseUntilCycle >= 0 && cycle >= io.piaCb2PulseUntilCycle) {
+        io.piaCb2Level = 1;
+        io.piaCb2PulseUntilCycle = -1;
+      }
+    }
+
     function syncTriggerReadback(ctx, initializeLatch) {
       const io = ctx.ioData;
       const ram = ctx.ram;
@@ -472,13 +594,11 @@
             break;
 
           case IO_PACTL:
-            sram[addr] = v;
-            ram[addr] = (v & 0x0d) | 0x30;
+            piaWriteControl(ctx, IO_PACTL, v);
             break;
 
           case IO_PBCTL:
-            sram[addr] = v;
-            ram[addr] = (v & 0x0d) | 0x30;
+            piaWriteControl(ctx, IO_PBCTL, v);
             break;
 
           // --- ANTIC ---
@@ -602,10 +722,12 @@
       switch (addr) {
         case IO_PORTA:
           if ((sram[IO_PACTL] & 0x04) === 0) return io.valuePortA & 0xff;
+          piaAcknowledgePortRead(ctx, false);
           return ram[addr] & 0xff;
 
         case IO_PORTB:
           if ((sram[IO_PBCTL] & 0x04) === 0) return io.valuePortB & 0xff;
+          piaAcknowledgePortRead(ctx, true);
           return ram[addr] & 0xff;
 
         case IO_CONSOL:
@@ -652,6 +774,9 @@
 
     return {
       ioAccess: ioAccess,
+      piaIrqAsserted: piaIrqAsserted,
+      piaSetControlLine: piaSetControlLine,
+      piaCycleTimedEvent: piaCycleTimedEvent,
     };
   }
 
