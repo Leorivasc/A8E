@@ -10,6 +10,7 @@
     const SERIAL_INPUT_FIRST_DATA_READY_CYCLES =
       cfg.SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
     const SERIAL_INPUT_DATA_READY_CYCLES = cfg.SERIAL_INPUT_DATA_READY_CYCLES;
+    const serialOutputClockPeriod = cfg.serialOutputClockPeriod;
 
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
 
@@ -48,6 +49,14 @@
 
     function effectiveEventCycle(ctx) {
       return ctx.cycleCounter;
+    }
+
+    function serialOutputDelay(ctx, fallback) {
+      if (typeof serialOutputClockPeriod === "function") {
+        const period = serialOutputClockPeriod(ctx) | 0;
+        if (period > 0) return period;
+      }
+      return fallback;
     }
 
     function setSioCommandLine(ctx, level) {
@@ -413,7 +422,12 @@
       // intentionally independent of the response-byte state machine.
       setSioCommandLine(ctx, 0);
 
-      io.serialOutputNeedDataCycle = now + SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
+      const clockPeriod = serialOutputDelay(
+        ctx,
+        SERIAL_OUTPUT_DATA_NEEDED_CYCLES,
+      );
+      io.serialOutputNeedDataCycle = now + clockPeriod;
+      io.serialOutputTransmissionDoneCycle = now + clockPeriod * 20;
       cycleTimedEventUpdate(ctx);
 
       const buf = io.sioBuffer;
@@ -429,7 +443,7 @@
         if (dataIndex !== expected) return;
 
         io.serialOutputTransmissionDoneCycle =
-          now + SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES;
+          now + serialOutputDelay(ctx, SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES) * 20;
         cycleTimedEventUpdate(ctx);
 
         const dataBytes = io.sioPendingBytes | 0;
@@ -480,7 +494,7 @@
       }
 
       io.serialOutputTransmissionDoneCycle =
-        now + SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES;
+        now + serialOutputDelay(ctx, SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES) * 20;
       cycleTimedEventUpdate(ctx);
 
       const dev = buf[0] & 0xff;

@@ -14,7 +14,7 @@ function checksum(bytes) {
   return value & 0xff;
 }
 
-function loadApi() {
+function loadApi(serialOutputClockPeriod) {
   const source = fs.readFileSync(
     path.join(__dirname, "..", "js", "core", "pokey_sio.js"),
     "utf8",
@@ -36,6 +36,7 @@ function loadApi() {
     SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES: 1,
     SERIAL_INPUT_FIRST_DATA_READY_CYCLES: 1,
     SERIAL_INPUT_DATA_READY_CYCLES: 1,
+    serialOutputClockPeriod: serialOutputClockPeriod,
     cycleTimedEventUpdate: function () {},
   });
 }
@@ -95,6 +96,25 @@ function main() {
   assert.equal(activities[0].operation, "write");
   assert.equal(ctx.ioData.sioBuffer[0], "A".charCodeAt(0));
   assert.equal(ctx.ioData.sioBuffer[1], "C".charCodeAt(0));
+
+  // AHRM 5.6: reading SERIN returns the byte but does not acknowledge the
+  // active-low serial input IRQ status bit.
+  ctx.ioData.sioBuffer[0] = 0x43;
+  ctx.ioData.sioInIndex = 0;
+  ctx.ioData.sioInSize = 1;
+  ctx.ram[0xd20e] = 0xdf;
+  assert.equal(api.serinRead(ctx), 0x43);
+  assert.equal(ctx.ram[0xd20e] & 0x20, 0x00);
+
+  // AHRM 5.6: standard SIO output deadlines follow the configured timer-4
+  // period. The multiplier covers the ten-bit serial frame at two timer
+  // phases per bit; an external-clock setup uses the legacy fallback.
+  const clockedApi = loadApi(function () { return 47; });
+  const clockedCtx = makeContext(function () {}, function () {});
+  clockedCtx.cycleCounter = 100;
+  clockedApi.seroutWrite(clockedCtx, 0x55);
+  assert.equal(clockedCtx.ioData.serialOutputNeedDataCycle, 147);
+  assert.equal(clockedCtx.ioData.serialOutputTransmissionDoneCycle, 1040);
   console.log("pokey_sio_disk_observer.test.js passed");
 }
 

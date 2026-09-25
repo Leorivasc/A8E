@@ -152,10 +152,36 @@ function testSkctlModeChangesDoNotRetroactivelyRescaleElapsedTime() {
   assert.equal(ctx.ram[IO_AUDCTL_ALLPOT], 0xff);
 }
 
+function testFastScanLiveReadsUseAdjacentCounterAnd() {
+  const api = loadPokeyApi();
+  const ctx = makeContext();
+  const expected = [
+    0x00, 0x00, 0x00, 0x02, 0x00, 0x04, 0x04, 0x06,
+    0x00, 0x08, 0x08, 0x0a, 0x08, 0x0c, 0x0c, 0x0e, 0x00,
+  ];
+
+  ctx.sram[IO_SKCTL_SKSTAT] = 0x07;
+  api.potStartScan(ctx);
+  for (let cycle = 0; cycle < expected.length; cycle++) {
+    ctx.cycleCounter = cycle;
+    api.potUpdate(ctx);
+    assert.equal(api.potReadValue(ctx, 0), expected[cycle]);
+  }
+
+  ctx.cycleCounter = 229;
+  api.potUpdate(ctx);
+  assert.equal(api.potReadValue(ctx, 0), 228);
+  ctx.cycleCounter = 230;
+  api.potUpdate(ctx);
+  assert.equal(ctx.ram[IO_AUDF1_POT0], 229);
+  assert.equal(api.potReadValue(ctx, 0), 229);
+}
+
 function main() {
   testSlowScanUsesScanlineRateAndRunsToCompletion();
   testFastScanUsesMachineClockAndEndsAt229();
   testSkctlModeChangesDoNotRetroactivelyRescaleElapsedTime();
+  testFastScanLiveReadsUseAdjacentCounterAnd();
   console.log("pokey_pot_scan.test.js passed");
 }
 

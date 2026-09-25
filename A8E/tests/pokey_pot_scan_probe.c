@@ -201,6 +201,42 @@ static int TestSkctlModeChangesDoNotRetroactivelyRescaleElapsedTime(void)
 	return 1;
 }
 
+static int TestFastScanLiveReadsUseAdjacentCounterAnd(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	static const u8 aExpected[] = {
+		0x00, 0x00, 0x00, 0x02, 0x00, 0x04, 0x04, 0x06,
+		0x00, 0x08, 0x08, 0x0a, 0x08, 0x0c, 0x0c, 0x0e, 0x00};
+	u32 i;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetPotState(&tMachine);
+	pContext->pShadowMemory[IO_SKCTL_SKSTAT] = 0x07;
+	Pokey_PotStartScan(pContext);
+
+	for(i = 0; i < sizeof(aExpected) / sizeof(aExpected[0]); i++)
+	{
+		u8 *pValue;
+		pContext->llCycleCounter = i;
+		pValue = Pokey_AUDF1_POT0(pContext, NULL);
+		REQUIRE(*pValue == aExpected[i],
+				"fast live read at cycle %u returned %02X, expected %02X",
+				(unsigned)i, *pValue, aExpected[i]);
+	}
+
+	pContext->llCycleCounter = 229;
+	REQUIRE(*Pokey_AUDF1_POT0(pContext, NULL) == 228,
+			"terminal fast live read did not return 228 AND 229");
+	pContext->llCycleCounter = 230;
+	REQUIRE(*Pokey_AUDF1_POT0(pContext, NULL) == 229,
+			"post-scan read did not return the latched 229 value");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
 int main(int argc, char *argv[])
 {
 	if(!TestSlowScanUsesScanlineRateAndRunsToCompletion())
@@ -214,6 +250,11 @@ int main(int argc, char *argv[])
 	}
 
 	if(!TestSkctlModeChangesDoNotRetroactivelyRescaleElapsedTime())
+	{
+		return 1;
+	}
+
+	if(!TestFastScanLiveReadsUseAdjacentCounterAnd())
 	{
 		return 1;
 	}

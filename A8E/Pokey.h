@@ -56,7 +56,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue);
 u8 *Pokey_IRQEN_IRQST(_6502_Context_t *pContext, u8 *pValue);
 u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue);
 
-/* Returns the timer period in CPU cycles for timer 1/2/4. Returns 0 if disabled. */
+/* Returns the timer period in CPU cycles for timer 1/2/4. AUDF=0 is valid. */
 u64 Pokey_TimerPeriodCpuCycles(_6502_Context_t *pContext, u8 timer);
 
 void Pokey_Init(_6502_Context_t *pContext);

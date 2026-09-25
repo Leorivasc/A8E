@@ -299,6 +299,7 @@
     window.A8EPokeyAudio && window.A8EPokeyAudio.createApi
       ? window.A8EPokeyAudio.createApi({
           ATARI_CPU_HZ_PAL: ATARI_CPU_HZ_PAL,
+          CYCLES_PER_LINE: CYCLES_PER_LINE,
           POKEY_AUDIO_MAX_CATCHUP_CYCLES: POKEY_AUDIO_MAX_CATCHUP_CYCLES,
           CYCLE_NEVER: CYCLE_NEVER,
           SERIAL_OUTPUT_DATA_NEEDED_CYCLES: SERIAL_OUTPUT_DATA_NEEDED_CYCLES,
@@ -338,6 +339,8 @@
   const pokeyPotPrepareSkctlWrite = pokeyAudioApi.potPrepareSkctlWrite;
   const pokeyPotStartScan = pokeyAudioApi.potStartScan;
   const pokeyPotUpdate = pokeyAudioApi.potUpdate;
+  const pokeyPotReadValue = pokeyAudioApi.potReadValue;
+  const pokeyPotStepCycles = pokeyAudioApi.potStepCycles;
   const pokeyTimerPeriodCpuCycles = pokeyAudioApi.timerPeriodCpuCycles;
   const pokeyRestartTimers = pokeyAudioApi.restartTimers;
   const pokeyArmInactiveTimers = pokeyAudioApi.armInactiveTimers;
@@ -427,6 +430,7 @@
           pokeySeroutWrite: pokeySeroutWrite,
           pokeySerinRead: pokeySerinRead,
           pokeyPotUpdate: pokeyPotUpdate,
+          pokeyPotReadValue: pokeyPotReadValue,
           recordPmgRegisterWrite: function (ctx, address, value) {
             return gtiaApi.recordPmgRegisterWrite(ctx, address, value);
           },
@@ -747,6 +751,19 @@
         skctl: ctx.sram[IO_SKCTL_SKSTAT] & 0xff,
         timer4PeriodCpuCycles: pokeyTimerPeriodCpuCycles(ctx, 4) >>> 0,
         timer4Cycle: io.timer4Cycle,
+        potScanActive: !!io.pokeyPotScanActive,
+        potCounter: io.pokeyPotCounter & 0xff,
+        potLastCycle: io.pokeyPotScanLastCycle >>> 0,
+        potTerminalCycle:
+          io.pokeyPotScanTerminalCycle === CYCLE_NEVER
+            ? null
+            : io.pokeyPotScanTerminalCycle >>> 0,
+        allpot: ctx.ram[IO_AUDCTL_ALLPOT] & 0xff,
+        pot0: ctx.ram[IO_AUDF1_POT0] & 0xff,
+        potStepCycles: pokeyPotStepCycles(ctx),
+        allpotIoMapped: ctx.accessFunctionList[IO_AUDCTL_ALLPOT] === ioAccess,
+        potgoIoMapped: ctx.accessFunctionList[IO_POTGO] === ioAccess,
+        skctlIoMapped: ctx.accessFunctionList[IO_SKCTL_SKSTAT] === ioAccess,
         cpuIrqPending: ctx.irqPending | 0,
         cpuInterruptMask: CPU.getPs(ctx) & 0x04 ? 1 : 0,
       };

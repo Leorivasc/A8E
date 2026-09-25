@@ -31,6 +31,10 @@
             SERIAL_INPUT_FIRST_DATA_READY_CYCLES:
               cfg.SERIAL_INPUT_FIRST_DATA_READY_CYCLES,
             SERIAL_INPUT_DATA_READY_CYCLES: cfg.SERIAL_INPUT_DATA_READY_CYCLES,
+            serialOutputClockPeriod: function (ctx) {
+              const period = pokeyTimerPeriodCpuCycles(ctx, 4);
+              return period || cfg.SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
+            },
             cycleTimedEventUpdate: cycleTimedEventUpdate,
           })
         : null;
@@ -1045,6 +1049,33 @@
       }
     }
 
+    // AHRM 5.9: a live POT read can sample the counter while it increments.
+    // Return the deterministic adjacent-counter AND without changing the
+    // stored value used after the input latches.
+    function pokeyPotReadValue(ctx, potIndex) {
+      const io = ctx.ioData;
+      if (
+        !io ||
+        potIndex < 0 ||
+        potIndex >= 8 ||
+        !io.pokeyPotScanActive ||
+        io.pokeyPotLatched[potIndex]
+      ) {
+        return ctx.ram[(IO_AUDF1_POT0 + potIndex) & 0xffff] & 0xff;
+      }
+
+      const count = io.pokeyPotCounter & 0xff;
+      if (count === 0) return 0;
+
+      if (
+        pokeyPotFastScanEnabled(ctx) ||
+        io.pokeyPotScanLastCycle === ctx.cycleCounter
+      ) {
+        return ((count - 1) & count) & 0xff;
+      }
+      return count;
+    }
+
     function pokeyTimerPeriodCpuCycles(ctx, timer) {
       const sram = ctx.sram;
       // Hold timers when POKEY clocks are in reset (SKCTL bits0..1 = 0).
@@ -1057,14 +1088,12 @@
       if (timer === 1) {
         // In 16-bit mode (ch1+ch2), timer1 has no independent divider output.
         if (audctl & 0x10) return 0;
-        if ((sram[IO_AUDF1_POT0] & 0xff) === 0) return 0;
         div = audctl & 0x40 ? 1 : base;
         reload = (sram[IO_AUDF1_POT0] & 0xff) + (audctl & 0x40 ? 4 : 1);
         return (reload * div) >>> 0;
       }
 
       if (timer === 2) {
-        if ((sram[IO_AUDF2_POT2] & 0xff) === 0) return 0;
         if (audctl & 0x10) {
           const period12 =
             ((sram[IO_AUDF2_POT2] & 0xff) << 8) | (sram[IO_AUDF1_POT0] & 0xff);
@@ -1078,7 +1107,6 @@
       }
 
       if (timer === 4) {
-        if ((sram[IO_AUDF4_POT6] & 0xff) === 0) return 0;
         if (audctl & 0x08) {
           const period34 =
             ((sram[IO_AUDF4_POT6] & 0xff) << 8) | (sram[IO_AUDF3_POT4] & 0xff);
@@ -1154,6 +1182,8 @@
       potPrepareSkctlWrite: pokeyPotPrepareSkctlWrite,
       potStartScan: pokeyPotStartScan,
       potUpdate: pokeyPotUpdate,
+      potReadValue: pokeyPotReadValue,
+      potStepCycles: pokeyPotStepCycles,
       timerPeriodCpuCycles: pokeyTimerPeriodCpuCycles,
       restartTimers: pokeyRestartTimers,
       armInactiveTimers: pokeyArmInactiveTimers,

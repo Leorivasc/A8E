@@ -803,21 +803,11 @@ u64 Pokey_TimerPeriodCpuCycles(_6502_Context_t *pContext, u8 timer)
 		{
 			return 0;
 		}
-		if(SRAM[IO_AUDF1_POT0] == 0)
-		{
-			return 0;
-		}
-
 		div = (audctl & 0x40) ? 1ull : (u64)base;
 		reload = (u64)SRAM[IO_AUDF1_POT0] + ((audctl & 0x40) ? 4ull : 1ull);
 		return reload * div;
 
 	case 2:
-		if(SRAM[IO_AUDF2_POT2] == 0)
-		{
-			return 0;
-		}
-
 		if(audctl & 0x10)
 		{
 			u32 period12 = (((u32)SRAM[IO_AUDF2_POT2]) << 8) | (u32)SRAM[IO_AUDF1_POT0];
@@ -831,11 +821,6 @@ u64 Pokey_TimerPeriodCpuCycles(_6502_Context_t *pContext, u8 timer)
 		return reload * div;
 
 	case 4:
-		if(SRAM[IO_AUDF4_POT6] == 0)
-		{
-			return 0;
-		}
-
 		if(audctl & 0x08)
 		{
 			u32 period34 = (((u32)SRAM[IO_AUDF4_POT6]) << 8) | (u32)SRAM[IO_AUDF3_POT4];
@@ -1641,6 +1626,38 @@ void Pokey_PotUpdate(_6502_Context_t *pContext)
 	}
 }
 
+/* AHRM 5.9: a live POT read can sample the counter while it increments. The
+ * resulting value is the bitwise AND of the adjacent counter values. Keep the
+ * stored POT value stable; this helper only changes the value observed by the
+ * current read. */
+static u8 Pokey_PotReadValue(_6502_Context_t *pContext, u32 lPotIndex)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u8 cCount;
+
+	if(!pIoData || lPotIndex >= 8 || !pIoData->cPotScanActive ||
+	   pIoData->aPotLatched[lPotIndex])
+	{
+		return RAM[(IO_AUDF1_POT0 + lPotIndex) & 0xffff];
+	}
+
+	cCount = pIoData->cPotScanCounter;
+	if(cCount == 0)
+	{
+		return 0;
+	}
+
+	/* Fast scans advance every cycle; slow scans advance on the current
+	 * scanline boundary, represented by llPotScanLastCycle. */
+	if(Pokey_PotScanFastEnabled(pContext) ||
+	   pIoData->llPotScanLastCycle == pContext->llCycleCounter)
+	{
+		return (u8)((cCount - 1u) & cCount);
+	}
+
+	return cCount;
+}
+
 /* $D200 AUDF1/POT0 */
 u8 *Pokey_AUDF1_POT0(_6502_Context_t *pContext, u8 *pValue)
 {
@@ -1664,6 +1681,7 @@ u8 *Pokey_AUDF1_POT0(_6502_Context_t *pContext, u8 *pValue)
 	else
 	{
 		Pokey_PotUpdate(pContext);
+		RAM[IO_AUDF1_POT0] = Pokey_PotReadValue(pContext, 0);
 	}
 
 	return &RAM[IO_AUDF1_POT0];
@@ -1684,6 +1702,7 @@ u8 *Pokey_AUDC1_POT1(_6502_Context_t *pContext, u8 *pValue)
 	else
 	{
 		Pokey_PotUpdate(pContext);
+		RAM[IO_AUDF2_POT2] = Pokey_PotReadValue(pContext, 2);
 	}
 
 	return &RAM[IO_AUDC1_POT1];
@@ -1712,6 +1731,7 @@ u8 *Pokey_AUDF2_POT2(_6502_Context_t *pContext, u8 *pValue)
 	else
 	{
 		Pokey_PotUpdate(pContext);
+		RAM[IO_AUDF3_POT4] = Pokey_PotReadValue(pContext, 4);
 	}
 
 	return &RAM[IO_AUDF2_POT2];
@@ -1732,6 +1752,7 @@ u8 *Pokey_AUDC2_POT3(_6502_Context_t *pContext, u8 *pValue)
 	else
 	{
 		Pokey_PotUpdate(pContext);
+		RAM[IO_AUDF4_POT6] = Pokey_PotReadValue(pContext, 6);
 	}
 
 	return &RAM[IO_AUDC2_POT3];
@@ -2002,6 +2023,28 @@ static u8 cSioPendingCmd = 0;
 static u16 sSioPendingSector = 0;
 static u16 sSioPendingBytes = 0;
 
+/* AHRM 5.6: standard SIO output uses timer 4 as its internal clock. Keep the
+ * fixed virtual delay only for external-clock or otherwise unconfigured modes. */
+static u64 Pokey_SerialOutputClockPeriod(_6502_Context_t *pContext)
+{
+	u8 cSkctl;
+	u8 cMode;
+	u64 period;
+
+	if(!pContext)
+	{
+		return SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
+	}
+	cSkctl = SRAM[IO_SKCTL_SKSTAT];
+	cMode = (u8)((cSkctl >> 4) & 0x07);
+	if(cMode != 2 && cMode != 3)
+	{
+		return SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
+	}
+	period = Pokey_TimerPeriodCpuCycles(pContext, 4);
+	return period ? period : SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
+}
+
 static u8 AtariIo_SioChecksum(u8 *pBuffer, u32 lSize)
 {
 	u8 cChecksum = 0;
@@ -2081,12 +2124,15 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		 * electrical transition separate from the response-byte model. */
 		Pia_SetCb2Line(pContext, 0);
 		u64 llNow = PokeyMasterReferenceCycle(pContext);
+		u64 llSerialClockPeriod = Pokey_SerialOutputClockPeriod(pContext);
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SEROUT ", pContext->llCycleCounter);
 		printf("(%02X)!\n", *pValue);
 #endif
 		pIoData->llSerialOutputNeedDataCycle =
-			llNow + SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
+			llNow + llSerialClockPeriod;
+		pIoData->llSerialOutputTransmissionDoneCycle =
+			llNow + llSerialClockPeriod * 20;
 
 		AtariIoCycleTimedEventUpdate(pContext);
 
@@ -2108,7 +2154,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 				u8 calculated = AtariIo_SioChecksum(&aSioBuffer[SIO_DATA_OFFSET], sSioPendingBytes);
 
 				pIoData->llSerialOutputTransmissionDoneCycle =
-					llNow + SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES;
+					llNow + Pokey_SerialOutputClockPeriod(pContext) * 20;
 				AtariIoCycleTimedEventUpdate(pContext);
 
 				Pokey_SioSectorBytesAndOffset(sSioPendingSector, sSectorSize, &sBytesToRead, &lOffset);
@@ -2191,8 +2237,8 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						printf("\n");
 					}
 #endif
-					pIoData->llSerialOutputTransmissionDoneCycle =
-						llNow + SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES;
+						pIoData->llSerialOutputTransmissionDoneCycle =
+							llNow + Pokey_SerialOutputClockPeriod(pContext) * 20;
 
 					AtariIoCycleTimedEventUpdate(pContext);
 

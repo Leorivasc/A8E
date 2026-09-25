@@ -679,4 +679,86 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
 - 2026-09-25: `A8E/{AtariIo.c,AtariIo.h,Gtia.c}`, `jsA8E/js/core/{antic,atari,gtia,io,memory,state}.js`, and `jsA8E/tests/gtia_pmg_dma_regression.test.js`: started AHRM-07 by recording bounded per-scanline PMG register writes and DMA latch events in both cores. The hidden PMG prefix now replays the line-start register snapshot plus events, so mid-line HPOS/SIZE/GRAFP/GRAFM changes no longer retroactively use the final state. Native writes use the final 6502 instruction cycle, JS snapshots preserve the event log, and overflow intentionally falls back to the prior renderer behavior. PRIOR/PMBASE raster fixtures and collision-focused validation remain pending.
 - 2026-09-25: `A8E/tests/antic_graphics_modes_probe.c` and `jsA8E/tests/gtia_pmg_dma_regression.test.js`: added native and JS AHRM-07 regressions for hidden-prefix HPOS replay and live PMBASE changes between player DMA slots, preserving the documented mixed-base line behavior. PRIOR fixtures and collision-latch validation remain pending.
 - 2026-09-25: `A8E/tests/antic_graphics_modes_probe.c` and `jsA8E/tests/gtia_pmg_dma_regression.test.js`: added native and JS regressions for mid-line PRIOR changes and player collision latches. Earlier pixels remain unchanged after a PRIOR write, later spans use the new priority, and overlapping players set both AHRM collision bits. AHRM-07 synthetic probe coverage is complete; real-content validation remains pending.
+- 2026-09-25: `A8E/Pokey.c`, `jsA8E/js/core/pokey.js`, and the new timer-period probes: began AHRM-08 by treating `AUDF=0` as the valid minimum timer divisor in native and JS, including linked fast-clock periods. Previously those values were incorrectly treated as disabled, which could suppress timer IRQ and serial timing at the fastest settings.
+- 2026-09-25: `A8E/Pokey.c`, `jsA8E/js/core/{pokey,io}.js`, and the paddle probes: added the AHRM 5.9 deterministic live-counter read behavior. Active `POT0-7` reads now return the adjacent-counter AND on the increment cycle without corrupting the latched register value; the native and JS fast-scan sequence tests cover the documented values and terminal hold.
+- 2026-09-25: `jsA8E/js/core/io.js` and `jsA8E/tests/pokey_sio_disk_observer.test.js`: removed the browser-only clearing of `IRQST` bit 5 when reading `SERIN`. AHRM 5.6 makes SERIN reads side-effect free; the input-ready status is now consistent with native A8E and the documented IRQ acknowledge path.
+- 2026-09-25: `implementation/traces/pokey_timer_contract.jsonl`,
+  `A8E/tests/pokey_timer_period_probe.c`, and
+  `jsA8E/tests/pokey_timer_period.test.js`: promoted the AHRM-08 AUDF=0,
+  fast-clock, and linked-timer checks to one shared native/JS JSONL contract.
+  The fixture intentionally covers timer periods only; cycle-perfect STIMER
+  reload sequencing remains a separate pending item.
+- 2026-09-25: `A8E/CMakeLists.txt`: native CTest probes now run from the
+  repository root, where `ATARIBAS.ROM` and `ATARIXL.ROM` are provided. This
+  fixes the test-runner path failure without changing emulator behavior. SDL
+  audio/video dummy drivers are also set for those probes so CTest does not
+  depend on a host audio device or display server.
+- 2026-09-25: `implementation/alignment_23Sept26.md`: documented the AHRM-08
+  completion boundary. Exact STIMER/SIO phase alignment needs a cycle trace,
+  while audio calibration needs a fixed PAL/NTSC reference capture; neither is
+  inferred from host playback or changed through a register-level workaround.
+- 2026-09-25: `implementation/AHRM08_POKEY_TEST.{asm,XEX,md}` and
+  `jsA8E/tests/ahrm08_pokey_xex.test.js`: added a portable guest-level POKEY
+  diagnostic. It records timer IRQ polling counts for normal, fast, AUDF=5,
+  and linked timers, SEROUT event counts, and POT/ALLPOT results for comparison
+  across jsA8E, native A8E, Altirra, and hardware. It deliberately reports
+  observations instead of manufacturing PASS/FAIL values.
+- 2026-09-25: `implementation/AHRM08_POKEY_TEST.asm`: corrected the diagnostic
+  result renderer to use Atari screen-code hexadecimal digits. The first
+  generated artifact displayed raw ASCII bytes as glyphs, so its numeric
+  results were not interpretable even though the tests themselves ran.
+- 2026-09-25: `implementation/AHRM08_POKEY_TEST.asm`: reset POKEY into and out
+  of initialization mode before every measured scenario, clearing IRQEN first.
+  This prevents indeterminate power-up timer/serial state from producing
+  immediate `00` results or contaminating cross-target comparisons.
+- 2026-09-25: `implementation/AHRM08_POKEY_TEST.asm`: hardened the external
+  diagnostic's baseline by clearing pending IRQ sources through an
+  enable-then-disable sequence, enabling timer IRQs after STIMER, and selecting
+  AHRM's `SKCTL=$23` serial output clock before the SEROUT cases.
+- 2026-09-25: `implementation/AHRM08_POKEY_TEST.asm`: made timer polling clear
+  IRQEN once more after STIMER and configured the serial case with the AHRM
+  linked timer 3+4 19.2 kbaud setup (`AUDCTL=$28`, divisor `$0028`,
+  `SKCTL=$23`).
+- 2026-09-25: `implementation/AHRM08_POKEY_TEST.md` and
+  `implementation/alignment_23Sept26.md`: recorded the first external
+  AHRM-08 comparison. Altirra/hardware agree on POT completion and closely
+  agree on SEROUT timing, while jsA8e diverges in both areas; AUDF=5 matches,
+  and AUDF=0 remains inconclusive at the current guest polling boundary.
+- 2026-09-25: `A8E/Pokey.c` and `jsA8E/js/core/pokey_sio.js`: standard SIO
+  output deadlines now derive from the configured timer-4 period in AHRM
+  serial modes 2/3 instead of always using the virtual 900/1500-cycle delays.
+  External-clock or unconfigured modes retain the fixed-delay fallback.
+- 2026-09-25: `jsA8E/tests/pokey_pot_io_path.test.js`: added an integration
+  regression that drives `SKCTL`, `POTGO`, `ALLPOT`, and `POT0` through the
+  actual JS I/O dispatcher. It passes the completed slow-scan contract, so
+  the remaining external POT discrepancy is isolated to the full worker/guest
+  execution path rather than the POKEY or I/O unit path.
+- 2026-09-25: `jsA8E/js/core/atari.js`: extended the existing debugger POKEY
+  state with the current POT scan flags, counter, terminal cycle, ALLPOT, and
+  POT0 values. This is debugger observability only; it adds no per-cycle trace
+  or normal-mode work and is intended to identify where the full guest path
+  diverges from the passing POKEY/I/O integration probe.
+- 2026-09-25: `jsA8E/js/core/atari.js` and
+  `jsA8E/tests/pokey_pot_cpu_dispatch.test.js`: verified the POT scan through
+  real 6502 instructions and exposed the three POKEY mapping checks in the
+  debugger state. This separates a lost full-machine I/O mapping from a
+  register-model failure without adding runtime tracing.
+- 2026-09-25: `jsA8E/emulator_worker.js`: extended the opt-in memory-access
+  diagnostic filter to include the POKEY register range `$D200-$D20F`. The
+  worker can now report the guest's actual `ALLPOT` reads without tracing the
+  full address space or adding work while the diagnostic is disabled.
+- 2026-09-25: `jsA8E/emulator_worker.js`: included the CPU access mode in the
+  opt-in POKEY memory events. This distinguishes an I/O handler dispatch from
+  an accidental RAM/ROM fast path while investigating the full guest POT scan.
+- 2026-09-25: `jsA8E/js/core/{pokey,atari}.js`: exposed the effective POT
+  scan step in debugger state. This is a single state query, not a per-cycle
+  trace, and distinguishes a disabled scan clock from a failed counter update.
+- 2026-09-25: `jsA8E/js/core/atari.js`: passed `CYCLES_PER_LINE` into the
+  full POKEY API configuration. Without it, the standalone POT probes used
+  the correct 114-cycle slow-scan step while the worker's full-machine path
+  used an undefined step and left `POT0/ALLPOT` frozen after `POTGO`.
+- 2026-09-25: Chrome validation with `AHRM08_POKEY_TEST.XEX` confirmed the
+  full-worker fix: `potStepCycles=114`, `potCounter=228`, `ALLPOT=00`, and
+  `POT0=228` (`$E4`). The jsA8e guest-visible POT result now matches Altirra
+  and hardware.
 - 2026-09-25: `implementation/AHRM07_PMG_TEST.{asm,XEX,md}` and `jsA8E/tests/ahrm07_pmg_xex.test.js`: added a standalone AHRM-07 executable. It exercises visible PMG DMA, PMBASE changes, DLI-driven HPOS/PRIOR changes, and real P0/P1 collision latches; each raster phase is held for 32 frames to make visual transitions deterministic, and the screen now explains the bars, phase timing, and real collision result. The assembler regression verifies that the checked-in XEX is reproducible from its source.

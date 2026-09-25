@@ -569,6 +569,53 @@ Acceptance criteria:
 - Audio differences are characterized as intentional analog approximations,
   not unexplained core divergence.
 
+Status: **in progress; timer minimum divisor and live POT reads corrected and covered on 2026-09-25**.
+
+- Native A8E and jsA8E now treat `AUDF=0` as the valid minimum divisor rather
+  than as a disabled timer. This includes linked 16-bit fast-clock periods.
+- Added matching native and JS timer-period probes.
+- Live `POT0-7` reads now reproduce the documented adjacent-counter AND during
+  active scans, while stored latched values remain stable and the terminal
+  scan result remains unchanged. Native and JS paddle probes cover the fast
+  scan sequence through the terminal hold cycle.
+- Added `implementation/traces/pokey_timer_contract.jsonl`, consumed by both
+  native and JS probes, for the shared AUDF=0 normal/fast/linked timer
+  contract. This is a digital period contract, not a claim of cycle-perfect
+  STIMER reload timing.
+- Added `implementation/AHRM08_POKEY_TEST.XEX`, a portable guest-level
+  diagnostic that records timer IRQ, SEROUT, and POT/ALLPOT observations for
+  external comparison on jsA8E, native A8E, Altirra, and hardware.
+- STIMER pipeline/SIO event differential fixtures, capacitor
+  discharge/threshold behavior, and audio calibration are still pending.
+
+Completion boundary requiring external reference:
+
+- The current timer deadline is an IRQ/event scheduling abstraction. AHRM
+  distinguishes the first STIMER reload, subsequent counter reloads, audio
+  pulses, IRQ assertion, linked-timer delay, and two-tone resync. These cannot
+  be collapsed into one deadline safely without a cycle trace for regression.
+- To finish the digital timing portion, provide either an Altirra trace or a
+  hardware-observed result for a small timer/SIO diagnostic covering STIMER at
+  cycle zero, AUDF=0 and AUDF=5, linked timers, IRQST timing, and SERIN/SEROUT
+  response phases. The same diagnostic can then become the next JSONL contract.
+- To finish audio calibration, provide a fixed reference capture for the same
+  PAL or NTSC target. A 48 kHz mono PCM/WAV capture of the four-voice Self
+  Test and the Prince of Persia `launcher.obx` intro, recorded at a stated
+  line-level/volume setting, is sufficient. Native and browser output can be
+  compared against it without changing POKEY register semantics.
+- The guest-level POT discrepancy was traced to the full POKEY construction
+  path: `CYCLES_PER_LINE` was omitted from the worker's POKEY API
+  configuration, so slow scans never advanced even though the standalone
+  POKEY/I/O probes passed. Passing it corrected Chrome/jsA8e to
+  `potStepCycles=114`, `ALLPOT=00`, and `POT0=E4`, matching Altirra and
+  hardware. The timer-4-derived SIO deadline now produces `01/14` in jsA8e
+  versus `02/15` and `03/15` externally, reducing the remaining difference
+  to a polling-phase boundary that still needs exact tracing. `T1 NORMAL AUDF5`
+  matches at `04`; AUDF=0 remains a boundary measurement issue rather than a
+  certified mismatch.
+- Until those references exist, the current digital fixes are safe to merge,
+  but AHRM-08 must remain **in progress** rather than being marked complete.
+
 ### AHRM-09: Build a cross-core AHRM differential harness
 
 Status: **foundation implemented; expand incrementally with each AHRM item**

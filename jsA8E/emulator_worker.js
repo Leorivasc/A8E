@@ -1037,12 +1037,16 @@
         // Memory access hooks are diagnostic-only and are intentionally not
         // serialized across the Worker boundary.
         if (typeof app.setMemoryAccessHook === "function") {
-          app.setMemoryAccessHook(data.enabled ? function (kind, address, value, cycle, instruction, pc, opcode) {
-            if (address !== 0xd301 && (address < 0x4000 || address > 0x7fff)) return;
+          app.setMemoryAccessHook(data.enabled ? function (kind, address, value, cycle, instruction, pc, opcode, ctx) {
+            const isPiaPortB = address === 0xd301;
+            const isMemoryExpansionWindow = address >= 0x4000 && address <= 0x7fff;
+            const isPokeyRegister = address >= 0xd200 && address <= 0xd20f;
+            if (!isPiaPortB && !isMemoryExpansionWindow && !isPokeyRegister) return;
             self.postMessage({
               type: "memoryAccess",
               access: {
                 kind, address, value, cycle, instruction, pc, opcode,
+                accessMode: ctx && typeof ctx.accessMode === "number" ? ctx.accessMode : null,
                 bank: typeof app.getBankState === "function" ? app.getBankState() : null,
               },
             });

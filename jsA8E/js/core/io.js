@@ -83,6 +83,7 @@
     const pokeySeroutWrite = cfg.pokeySeroutWrite;
     const pokeySerinRead = cfg.pokeySerinRead;
     const pokeyPotUpdate = cfg.pokeyPotUpdate;
+    const pokeyPotReadValue = cfg.pokeyPotReadValue;
     const TRIG_REGS = [
       IO_GRAFP3_TRIG0,
       IO_GRAFM_TRIG1,
@@ -760,9 +761,8 @@
           return ram[addr] & 0xff;
 
         case IO_SEROUT_SERIN:
-          // On real POKEY, reading SERIN acknowledges the data-ready condition:
-          // bit 5 (serial input data ready) → 1: byte consumed, not ready
-          ram[IO_IRQEN_IRQST] |= 0x20;
+          // AHRM 5.6: reading SERIN does not acknowledge the data-ready
+          // condition. IRQST is cleared through its normal IRQEN protocol.
           return pokeySerinRead(ctx);
 
         case IO_AUDF1_POT0:
@@ -773,8 +773,15 @@
         case IO_AUDC3_POT5:
         case IO_AUDF4_POT6:
         case IO_AUDC4_POT7:
-        case IO_AUDCTL_ALLPOT:
-          pokeyPotUpdate(ctx);
+          case IO_AUDCTL_ALLPOT:
+            pokeyPotUpdate(ctx);
+          if (addr === IO_AUDF1_POT0 || addr === IO_AUDF2_POT2 ||
+              addr === IO_AUDF3_POT4 || addr === IO_AUDF4_POT6) {
+            const potIndex = addr - IO_AUDF1_POT0;
+            return pokeyPotReadValue
+              ? pokeyPotReadValue(ctx, potIndex)
+              : ram[addr] & 0xff;
+          }
           return ram[addr] & 0xff;
 
         case IO_SKCTL_SKSTAT:
