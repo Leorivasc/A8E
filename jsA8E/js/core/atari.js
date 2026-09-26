@@ -343,6 +343,9 @@
   const pokeyPotReadValue = pokeyAudioApi.potReadValue;
   const pokeyPotStepCycles = pokeyAudioApi.potStepCycles;
   const pokeyTimerPeriodCpuCycles = pokeyAudioApi.timerPeriodCpuCycles;
+  const pokeySerialOutputClockTimer = pokeyAudioApi.serialOutputClockTimer;
+  const pokeySerialOutputClockTimerExpired =
+    pokeyAudioApi.serialOutputClockTimerExpired;
   const pokeyRestartTimers = pokeyAudioApi.restartTimers;
   const pokeyArmInactiveTimers = pokeyAudioApi.armInactiveTimers;
   const pokeySeroutWrite = pokeyAudioApi.seroutWrite;
@@ -546,6 +549,9 @@
           fetchPmgDmaCycle: gtiaApi.fetchPmgDmaCycle,
           drawPlayerMissiles: drawPlayerMissiles,
           pokeyTimerPeriodCpuCycles: pokeyTimerPeriodCpuCycles,
+          pokeySerialOutputClockTimer: pokeySerialOutputClockTimer,
+          pokeySerialOutputClockTimerExpired:
+            pokeySerialOutputClockTimerExpired,
           cycleTimedEventUpdate: cycleTimedEventUpdate,
           PRIO_BKG: PRIO_BKG,
           PRIO_PF0: PRIO_PF0,

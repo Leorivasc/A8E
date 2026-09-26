@@ -14,7 +14,11 @@ function checksum(bytes) {
   return value & 0xff;
 }
 
-function loadApi(serialOutputClockPeriod, serialOutputClockAvailable) {
+function loadApi(
+  serialOutputClockPeriod,
+  serialOutputClockAvailable,
+  serialOutputClockNextCycle,
+) {
   const source = fs.readFileSync(
     path.join(__dirname, "..", "js", "core", "pokey_sio.js"),
     "utf8",
@@ -40,6 +44,7 @@ function loadApi(serialOutputClockPeriod, serialOutputClockAvailable) {
     CYCLE_NEVER: Number.POSITIVE_INFINITY,
     serialOutputClockAvailable: serialOutputClockAvailable,
     serialOutputClockPeriod: serialOutputClockPeriod,
+    serialOutputClockNextCycle: serialOutputClockNextCycle,
     cycleTimedEventUpdate: function () {},
   });
 }
@@ -118,6 +123,30 @@ function main() {
   clockedApi.seroutWrite(clockedCtx, 0x55);
   assert.equal(clockedCtx.ioData.serialOutputNeedDataCycle, 147);
   assert.equal(clockedCtx.ioData.serialOutputTransmissionDoneCycle, 1087);
+
+  // AHRM 5.6: DATA NEEDED follows the next rising serial-clock edge, not a
+  // fixed period measured from SEROUT. The high phase skips the next timer
+  // expiry because that expiry is the falling edge.
+  const phaseApi = loadApi(
+    function () { return 56; },
+    function () { return true; },
+    function (ctx) {
+      return ctx.ioData.timer4Cycle + (ctx.ioData.serialOutputClockHigh ? 56 : 0);
+    },
+  );
+  const phaseCtx = makeContext(function () {}, function () {});
+  phaseCtx.cycleCounter = 100;
+  phaseCtx.ioData.timer4Cycle = 140;
+  phaseApi.seroutWrite(phaseCtx, 0x55);
+  assert.equal(phaseCtx.ioData.serialOutputNeedDataCycle, 140);
+  assert.equal(phaseCtx.ioData.serialOutputTransmissionDoneCycle, 1260);
+
+  phaseCtx.ioData.serialOutputNeedDataCycle = 0;
+  phaseCtx.ioData.serialOutputTransmissionDoneCycle = 0;
+  phaseCtx.ioData.serialOutputClockHigh = true;
+  phaseApi.seroutWrite(phaseCtx, 0x55);
+  assert.equal(phaseCtx.ioData.serialOutputNeedDataCycle, 196);
+  assert.equal(phaseCtx.ioData.serialOutputTransmissionDoneCycle, 1316);
 
   // AHRM 5.6: no synthetic output deadlines are created when the selected
   // serial mode has no internal output clock. XMTDONE remains inactive while

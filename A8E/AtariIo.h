@@ -158,6 +158,8 @@ typedef struct
 	u64 llTimer1Cycle;
 	u64 llTimer2Cycle;
 	u64 llTimer4Cycle;
+	u64 llPokeySlowClockOriginCycle;
+	u8 cSerialOutputClockHigh;
 	u8 bInDrawLine;
 	u8 cNmienEnabledByCycle7;
 	u8 cNmienEnabledByCycle8;

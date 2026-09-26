@@ -15,6 +15,7 @@
       cfg.CYCLE_NEVER !== undefined ? cfg.CYCLE_NEVER : Number.POSITIVE_INFINITY;
     const serialOutputClockAvailable = cfg.serialOutputClockAvailable;
     const serialOutputClockPeriod = cfg.serialOutputClockPeriod;
+    const serialOutputClockNextCycle = cfg.serialOutputClockNextCycle;
 
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
 
@@ -81,14 +82,21 @@
       }
 
       const period = serialOutputDelay(ctx, SERIAL_OUTPUT_DATA_NEEDED_CYCLES);
-      if (scheduleNeed) io.serialOutputNeedDataCycle = now + period;
+      const needCycle = scheduleNeed
+        ? typeof serialOutputClockNextCycle === "function"
+          ? serialOutputClockNextCycle(ctx, now)
+          : now + period
+        : 0;
+      if (scheduleNeed) io.serialOutputNeedDataCycle = needCycle;
       if (scheduleDone) {
         const doneDelay = scheduleNeed
           // AHRM 5.6: the first byte is loaded into the shift register on
           // the next output-clock edge, then ten bit cells are transmitted.
           ? period * 21
           : serialOutputDelay(ctx, SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES) * 20;
-        io.serialOutputTransmissionDoneCycle = now + doneDelay;
+        io.serialOutputTransmissionDoneCycle = scheduleNeed
+          ? needCycle + period * 20
+          : now + doneDelay;
       }
       cycleTimedEventUpdate(ctx);
       return true;

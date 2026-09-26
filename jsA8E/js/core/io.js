@@ -574,6 +574,7 @@
             break;
 
           case IO_SKCTL_SKSTAT:
+            const wasPokeyInitializing = (sram[addr] & 0x03) === 0;
             pokeySyncLfsr17(ctx);
             pokeyPotPrepareSkctlWrite(ctx);
             sram[addr] = v;
@@ -590,6 +591,13 @@
               io.sioInIndex = 0;
               io.sioPendingReadSize = 0;
             }
+            // AHRM 5.3: the slow clock phase is set when initialization ends.
+            if (wasPokeyInitializing && (v & 0x03) !== 0) {
+              io.pokeySlowClockOriginCycle = ctx.cycleCounter;
+            }
+            // AHRM 5.6: selecting external clock mode resets the serial
+            // output divide-by-two flip-flop to its low phase.
+            if ((v & 0x70) === 0) io.serialOutputClockHigh = false;
             pokeyArmInactiveTimers(ctx);
             break;
 

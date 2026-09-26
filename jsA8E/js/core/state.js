@@ -25,6 +25,8 @@
         timer1Cycle: CYCLE_NEVER,
         timer2Cycle: CYCLE_NEVER,
         timer4Cycle: CYCLE_NEVER,
+        pokeySlowClockOriginCycle: 0,
+        serialOutputClockHigh: false,
         // PIA data-direction registers and port B output latch. PIA reset
         // leaves both DDRs at zero; external pull-ups determine PORTB's
         // effective MMU value until the OS enables its outputs.

@@ -4,6 +4,44 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-26: `implementation/AHRM08_POKEY_EDGE_TEST.{asm,XEX,md}` and
+  `jsA8E/tests/ahrm08_pokey_edge_xex.test.js`: added a diagnostic that records
+  independent timer-4 IRQ and `DATA NEEDED` polling counts from the same
+  STIMER/SEROUT padding cases. The timer probe now uses `AUDF4=$05` to avoid
+  the first-read `T4=00` resolution limit, while the data probe retains the
+  original single-event polling loop; `TX COMPLETE` runs before the sweep.
+  This isolates timer reload/slow-clock phase from the serial divide-by-two
+  phase before the existing Stage 3 certification fixture is rerun.
+
+- 2026-09-26: AHRM-08 Stage 3 comparison established the current open timing
+  issue. With identical `AHRM08_POKEY_PHASE_TEST.XEX` runs, Altirra and the
+  hardware agree at `03,00,05,04,3A`, while the restored jsA8e/A8E condition
+  reports `00,00,02,04,3A` and `00,00,02,04,38`. `P0` and `P2` therefore expose
+  the same phase-boundary discrepancy; they are not independent padding bugs,
+  and `P1`/`P3` already agree. The final `3A`/`38` difference is tracked
+  separately as a native A8E completion-timing discrepancy.
+
+- 2026-09-26: technical decisions for the Stage 3 investigation: use Altirra
+  as the practical digital reference because it is aligned with the hardware;
+  do not add per-padding delays or tune P0/P2 independently; preserve the
+  currently bootable emulator state until the cause is isolated; and measure
+  the first timer-4 IRQ and `DATA NEEDED` event before changing production
+  timing. AHRM 5.3 supplies the persistent 64 kHz clock phase and STIMER
+  reload rules, AHRM 5.6 supplies the serial divide-by-two/rising-edge and
+  holding-register rules, and AHRM 5.7 explains the IRQ/polling observation
+  boundary. The new edge diagnostic precedes the existing phase XEX, which
+  remains the final certification fixture.
+
+- 2026-09-26: the independent edge diagnostic was run on jsA8e, A8E, and
+  Altirra. Results were jsA8e `T4=06,06,05,04 DATA=00,00,05,04 TX=3B`,
+  A8E `T4=06,06,05,05 DATA=00,00,05,04 TX=3B`, and Altirra
+  `T4=06,06,05,04 DATA=00,02,05,04 TX=3A`. Timer-4 timing therefore matches
+  the reference except for one polling boundary in A8E/P3, while the remaining
+  serial-phase discrepancy is localized to P1. The matching `TX=3B` result in
+  both emulators also means the earlier A8E-only `TX=38` result was likely
+  affected by the original diagnostic's accumulated test order; it is not yet
+  evidence of a separate native completion bug.
+
 - 2026-09-25: `A8E/6502.{h,c}`, `A8E/tests/antic_timing_probe.c`,
   `jsA8E/js/core/cpu.js`, and
   `jsA8E/{js/core/atari_snapshot.js,tests/cpu_interrupt_step_regression.test.js}`:
@@ -803,3 +841,42 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   Stage 2 guest-level digital test is therefore certified; DAC/audio
   calibration remains a separate AHRM-08 completion item.
 - 2026-09-25: `implementation/AHRM07_PMG_TEST.{asm,XEX,md}` and `jsA8E/tests/ahrm07_pmg_xex.test.js`: added a standalone AHRM-07 executable. It exercises visible PMG DMA, PMBASE changes, DLI-driven HPOS/PRIOR changes, and real P0/P1 collision latches; each raster phase is held for 32 frames to make visual transitions deterministic, and the screen now explains the bars, phase timing, and real collision result. The assembler regression verifies that the checked-in XEX is reproducible from its source.
+- 2026-09-25: `jsA8E/tests/snapshot_save_timing.test.js`: updated the POKEY
+  test double with the current `potStepCycles` API so snapshot timing coverage
+  remains independent of the full POKEY implementation.
+- 2026-09-25: `implementation/AHRM08_POKEY_PHASE_TEST.asm`: corrected the
+  Stage 3 fixture to enable serial IRQ sources before `STIMER`. AHRM 5.7's
+  enable lead-time rule means enabling immediately before `SEROUT` would mix
+  IRQ latch latency into the intended STIMER/SEROUT phase measurement.
+- 2026-09-25: `implementation/AHRM08_POKEY_PHASE_TEST.{asm,XEX,md}` and
+  `jsA8E/tests/ahrm08_pokey_phase_xex.test.js`: added the AHRM-08 Stage 3
+  guest diagnostic. It sweeps four deterministic delays between `STIMER` and
+  `SEROUT`, records `DATA NEEDED` polling counts plus a `TX COMPLETE` observation,
+  and keeps ANTIC DMA disabled during measurement. This isolates serial phase
+  evidence from the broader Stage 2 clock-routing test without changing normal
+  emulation behavior.
+- 2026-09-25: `implementation/AHRM08_POKEY_PHASE_TEST.{asm,XEX,md}`: corrected
+  the Stage 3 completion measurement to wait for `DATA NEEDED` before polling
+  `XMTDONE`. AHRM 5.6 states that the holding register must first load the
+  shift register; checking completion immediately after `SEROUT` measures the
+  idle-shifter state instead of the ten-bit transmission interval.
+- 2026-09-25: `A8E/{AtariIo.h,AtariIo.c,Pokey.c}` and
+  `jsA8E/js/core/{state,memory,io,pokey,pokey_sio,antic,atari}.js`: aligned
+  serial output phase with AHRM 5.6. The divide-by-two output-clock level is
+  reset by SKCTL external-clock mode, toggled on each selected timer expiry,
+  and used to schedule `DATA NEEDED` on the next rising edge instead of one
+  synthetic period after SEROUT. Added snapshot persistence and a direct phase
+  regression; the native build and full JS automation suite pass.
+- 2026-09-25: `A8E/Pokey.c` and `jsA8E/js/core/pokey.js`: preserved the global
+  28/114-cycle slow-clock phase across `STIMER` reloads, following AHRM 5.3.
+  The first timer underflow now aligns to the next absolute slow-clock tick;
+  linked and 1.79 MHz timers retain their existing explicit reload path. Native
+  probes and the full JS automation suite still pass.
+- 2026-09-26: `A8E/{AtariIo.h,AtariIo.c,Pokey.c}` and
+  `jsA8E/js/core/{state,io,memory,pokey}.js`: made the shared 28/114-cycle
+  clock phase originate when POKEY exits initialization mode, rather than
+  assuming cycle zero or resetting it on every `SKCTL=$00` write. This follows
+  AHRM 5.3, which says `STIMER` preserves the slow-clock phase while the end of
+  initialization establishes its offset. The phase is persisted in JS
+  snapshots, while the serial divide-by-two reset remains controlled by
+  `SKCTL[6:4]=000` per AHRM 5.6.

@@ -838,6 +838,50 @@ u64 Pokey_TimerPeriodCpuCycles(_6502_Context_t *pContext, u8 timer)
 	}
 }
 
+static u64 Pokey_TimerFirstCycle(
+	_6502_Context_t *pContext,
+	u8 timer,
+	u64 llNow)
+{
+	u8 audctl;
+	u64 period;
+	u64 base;
+	u64 reload;
+	u64 llNextClock;
+	u64 llOrigin;
+
+	if(!pContext)
+	{
+		return CYCLE_NEVER;
+	}
+
+	period = Pokey_TimerPeriodCpuCycles(pContext, timer);
+	if(period == 0)
+	{
+		return CYCLE_NEVER;
+	}
+
+	audctl = SRAM[IO_AUDCTL_ALLPOT];
+	/* Linked and 1.79 MHz timers use their explicit reload timing. */
+	if((timer == 1 && (audctl & 0x40)) ||
+	   (timer == 2 && (audctl & 0x10)) ||
+	   (timer == 4 && (audctl & 0x08)))
+	{
+		return llNow + period;
+	}
+
+	base = (audctl & 0x01) ? (u64)CYCLES_PER_LINE : 28ull;
+	reload = (u64)SRAM[timer == 1 ? IO_AUDF1_POT0 :
+					 timer == 2 ? IO_AUDF2_POT2 : IO_AUDF4_POT6] + 1ull;
+	llOrigin = ((IoData_t *)pContext->pIoData)->llPokeySlowClockOriginCycle;
+	if(llNow < llOrigin)
+	{
+		llOrigin = llNow;
+	}
+	llNextClock = llOrigin + (((llNow - llOrigin) / base) + 1ull) * base;
+	return llNextClock + (reload - 1ull) * base;
+}
+
 /* Arm only timers that have no scheduled deadline. This preserves the phase
  * of timers already running while allowing software to write AUDF after the
  * initial STIMER or after leaving POKEY initialization mode. */
@@ -859,21 +903,21 @@ static void Pokey_ArmInactiveTimers(_6502_Context_t *pContext)
 	period = Pokey_TimerPeriodCpuCycles(pContext, 1);
 	if(pIoData->llTimer1Cycle == CYCLE_NEVER && period != 0)
 	{
-		pIoData->llTimer1Cycle = llNow + period;
+		pIoData->llTimer1Cycle = Pokey_TimerFirstCycle(pContext, 1, llNow);
 		bChanged = 1;
 	}
 
 	period = Pokey_TimerPeriodCpuCycles(pContext, 2);
 	if(pIoData->llTimer2Cycle == CYCLE_NEVER && period != 0)
 	{
-		pIoData->llTimer2Cycle = llNow + period;
+		pIoData->llTimer2Cycle = Pokey_TimerFirstCycle(pContext, 2, llNow);
 		bChanged = 1;
 	}
 
 	period = Pokey_TimerPeriodCpuCycles(pContext, 4);
 	if(pIoData->llTimer4Cycle == CYCLE_NEVER && period != 0)
 	{
-		pIoData->llTimer4Cycle = llNow + period;
+		pIoData->llTimer4Cycle = Pokey_TimerFirstCycle(pContext, 4, llNow);
 		bChanged = 1;
 	}
 
@@ -1936,13 +1980,13 @@ u8 *Pokey_STIMER_KBCODE(_6502_Context_t *pContext, u8 *pValue)
 		llNow = PokeyMasterReferenceCycle(pContext);
 
 		period = Pokey_TimerPeriodCpuCycles(pContext, 1);
-		pIoData->llTimer1Cycle = period ? (llNow + period) : CYCLE_NEVER;
+		pIoData->llTimer1Cycle = period ? Pokey_TimerFirstCycle(pContext, 1, llNow) : CYCLE_NEVER;
 
 		period = Pokey_TimerPeriodCpuCycles(pContext, 2);
-		pIoData->llTimer2Cycle = period ? (llNow + period) : CYCLE_NEVER;
+		pIoData->llTimer2Cycle = period ? Pokey_TimerFirstCycle(pContext, 2, llNow) : CYCLE_NEVER;
 
 		period = Pokey_TimerPeriodCpuCycles(pContext, 4);
-		pIoData->llTimer4Cycle = period ? (llNow + period) : CYCLE_NEVER;
+		pIoData->llTimer4Cycle = period ? Pokey_TimerFirstCycle(pContext, 4, llNow) : CYCLE_NEVER;
 
 		/* AHRM 5.3/5.7: STIMER reloads the countdown timers without firing
 		 * them. Clear any stale timer IRQ flags at the same observable point. */
@@ -2035,7 +2079,7 @@ static u16 sSioPendingBytes = 0;
  * Modes 000/001/011/101 do not provide a usable output clock here: the first
  * two are externally clocked and the latter two hold timers 3+4 in reset for
  * asynchronous input until a start bit arrives. */
-static u8 Pokey_SerialOutputClockAvailable(_6502_Context_t *pContext)
+static u8 Pokey_SerialOutputClockTimer(_6502_Context_t *pContext)
 {
 	u8 cMode;
 
@@ -2044,20 +2088,37 @@ static u8 Pokey_SerialOutputClockAvailable(_6502_Context_t *pContext)
 		return 0;
 	}
 	cMode = (u8)((SRAM[IO_SKCTL_SKSTAT] >> 4) & 0x07);
-	if(cMode != 2 && cMode != 4 && cMode != 6 && cMode != 7)
+	if(cMode == 2 || cMode == 4)
+	{
+		return 4;
+	}
+	if(cMode == 6 || cMode == 7)
+	{
+		return 2;
+	}
+	return 0;
+}
+
+static u8 Pokey_SerialOutputClockAvailable(_6502_Context_t *pContext)
+{
+	u8 cTimer;
+
+	if(!pContext)
+	{
+		return 0;
+	}
+	cTimer = Pokey_SerialOutputClockTimer(pContext);
+	if(cTimer == 0)
 	{
 		return 0;
 	}
 
 	/* A selected timer with no armed period cannot clock the shift register. */
-	cMode = (u8)((cMode == 2 || cMode == 4) ? 4 : 2);
-	return Pokey_TimerPeriodCpuCycles(pContext, cMode) ? 1 : 0;
+	return Pokey_TimerPeriodCpuCycles(pContext, cTimer) ? 1 : 0;
 }
 
 static u64 Pokey_SerialOutputClockPeriod(_6502_Context_t *pContext)
 {
-	u8 cSkctl;
-	u8 cMode;
 	u8 cTimer;
 	u64 period;
 
@@ -2065,22 +2126,61 @@ static u64 Pokey_SerialOutputClockPeriod(_6502_Context_t *pContext)
 	{
 		return SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
 	}
-	cSkctl = SRAM[IO_SKCTL_SKSTAT];
-	cMode = (u8)((cSkctl >> 4) & 0x07);
-	if(cMode == 2 || cMode == 4)
-	{
-		cTimer = 4;
-	}
-	else if(cMode == 6 || cMode == 7)
-	{
-		cTimer = 2;
-	}
-	else
+	cTimer = Pokey_SerialOutputClockTimer(pContext);
+	if(cTimer == 0)
 	{
 		return SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
 	}
 	period = Pokey_TimerPeriodCpuCycles(pContext, cTimer);
 	return period;
+}
+
+void Pokey_SerialOutputClockTimerExpired(_6502_Context_t *pContext, u8 timer)
+{
+	IoData_t *pIoData;
+
+	if(!pContext || !pContext->pIoData ||
+	   Pokey_SerialOutputClockTimer(pContext) != timer)
+	{
+		return;
+	}
+
+	pIoData = (IoData_t *)pContext->pIoData;
+	pIoData->cSerialOutputClockHigh ^= 1;
+}
+
+static u64 Pokey_SerialOutputClockNextCycle(
+	_6502_Context_t *pContext,
+	u64 llNow)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u8 cTimer = Pokey_SerialOutputClockTimer(pContext);
+	u64 period = Pokey_SerialOutputClockPeriod(pContext);
+	u64 llNext;
+	u8 cLevel;
+
+	if(cTimer == 0 || period == 0)
+	{
+		return llNow + period;
+	}
+
+	llNext = cTimer == 2 ? pIoData->llTimer2Cycle : pIoData->llTimer4Cycle;
+	if(llNext == CYCLE_NEVER)
+	{
+		return llNow + period;
+	}
+
+	cLevel = pIoData->cSerialOutputClockHigh;
+	while(llNext <= llNow)
+	{
+		cLevel ^= 1;
+		llNext += period;
+	}
+	if(cLevel)
+	{
+		llNext += period;
+	}
+	return llNext;
 }
 
 static u8 AtariIo_SioChecksum(u8 *pBuffer, u32 lSize)
@@ -2170,10 +2270,11 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 #endif
 		if(cClockAvailable)
 		{
+			u64 llNeedDataCycle = Pokey_SerialOutputClockNextCycle(pContext, llNow);
 			pIoData->llSerialOutputNeedDataCycle =
-				llNow + llSerialClockPeriod;
+				llNeedDataCycle;
 			pIoData->llSerialOutputTransmissionDoneCycle =
-				llNow + llSerialClockPeriod * 21;
+				llNeedDataCycle + llSerialClockPeriod * 20;
 			RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_DATA_NEEDED;
 		}
 		else
@@ -2648,9 +2749,19 @@ u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue)
 {
 	if(pValue)
 	{
+		u8 cPreviousSkctl = SRAM[IO_SKCTL_SKSTAT];
+		IoData_t *pIoData = (IoData_t *)pContext->pIoData;
 		Pokey_Sync(pContext, pContext->llCycleCounter);
 		Pokey_PotPrepareSkctlWrite(pContext);
 		SRAM[IO_SKCTL_SKSTAT] = *pValue;
+		if((cPreviousSkctl & 0x03) == 0 && (*pValue & 0x03) != 0)
+		{
+			pIoData->llPokeySlowClockOriginCycle = pContext->llCycleCounter;
+		}
+		if((*pValue & 0x70) == 0)
+		{
+			pIoData->cSerialOutputClockHigh = 0;
+		}
 		Pokey_ArmInactiveTimers(pContext);
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);

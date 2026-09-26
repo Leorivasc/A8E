@@ -5615,6 +5615,7 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 		{
 			while(pIoData->llTimer2Cycle <= llMasterCycle)
 			{
+				Pokey_SerialOutputClockTimerExpired(pContext, 2);
 				pIoData->llTimer2Cycle += period;
 			}
 		}
@@ -5640,6 +5641,7 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 		{
 			while(pIoData->llTimer4Cycle <= llMasterCycle)
 			{
+				Pokey_SerialOutputClockTimerExpired(pContext, 4);
 				pIoData->llTimer4Cycle += period;
 			}
 		}
@@ -5812,6 +5814,8 @@ void AtariIoOpenWithMemory(
 	pIoData->llTimer1Cycle = CYCLE_NEVER;
 	pIoData->llTimer2Cycle = CYCLE_NEVER;
 	pIoData->llTimer4Cycle = CYCLE_NEVER;
+	pIoData->llPokeySlowClockOriginCycle = 0;
+	pIoData->cSerialOutputClockHigh = 0;
 	AtariIoCycleTimedEventUpdate(pContext);
 
 	pIoData->tVideoData.pSdlAtariSurface = pSdlAtariSurface;

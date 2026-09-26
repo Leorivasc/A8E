@@ -385,6 +385,9 @@ function loadAppHarness() {
         syncLfsr17: function () {},
         potStartScan: function () {},
         potUpdate: function () {},
+        potStepCycles: function () {
+          return 0;
+        },
         timerPeriodCpuCycles: function () {
           return 0;
         },

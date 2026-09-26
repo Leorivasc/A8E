@@ -46,6 +46,9 @@
     const fetchPmgDmaCycle = cfg.fetchPmgDmaCycle;
     const drawPlayerMissiles = cfg.drawPlayerMissiles;
     const pokeyTimerPeriodCpuCycles = cfg.pokeyTimerPeriodCpuCycles;
+    const pokeySerialOutputClockTimer = cfg.pokeySerialOutputClockTimer;
+    const pokeySerialOutputClockTimerExpired =
+      cfg.pokeySerialOutputClockTimerExpired;
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
     const PRIO_BKG = cfg.PRIO_BKG;
     const PRIO_PF0 = cfg.PRIO_PF0;
@@ -525,7 +528,16 @@
         if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_2) CPU.irq(ctx);
         if (p2 === 0) io.timer2Cycle = CYCLE_NEVER;
         else {
-          while (io.timer2Cycle <= masterEff) io.timer2Cycle += p2;
+          while (io.timer2Cycle <= masterEff) {
+            if (
+              pokeySerialOutputClockTimer &&
+              pokeySerialOutputClockTimerExpired &&
+              pokeySerialOutputClockTimer(ctx) === 2
+            ) {
+              pokeySerialOutputClockTimerExpired(ctx, 2);
+            }
+            io.timer2Cycle += p2;
+          }
         }
       }
 
@@ -535,7 +547,16 @@
         if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_4) CPU.irq(ctx);
         if (p4 === 0) io.timer4Cycle = CYCLE_NEVER;
         else {
-          while (io.timer4Cycle <= masterEff) io.timer4Cycle += p4;
+          while (io.timer4Cycle <= masterEff) {
+            if (
+              pokeySerialOutputClockTimer &&
+              pokeySerialOutputClockTimerExpired &&
+              pokeySerialOutputClockTimer(ctx) === 4
+            ) {
+              pokeySerialOutputClockTimerExpired(ctx, 4);
+            }
+            io.timer4Cycle += p4;
+          }
         }
       }
 

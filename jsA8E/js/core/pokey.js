@@ -40,6 +40,9 @@
               const period = timer ? pokeyTimerPeriodCpuCycles(ctx, timer) : 0;
               return period;
             },
+            serialOutputClockNextCycle: function (ctx, now) {
+              return pokeySerialOutputClockNextCycle(ctx, now);
+            },
             cycleTimedEventUpdate: cycleTimedEventUpdate,
           })
         : null;
@@ -1137,9 +1140,60 @@
       return 0;
     }
 
+    function pokeyTimerFirstCycle(ctx, timer, now) {
+      const sram = ctx.sram;
+      const audctl = sram[IO_AUDCTL_ALLPOT] & 0xff;
+      const period = pokeyTimerPeriodCpuCycles(ctx, timer);
+      if (!period) return CYCLE_NEVER;
+
+      // Linked and 1.79 MHz timers use their explicit reload timing.
+      if (
+        (timer === 1 && (audctl & 0x40)) ||
+        (timer === 2 && (audctl & 0x10)) ||
+        (timer === 4 && (audctl & 0x08))
+      ) {
+        return now + period;
+      }
+
+      const base = audctl & 0x01 ? CYCLES_PER_LINE : 28;
+      const reloadRegister =
+        timer === 1 ? IO_AUDF1_POT0 : timer === 2 ? IO_AUDF2_POT2 : IO_AUDF4_POT6;
+      const reload = (sram[reloadRegister] & 0xff) + 1;
+      let origin = Number.isFinite(ctx.ioData.pokeySlowClockOriginCycle)
+        ? ctx.ioData.pokeySlowClockOriginCycle
+        : now;
+      if (now < origin) origin = now;
+      const nextClock =
+        origin + (Math.floor((now - origin) / base) + 1) * base;
+      return nextClock + (reload - 1) * base;
+    }
+
     function pokeySerialOutputClockAvailable(ctx) {
       const timer = pokeySerialOutputClockTimer(ctx);
       return timer !== 0 && pokeyTimerPeriodCpuCycles(ctx, timer) > 0;
+    }
+
+    function pokeySerialOutputClockNextCycle(ctx, now) {
+      const timer = pokeySerialOutputClockTimer(ctx);
+      const period = timer ? pokeyTimerPeriodCpuCycles(ctx, timer) : 0;
+      if (!timer || !period) return now + period;
+
+      const io = ctx.ioData;
+      let next = timer === 2 ? io.timer2Cycle : io.timer4Cycle;
+      if (!Number.isFinite(next)) return now + period;
+
+      let level = io.serialOutputClockHigh ? 1 : 0;
+      while (next <= now) {
+        level ^= 1;
+        next += period;
+      }
+      if (level) next += period;
+      return next;
+    }
+
+    function pokeySerialOutputClockTimerExpired(ctx, timer) {
+      if (pokeySerialOutputClockTimer(ctx) === timer)
+        ctx.ioData.serialOutputClockHigh = !ctx.ioData.serialOutputClockHigh;
     }
 
     function pokeyRestartTimers(ctx) {
@@ -1147,13 +1201,13 @@
       const now = ctx.cycleCounter;
 
       const p1 = pokeyTimerPeriodCpuCycles(ctx, 1);
-      io.timer1Cycle = p1 ? now + p1 : CYCLE_NEVER;
+      io.timer1Cycle = p1 ? pokeyTimerFirstCycle(ctx, 1, now) : CYCLE_NEVER;
 
       const p2 = pokeyTimerPeriodCpuCycles(ctx, 2);
-      io.timer2Cycle = p2 ? now + p2 : CYCLE_NEVER;
+      io.timer2Cycle = p2 ? pokeyTimerFirstCycle(ctx, 2, now) : CYCLE_NEVER;
 
       const p4 = pokeyTimerPeriodCpuCycles(ctx, 4);
-      io.timer4Cycle = p4 ? now + p4 : CYCLE_NEVER;
+      io.timer4Cycle = p4 ? pokeyTimerFirstCycle(ctx, 4, now) : CYCLE_NEVER;
 
       cycleTimedEventUpdate(ctx);
     }
@@ -1168,19 +1222,19 @@
 
       const p1 = pokeyTimerPeriodCpuCycles(ctx, 1);
       if (io.timer1Cycle === CYCLE_NEVER && p1) {
-        io.timer1Cycle = now + p1;
+        io.timer1Cycle = pokeyTimerFirstCycle(ctx, 1, now);
         changed = true;
       }
 
       const p2 = pokeyTimerPeriodCpuCycles(ctx, 2);
       if (io.timer2Cycle === CYCLE_NEVER && p2) {
-        io.timer2Cycle = now + p2;
+        io.timer2Cycle = pokeyTimerFirstCycle(ctx, 2, now);
         changed = true;
       }
 
       const p4 = pokeyTimerPeriodCpuCycles(ctx, 4);
       if (io.timer4Cycle === CYCLE_NEVER && p4) {
-        io.timer4Cycle = now + p4;
+        io.timer4Cycle = pokeyTimerFirstCycle(ctx, 4, now);
         changed = true;
       }
 
@@ -1205,6 +1259,8 @@
       potReadValue: pokeyPotReadValue,
       potStepCycles: pokeyPotStepCycles,
       timerPeriodCpuCycles: pokeyTimerPeriodCpuCycles,
+      serialOutputClockTimer: pokeySerialOutputClockTimer,
+      serialOutputClockTimerExpired: pokeySerialOutputClockTimerExpired,
       restartTimers: pokeyRestartTimers,
       armInactiveTimers: pokeyArmInactiveTimers,
       seroutWrite: pokeySioApi.seroutWrite,
