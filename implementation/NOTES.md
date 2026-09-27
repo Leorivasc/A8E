@@ -4,6 +4,15 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-26: fixed a jsA8E-only audio degradation in linked POKEY timer modes.
+  The browser mixer was fast-forwarding between divider events while native A8E
+  advances the audio state every CPU cycle; holding one mixed level across that
+  interval could make one Prince of Persia music voice sound muffled. jsA8E now
+  keeps the fast path for independent channels but uses cycle-accurate audio
+  stepping whenever AUDCTL links timers 1+2 or 3+4. POKEY timer/SIO behavior is
+  unchanged; the focused timer and POT tests still pass. Prince of Persia was
+  replayed in Chromium and the affected voice returned to normal.
+
 - 2026-09-26: rechecked the remaining jsA8E P1 phase discrepancy using the
   AHRM timing rules, Altirra only as a conceptual reference, and Chromium
   traces. Two hypotheses were rejected: globally moving the `STIMER` reload

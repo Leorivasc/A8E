@@ -117,6 +117,7 @@
     const POKEY_AUDIO_RING_SIZE = 4096; // power-of-two
     const POKEY_AUDIO_TARGET_BUFFER_SAMPLES = 1024;
     const POKEY_AUDIO_ENABLE_ADAPTIVE_SYNC = true;
+    const POKEY_AUDIO_USE_FAST_FORWARD = true;
     const POKEY_AUDIO_MAX_ADJUST_DIVISOR = 200; // +/-0.5%
     const POKEY_AUDIO_FILL_DEADBAND_DIVISOR = 8; // +/-12.5% fill deadband
     const POKEY_AUDIO_CPS_SLEW_DIVISOR = 1000; // max cps delta per sync (~0.1%)
@@ -872,11 +873,53 @@
       if (cps < 1) cps = 1;
       st.cyclesPerSampleFp = cps;
       let samplePhase = st.samplePhaseFp;
+      // Linked timers can expose intermediate divider transitions to audio.
+      // Keep those modes cycle-accurate; the event fast-forward path remains
+      // safe for independent channels.
+      const useFastForward =
+        POKEY_AUDIO_USE_FAST_FORWARD && (st.audctl & 0x18) === 0;
       if (target - cur > POKEY_AUDIO_MAX_CATCHUP_CYCLES) {
         cur = target - POKEY_AUDIO_MAX_CATCHUP_CYCLES;
       }
 
       while (cur < target) {
+        if (!useFastForward) {
+          const level = pokeyAudioMixCycleSample(st);
+          const cyclesNeededFp = cps - samplePhase;
+          const batchFp = POKEY_FP_ONE;
+
+          if (batchFp < cyclesNeededFp) {
+            st.sampleAccum += level * batchFp;
+            samplePhase += batchFp;
+          } else {
+            st.sampleAccum += level * cyclesNeededFp;
+            tmp[tmpCount++] = pokeyAudioFinalizeSample(
+              st,
+              st.sampleAccum / cps,
+            );
+            if (tmpCount === tmp.length) {
+              pokeyAudioRingWrite(st, tmp, tmpCount);
+              tmpCount = 0;
+            }
+
+            let remainingFp = batchFp - cyclesNeededFp;
+            while (remainingFp >= cps) {
+              tmp[tmpCount++] = pokeyAudioFinalizeSample(st, level);
+              if (tmpCount === tmp.length) {
+                pokeyAudioRingWrite(st, tmp, tmpCount);
+                tmpCount = 0;
+              }
+              remainingFp -= cps;
+            }
+            st.sampleAccum = level * remainingFp;
+            samplePhase = remainingFp;
+          }
+
+          if ((st.skctl & 0x03) !== 0) pokeyAudioStepCpuCycle(st);
+          cur++;
+          continue;
+        }
+
         const remaining = target - cur;
         let runCycles = remaining;
         let nextEvent = 0;
