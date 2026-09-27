@@ -19,6 +19,67 @@
     const IO_SKCTL_SKSTAT = cfg.IO_SKCTL_SKSTAT;
     const IO_IRQEN_IRQST = cfg.IO_IRQEN_IRQST;
 
+    let pokeyTraceEnabled =
+      cfg.pokeyTrace === true ||
+      (window.A8E_BOOT_OPTIONS && window.A8E_BOOT_OPTIONS.pokeyTrace === true);
+    let pokeyTraceEdgesEnabled =
+      cfg.pokeyTraceEdges === true ||
+      (window.A8E_BOOT_OPTIONS &&
+        window.A8E_BOOT_OPTIONS.pokeyTraceEdges === true);
+    if (window.location && window.location.search) {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const traceValue = params.get("a8e_pokey_trace");
+        if (!pokeyTraceEnabled) {
+          pokeyTraceEnabled =
+            traceValue === "1" || traceValue === "true";
+        }
+        if (!pokeyTraceEdgesEnabled) {
+          pokeyTraceEdgesEnabled =
+            params.get("a8e_pokey_trace_edges") === "1" ||
+            params.get("a8e_pokey_trace_edges") === "true";
+        }
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+    const POKEY_TRACE_PAD_INDEX = 0x89;
+
+    function pokeyTraceEvent(ctx, event, fields) {
+      if (!pokeyTraceEnabled || typeof console === "undefined") return;
+      if (event === "TIMER_CLOCK_EDGE" && !pokeyTraceEdgesEnabled) return;
+      const io = ctx.ioData || {};
+      const timer = pokeySerialOutputClockTimer(ctx);
+      const record = {
+        event: event,
+        cycle: ctx.cycleCounter,
+        pad: ctx.ram ? ctx.ram[POKEY_TRACE_PAD_INDEX] & 0xff : null,
+        audctl: ctx.sram ? ctx.sram[IO_AUDCTL_ALLPOT] & 0xff : null,
+        audf4: ctx.sram ? ctx.sram[IO_AUDF4_POT6] & 0xff : null,
+        skctl: ctx.sram ? ctx.sram[IO_SKCTL_SKSTAT] & 0xff : null,
+        timer: timer,
+        timerPeriod: timer ? pokeyTimerPeriodCpuCycles(ctx, timer) : 0,
+        timer2Cycle: Number.isFinite(io.timer2Cycle) ? io.timer2Cycle : null,
+        timer4Cycle: Number.isFinite(io.timer4Cycle) ? io.timer4Cycle : null,
+        serialClockHigh: io.serialOutputClockHigh ? 1 : 0,
+        needDataCycle: Number.isFinite(io.serialOutputNeedDataCycle)
+          ? io.serialOutputNeedDataCycle
+          : null,
+        transmissionDoneCycle: Number.isFinite(
+          io.serialOutputTransmissionDoneCycle,
+        )
+          ? io.serialOutputTransmissionDoneCycle
+          : null,
+        irqst: ctx.ram ? ctx.ram[IO_IRQEN_IRQST] & 0xff : null,
+      };
+      if (fields && typeof fields === "object") Object.assign(record, fields);
+      try {
+        console.log("[A8E-POKEY]", JSON.stringify(record));
+      } catch {
+        // Diagnostics must never affect emulation.
+      }
+    }
+
     const CYCLE_NEVER = cfg.CYCLE_NEVER;
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
     const pokeySioApi =
@@ -43,6 +104,7 @@
             serialOutputClockNextCycle: function (ctx, now) {
               return pokeySerialOutputClockNextCycle(ctx, now);
             },
+            traceSerialEvent: pokeyTraceEvent,
             cycleTimedEventUpdate: cycleTimedEventUpdate,
           })
         : null;
@@ -1194,11 +1256,15 @@
     function pokeySerialOutputClockTimerExpired(ctx, timer) {
       if (pokeySerialOutputClockTimer(ctx) === timer)
         ctx.ioData.serialOutputClockHigh = !ctx.ioData.serialOutputClockHigh;
+      pokeyTraceEvent(ctx, "TIMER_CLOCK_EDGE", {
+        timer: timer,
+        timerCycle:
+          timer === 2 ? ctx.ioData.timer2Cycle : ctx.ioData.timer4Cycle,
+      });
     }
 
-    function pokeyRestartTimers(ctx) {
+    function pokeyRestartTimersAt(ctx, now) {
       const io = ctx.ioData;
-      const now = ctx.cycleCounter;
 
       const p1 = pokeyTimerPeriodCpuCycles(ctx, 1);
       io.timer1Cycle = p1 ? pokeyTimerFirstCycle(ctx, 1, now) : CYCLE_NEVER;
@@ -1210,6 +1276,43 @@
       io.timer4Cycle = p4 ? pokeyTimerFirstCycle(ctx, 4, now) : CYCLE_NEVER;
 
       cycleTimedEventUpdate(ctx);
+    }
+
+    function pokeyRestartTimers(ctx) {
+      pokeyRestartTimersAt(ctx, ctx.cycleCounter);
+    }
+
+    // POKEY initialization stops the old timer schedule. This prevents a
+    // timer edge from the previous serial transaction leaking into the next
+    // STIMER/SEROUT measurement.
+    function pokeyEnterInitialization(ctx) {
+      const io = ctx.ioData;
+      io.timer1Cycle = CYCLE_NEVER;
+      io.timer2Cycle = CYCLE_NEVER;
+      io.timer4Cycle = CYCLE_NEVER;
+      io.pokeyTimerResetCycle = CYCLE_NEVER;
+      io.serialOutputClockHigh = false;
+      cycleTimedEventUpdate(ctx);
+    }
+
+    // STIMER takes effect on a later POKEY master-clock boundary. Keep the
+    // application step separate so the event loop can observe that boundary.
+    function pokeyApplyTimerReset(ctx) {
+      const io = ctx.ioData;
+      const resetCycle = io.pokeyTimerResetCycle;
+      io.pokeyTimerResetCycle = CYCLE_NEVER;
+      ctx.ram[IO_IRQEN_IRQST] |= 0x07;
+      if (io.serialOutputTransmissionDoneCycle === CYCLE_NEVER)
+        ctx.ram[IO_IRQEN_IRQST] &= ~0x08;
+      pokeyTraceEvent(ctx, "TIMER_RESET_APPLY", {
+        scheduledCycle: Number.isFinite(resetCycle) ? resetCycle : null,
+        actualCycle: ctx.cycleCounter,
+      });
+      // The reset is observed at a CPU instruction boundary. Rebuild the
+      // countdown from that observed cycle, as the hardware-visible timer
+      // phase follows the actual reset boundary rather than the request's
+      // queued deadline.
+      pokeyRestartTimersAt(ctx, ctx.cycleCounter);
     }
 
     // Programs may configure AUDF after the initial STIMER write. In that
@@ -1261,7 +1364,10 @@
       timerPeriodCpuCycles: pokeyTimerPeriodCpuCycles,
       serialOutputClockTimer: pokeySerialOutputClockTimer,
       serialOutputClockTimerExpired: pokeySerialOutputClockTimerExpired,
+      traceEvent: pokeyTraceEvent,
       restartTimers: pokeyRestartTimers,
+      enterInitialization: pokeyEnterInitialization,
+      applyTimerReset: pokeyApplyTimerReset,
       armInactiveTimers: pokeyArmInactiveTimers,
       seroutWrite: pokeySioApi.seroutWrite,
       serinRead: pokeySioApi.serinRead,

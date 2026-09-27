@@ -5415,6 +5415,9 @@ void AtariIoCycleTimedEventUpdate(_6502_Context_t *pContext)
 	pContext->llIoMasterTimedEventCycle =
 		MIN(pIoData->llTimer4Cycle, pContext->llIoMasterTimedEventCycle);
 
+	pContext->llIoMasterTimedEventCycle =
+		MIN(pIoData->llPokeyTimerResetCycle, pContext->llIoMasterTimedEventCycle);
+
 	pContext->llIoCycleTimedEventCycle = pContext->llIoMasterTimedEventCycle;
 }
 
@@ -5425,6 +5428,11 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 	u64 llBeamCycle = pIoData->llCycle;
 
 	Pia_CycleTimedEvent(pContext);
+
+	if(llMasterCycle >= pIoData->llPokeyTimerResetCycle)
+	{
+		Pokey_ApplyTimerReset(pContext);
+	}
 
 	if(!pIoData->bInDrawLine &&
 	   pContext->llCycleCounter >= pIoData->llDisplayListFetchCycle)
@@ -5530,6 +5538,12 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 	{
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIAL_OUTPUT_TRANSMISSION_DONE request!\n", pContext->llCycleCounter);
+		printf("POKEY_TRACE TRANSMISSION_DONE cycle=%llu pad=%02X level=%u need=%llu done=%llu irqst=%02X\n",
+		       (unsigned long long)llMasterCycle, RAM[0x89],
+		       pIoData->cSerialOutputClockHigh,
+		       (unsigned long long)pIoData->llSerialOutputNeedDataCycle,
+		       (unsigned long long)pIoData->llSerialOutputTransmissionDoneCycle,
+		       RAM[IO_IRQEN_IRQST]);
 #endif
 		RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
 		if(SRAM[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE)
@@ -5544,6 +5558,12 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 	{
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIAL_OUTPUT_DATA_NEEDED request!\n", pContext->llCycleCounter);
+		printf("POKEY_TRACE DATA_NEEDED cycle=%llu pad=%02X level=%u need=%llu done=%llu irqst=%02X\n",
+		       (unsigned long long)llMasterCycle, RAM[0x89],
+		       pIoData->cSerialOutputClockHigh,
+		       (unsigned long long)pIoData->llSerialOutputNeedDataCycle,
+		       (unsigned long long)pIoData->llSerialOutputTransmissionDoneCycle,
+		       RAM[IO_IRQEN_IRQST]);
 #endif
 		RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;
 		/* The queued byte is now loaded into the output shift register. */
@@ -5814,6 +5834,7 @@ void AtariIoOpenWithMemory(
 	pIoData->llTimer1Cycle = CYCLE_NEVER;
 	pIoData->llTimer2Cycle = CYCLE_NEVER;
 	pIoData->llTimer4Cycle = CYCLE_NEVER;
+	pIoData->llPokeyTimerResetCycle = CYCLE_NEVER;
 	pIoData->llPokeySlowClockOriginCycle = 0;
 	pIoData->cSerialOutputClockHigh = 0;
 	AtariIoCycleTimedEventUpdate(pContext);

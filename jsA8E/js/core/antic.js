@@ -23,6 +23,7 @@
       cfg.IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
     const IRQ_SERIAL_OUTPUT_DATA_NEEDED = cfg.IRQ_SERIAL_OUTPUT_DATA_NEEDED;
     const IRQ_SERIAL_INPUT_DATA_READY = cfg.IRQ_SERIAL_INPUT_DATA_READY;
+    const pokeyTraceEvent = cfg.pokeyTraceEvent;
 
     const IO_VCOUNT = cfg.IO_VCOUNT;
     const IO_NMIEN = cfg.IO_NMIEN;
@@ -49,6 +50,7 @@
     const pokeySerialOutputClockTimer = cfg.pokeySerialOutputClockTimer;
     const pokeySerialOutputClockTimerExpired =
       cfg.pokeySerialOutputClockTimerExpired;
+    const pokeyApplyTimerReset = cfg.pokeyApplyTimerReset;
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
     const PRIO_BKG = cfg.PRIO_BKG;
     const PRIO_PF0 = cfg.PRIO_PF0;
@@ -447,6 +449,11 @@
       const masterEff = ctx.cycleCounter;
       const beamEff = io.clock;
 
+      if (masterEff >= io.pokeyTimerResetCycle) {
+        if (typeof pokeyApplyTimerReset === "function")
+          pokeyApplyTimerReset(ctx);
+      }
+
       if (beamEff >= io.dliCycle) {
         // NMIST is set at cycle 7 unconditionally (AHRM 4.8)
         ram[IO_NMIRES_NMIST] &= ~NMI_VBI;
@@ -492,6 +499,8 @@
       }
 
       if (masterEff >= io.serialOutputTransmissionDoneCycle) {
+        if (typeof pokeyTraceEvent === "function")
+          pokeyTraceEvent(ctx, "TRANSMISSION_DONE", { eventCycle: masterEff });
         ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE)
           {CPU.irq(ctx);}
@@ -499,6 +508,8 @@
       }
 
       if (masterEff >= io.serialOutputNeedDataCycle) {
+        if (typeof pokeyTraceEvent === "function")
+          pokeyTraceEvent(ctx, "DATA_NEEDED", { eventCycle: masterEff });
         ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;
         // The queued byte is now loaded into the output shift register.
         ram[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;

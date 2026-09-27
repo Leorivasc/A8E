@@ -80,11 +80,14 @@
     const IO_VDELAY = cfg.IO_VDELAY;
     const IO_VSCROL = cfg.IO_VSCROL;
     const IO_WSYNC = cfg.IO_WSYNC;
+    const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
     const pokeyAudioSync = cfg.pokeyAudioSync;
     const pokeyAudioOnRegisterWrite = cfg.pokeyAudioOnRegisterWrite;
     const pokeyPotPrepareSkctlWrite = cfg.pokeyPotPrepareSkctlWrite;
     const pokeyPotStartScan = cfg.pokeyPotStartScan;
+    const pokeyTraceEvent = cfg.pokeyTraceEvent;
     const pokeyRestartTimers = cfg.pokeyRestartTimers;
+    const pokeyEnterInitialization = cfg.pokeyEnterInitialization;
     const pokeyArmInactiveTimers = cfg.pokeyArmInactiveTimers;
     const pokeySyncLfsr17 = cfg.pokeySyncLfsr17;
     const pokeySeroutWrite = cfg.pokeySeroutWrite;
@@ -523,6 +526,13 @@
             sram[addr] = v;
             if (io.pokeyAudio)
               {pokeyAudioOnRegisterWrite(io.pokeyAudio, addr, v);}
+            if (typeof pokeyTraceEvent === "function" &&
+                (addr === IO_AUDCTL_ALLPOT || addr === IO_AUDF4_POT6)) {
+              pokeyTraceEvent(ctx, "CLOCK_CONFIG_WRITE", {
+                register: addr === IO_AUDCTL_ALLPOT ? "AUDCTL" : "AUDF4",
+                value: v,
+              });
+            }
             pokeyArmInactiveTimers(ctx);
             break;
 
@@ -537,12 +547,19 @@
             sram[addr] = v;
             if (io.pokeyAudio)
               {pokeyAudioOnRegisterWrite(io.pokeyAudio, addr, v);}
-            pokeyRestartTimers(ctx);
-            // AHRM 5.3/5.7: STIMER reloads the countdown timers without
-            // firing them. Their latched IRQST flags therefore become idle.
-            ram[IO_IRQEN_IRQST] |= IRQ_TIMER_1 | IRQ_TIMER_2 | IRQ_TIMER_4;
-            if (io.serialOutputTransmissionDoneCycle === CYCLE_NEVER)
-              ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
+            // The divider reload is applied by the timed-event loop after
+            // the write, rather than at the CPU bus write itself.
+            io.pokeyTimerResetCycle = ctx.cycleCounter + 4;
+            if (typeof pokeyTraceEvent === "function") {
+              pokeyTraceEvent(ctx, "STIMER_WRITE", {
+                value: v,
+                slowClockOriginCycle: io.pokeySlowClockOriginCycle,
+                timerResetCycle: io.pokeyTimerResetCycle,
+              });
+            }
+            // The reset is a new master-clock deadline. Publish it now so
+            // the CPU stops exactly at the requested POKEY boundary.
+            cycleTimedEventUpdate(ctx);
             break;
 
           case IO_SKREST_RANDOM:
@@ -555,6 +572,9 @@
             // AHRM 5.6: SEROUT fills the holding register first. The shift
             // register and DATA NEEDED state change only on the next clock
             // edge; XMTDONE stays active until that load occurs.
+            if (typeof pokeyTraceEvent === "function") {
+              pokeyTraceEvent(ctx, "SEROUT_WRITE", { value: v });
+            }
             ram[IO_IRQEN_IRQST] |= 0x10;
             pokeySeroutWrite(ctx, v);
             break;
@@ -574,7 +594,8 @@
             break;
 
           case IO_SKCTL_SKSTAT:
-            const wasPokeyInitializing = (sram[addr] & 0x03) === 0;
+            const previousSkctl = sram[addr] & 0xff;
+            const wasPokeyInitializing = (previousSkctl & 0x03) === 0;
             pokeySyncLfsr17(ctx);
             pokeyPotPrepareSkctlWrite(ctx);
             sram[addr] = v;
@@ -593,11 +614,29 @@
             }
             // AHRM 5.3: the slow clock phase is set when initialization ends.
             if (wasPokeyInitializing && (v & 0x03) !== 0) {
-              io.pokeySlowClockOriginCycle = ctx.cycleCounter;
+              io.pokeySlowClockOriginCycle = Math.max(0, ctx.cycleCounter - 6);
             }
             // AHRM 5.6: selecting external clock mode resets the serial
             // output divide-by-two flip-flop to its low phase.
             if ((v & 0x70) === 0) io.serialOutputClockHigh = false;
+            if (!wasPokeyInitializing && (v & 0x03) === 0) {
+              pokeyEnterInitialization(ctx);
+            }
+            if (typeof pokeyTraceEvent === "function") {
+              pokeyTraceEvent(ctx, "SKCTL_WRITE", {
+                previous: previousSkctl,
+                value: v,
+                initializingBefore: wasPokeyInitializing ? 1 : 0,
+                initializingAfter: (v & 0x03) === 0 ? 1 : 0,
+                initTransition:
+                  wasPokeyInitializing && (v & 0x03) !== 0
+                    ? "exit"
+                    : !wasPokeyInitializing && (v & 0x03) === 0
+                      ? "enter"
+                      : "none",
+                slowClockOriginCycle: io.pokeySlowClockOriginCycle,
+              });
+            }
             pokeyArmInactiveTimers(ctx);
             break;
 

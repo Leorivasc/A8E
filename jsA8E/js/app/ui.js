@@ -247,6 +247,31 @@
     return null;
   }
 
+  function resolvePokeyTracePreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    if (boot) {
+      const trace = parseBooleanLike(boot.pokeyTrace);
+      if (trace !== null) return trace;
+    }
+    if (
+      window.location &&
+      typeof window.location.search === "string" &&
+      typeof window.URLSearchParams === "function"
+    ) {
+      try {
+        const params = new window.URLSearchParams(window.location.search);
+        const trace = parseBooleanLike(params.get("a8e_pokey_trace"));
+        if (trace !== null) return trace;
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+    return false;
+  }
+
   function withWorkerPreference(base, workerPreference) {
     if (workerPreference === null) return Object.assign({}, base);
     return Object.assign({}, base, {
@@ -262,6 +287,7 @@
     const nativeScreenW = canvas.width | 0;
     const nativeScreenH = canvas.height | 0;
     const workerPreference = resolveWorkerPreference();
+    const pokeyTracePreference = resolvePokeyTracePreference();
     const videoStandardPreference = persistVideoStandardPreference(
       resolveVideoStandardPreference(),
     );
@@ -904,6 +930,7 @@
         keyboardMappingMode: getKeyboardMappingModeFromUi(),
         videoStandard: videoStandardPreference,
         memoryExpansion: memoryExpansionPreference,
+        pokeyTrace: pokeyTracePreference,
       }, workerPreference));
       resizeCrtCanvas();
     } else {
@@ -920,6 +947,7 @@
           keyboardMappingMode: getKeyboardMappingModeFromUi(),
           videoStandard: videoStandardPreference,
           memoryExpansion: memoryExpansionPreference,
+          pokeyTrace: pokeyTracePreference,
         }, workerPreference));
       } catch (e) {
         // If WebGL init succeeded but shader/program setup failed, fall back to 2D by replacing the canvas.
@@ -953,6 +981,7 @@
               keyboardMappingMode: getKeyboardMappingModeFromUi(),
               videoStandard: videoStandardPreference,
               memoryExpansion: memoryExpansionPreference,
+              pokeyTrace: pokeyTracePreference,
             }, workerPreference));
             resizeCrtCanvas();
           } else {

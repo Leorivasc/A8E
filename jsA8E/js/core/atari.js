@@ -346,7 +346,10 @@
   const pokeySerialOutputClockTimer = pokeyAudioApi.serialOutputClockTimer;
   const pokeySerialOutputClockTimerExpired =
     pokeyAudioApi.serialOutputClockTimerExpired;
+  const pokeyTraceEvent = pokeyAudioApi.traceEvent;
   const pokeyRestartTimers = pokeyAudioApi.restartTimers;
+  const pokeyEnterInitialization = pokeyAudioApi.enterInitialization;
+  const pokeyApplyTimerReset = pokeyAudioApi.applyTimerReset;
   const pokeyArmInactiveTimers = pokeyAudioApi.armInactiveTimers;
   const pokeySeroutWrite = pokeyAudioApi.seroutWrite;
   const pokeySerinRead = pokeyAudioApi.serinRead;
@@ -430,11 +433,14 @@
           IO_VDELAY: IO_VDELAY,
           IO_VSCROL: IO_VSCROL,
           IO_WSYNC: IO_WSYNC,
+          cycleTimedEventUpdate: cycleTimedEventUpdate,
           pokeyAudioSync: pokeyAudioSync,
           pokeyAudioOnRegisterWrite: pokeyAudioOnRegisterWrite,
+          pokeyTraceEvent: pokeyTraceEvent,
           pokeyPotPrepareSkctlWrite: pokeyPotPrepareSkctlWrite,
           pokeyPotStartScan: pokeyPotStartScan,
           pokeyRestartTimers: pokeyRestartTimers,
+          pokeyEnterInitialization: pokeyEnterInitialization,
           pokeyArmInactiveTimers: pokeyArmInactiveTimers,
           pokeySyncLfsr17: pokeySyncLfsr17,
           pokeySeroutWrite: pokeySeroutWrite,
@@ -552,6 +558,8 @@
           pokeySerialOutputClockTimer: pokeySerialOutputClockTimer,
           pokeySerialOutputClockTimerExpired:
             pokeySerialOutputClockTimerExpired,
+          pokeyApplyTimerReset: pokeyApplyTimerReset,
+          pokeyTraceEvent: pokeyTraceEvent,
           cycleTimedEventUpdate: cycleTimedEventUpdate,
           PRIO_BKG: PRIO_BKG,
           PRIO_PF0: PRIO_PF0,

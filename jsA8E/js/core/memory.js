@@ -1924,6 +1924,7 @@
           timer1Cycle: io.timer1Cycle,
           timer2Cycle: io.timer2Cycle,
           timer4Cycle: io.timer4Cycle,
+          pokeyTimerResetCycle: io.pokeyTimerResetCycle,
           pokeySlowClockOriginCycle: io.pokeySlowClockOriginCycle,
           serialOutputClockHigh: !!io.serialOutputClockHigh,
           valuePortA: io.valuePortA | 0,
@@ -2040,6 +2041,8 @@
         io.timer1Cycle = state.timer1Cycle;
         io.timer2Cycle = state.timer2Cycle;
         io.timer4Cycle = state.timer4Cycle;
+        if (state.pokeyTimerResetCycle !== undefined)
+          io.pokeyTimerResetCycle = state.pokeyTimerResetCycle;
         if (state.pokeySlowClockOriginCycle !== undefined)
           io.pokeySlowClockOriginCycle = state.pokeySlowClockOriginCycle;
         if (state.serialOutputClockHigh !== undefined)

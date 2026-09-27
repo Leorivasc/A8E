@@ -25,6 +25,7 @@
         timer1Cycle: CYCLE_NEVER,
         timer2Cycle: CYCLE_NEVER,
         timer4Cycle: CYCLE_NEVER,
+        pokeyTimerResetCycle: CYCLE_NEVER,
         pokeySlowClockOriginCycle: 0,
         serialOutputClockHigh: false,
         // PIA data-direction registers and port B output latch. PIA reset
@@ -196,6 +197,9 @@
       if (io.timer1Cycle < masterNext) masterNext = io.timer1Cycle;
       if (io.timer2Cycle < masterNext) masterNext = io.timer2Cycle;
       if (io.timer4Cycle < masterNext) masterNext = io.timer4Cycle;
+      if (io.pokeyTimerResetCycle < masterNext) {
+        masterNext = io.pokeyTimerResetCycle;
+      }
 
       ctx.ioBeamTimedEventCycle = beamNext;
       ctx.ioMasterTimedEventCycle = masterNext;

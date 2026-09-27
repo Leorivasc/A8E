@@ -1865,6 +1865,11 @@ u8 *Pokey_AUDF4_POT6(_6502_Context_t *pContext, u8 *pValue)
 			}
 		}
 		Pokey_ArmInactiveTimers(pContext);
+#ifdef VERBOSE_SIO
+		printf("POKEY_TRACE CLOCK_CONFIG_WRITE cycle=%llu register=AUDF4 value=%02X timer4=%llu\n",
+		       (unsigned long long)pContext->llCycleCounter, *pValue,
+		       (unsigned long long)((IoData_t *)pContext->pIoData)->llTimer4Cycle);
+#endif
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" AUDF4: %02X\n", *pValue);
@@ -1914,6 +1919,12 @@ u8 *Pokey_AUDCTL_ALLPOT(_6502_Context_t *pContext, u8 *pValue)
 			}
 		}
 		Pokey_ArmInactiveTimers(pContext);
+#ifdef VERBOSE_SIO
+		printf("POKEY_TRACE CLOCK_CONFIG_WRITE cycle=%llu register=AUDCTL value=%02X timer2=%llu timer4=%llu\n",
+		       (unsigned long long)pContext->llCycleCounter, *pValue,
+		       (unsigned long long)((IoData_t *)pContext->pIoData)->llTimer2Cycle,
+		       (unsigned long long)((IoData_t *)pContext->pIoData)->llTimer4Cycle);
+#endif
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" AUDCTL: %02X\n", *pValue);
@@ -1927,76 +1938,103 @@ u8 *Pokey_AUDCTL_ALLPOT(_6502_Context_t *pContext, u8 *pValue)
 	return &RAM[IO_AUDCTL_ALLPOT];
 }
 
+void Pokey_ApplyTimerReset(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData;
+	PokeyState_t *pPokey;
+	u64 llNow;
+	u64 period;
+
+	if(!pContext || !pContext->pIoData)
+	{
+		return;
+	}
+
+	pIoData = (IoData_t *)pContext->pIoData;
+	pIoData->llPokeyTimerResetCycle = CYCLE_NEVER;
+	Pokey_Sync(pContext, pContext->llCycleCounter);
+	pPokey = Pokey_GetState(pContext);
+	if(pPokey)
+	{
+		u32 i;
+		for(i = 0; i < 4; i++)
+		{
+			pPokey->aChannels[i].clk_acc_cycles = 0;
+		}
+		if(pPokey->audctl & 0x10)
+		{
+			u32 p12 = (((u32)pPokey->aChannels[1].audf) << 8) | (u32)pPokey->aChannels[0].audf;
+			pPokey->aChannels[1].counter = (pPokey->audctl & 0x40) ? (p12 + 7u) : (p12 + 1u);
+		}
+		else
+		{
+			pPokey->aChannels[0].counter = (pPokey->audctl & 0x40) ? ((u32)pPokey->aChannels[0].audf + 4u) : ((u32)pPokey->aChannels[0].audf + 1u);
+			pPokey->aChannels[1].counter = (u32)pPokey->aChannels[1].audf + 1u;
+		}
+		if(pPokey->audctl & 0x08)
+		{
+			u32 p34 = (((u32)pPokey->aChannels[3].audf) << 8) | (u32)pPokey->aChannels[2].audf;
+			pPokey->aChannels[3].counter = (pPokey->audctl & 0x20) ? (p34 + 7u) : (p34 + 1u);
+		}
+		else
+		{
+			pPokey->aChannels[2].counter = (pPokey->audctl & 0x20) ? ((u32)pPokey->aChannels[2].audf + 4u) : ((u32)pPokey->aChannels[2].audf + 1u);
+			pPokey->aChannels[3].counter = (u32)pPokey->aChannels[3].audf + 1u;
+		}
+	}
+
+	llNow = PokeyMasterReferenceCycle(pContext);
+	period = Pokey_TimerPeriodCpuCycles(pContext, 1);
+	pIoData->llTimer1Cycle = period ? Pokey_TimerFirstCycle(pContext, 1, llNow) : CYCLE_NEVER;
+	period = Pokey_TimerPeriodCpuCycles(pContext, 2);
+	pIoData->llTimer2Cycle = period ? Pokey_TimerFirstCycle(pContext, 2, llNow) : CYCLE_NEVER;
+	period = Pokey_TimerPeriodCpuCycles(pContext, 4);
+	pIoData->llTimer4Cycle = period ? Pokey_TimerFirstCycle(pContext, 4, llNow) : CYCLE_NEVER;
+	RAM[IO_IRQEN_IRQST] |= IRQ_TIMER_1 | IRQ_TIMER_2 | IRQ_TIMER_4;
+	if(pIoData->llSerialOutputTransmissionDoneCycle == CYCLE_NEVER)
+	{
+		RAM[IO_IRQEN_IRQST] &= (u8)~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
+	}
+	AtariIoCycleTimedEventUpdate(pContext);
+}
+
+void Pokey_EnterInitialization(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData;
+
+	if(!pContext || !pContext->pIoData)
+	{
+		return;
+	}
+
+	pIoData = (IoData_t *)pContext->pIoData;
+	pIoData->llTimer1Cycle = CYCLE_NEVER;
+	pIoData->llTimer2Cycle = CYCLE_NEVER;
+	pIoData->llTimer4Cycle = CYCLE_NEVER;
+	pIoData->llPokeyTimerResetCycle = CYCLE_NEVER;
+	pIoData->cSerialOutputClockHigh = 0;
+	AtariIoCycleTimedEventUpdate(pContext);
+}
+
 /* $D209 STIMER/KBCODE */
 u8 *Pokey_STIMER_KBCODE(_6502_Context_t *pContext, u8 *pValue)
 {
 	if(pValue)
 	{
 		IoData_t *pIoData = (IoData_t *)pContext->pIoData;
-		u64 llNow;
-		u64 period;
-
 		Pokey_Sync(pContext, pContext->llCycleCounter);
 		SRAM[IO_STIMER_KBCODE] = *pValue;
-#ifdef VERBOSE_REGISTER
-		printf("             [%16llu]", pContext->llCycleCounter);
-		printf(" STIMER: %02X\n", *pValue);
-#endif
-
-		/* STIMER resets all audio channel dividers to their AUDF values. */
-		{
-			PokeyState_t *pPokey = Pokey_GetState(pContext);
-			if(pPokey)
-			{
-				u32 i;
-				for(i = 0; i < 4; i++)
-				{
-					pPokey->aChannels[i].clk_acc_cycles = 0;
-				}
-
-				if(pPokey->audctl & 0x10)
-				{
-					u32 p12 = (((u32)pPokey->aChannels[1].audf) << 8) | (u32)pPokey->aChannels[0].audf;
-					pPokey->aChannels[1].counter = (pPokey->audctl & 0x40) ? (p12 + 7u) : (p12 + 1u);
-				}
-				else
-				{
-					pPokey->aChannels[0].counter = (pPokey->audctl & 0x40) ? ((u32)pPokey->aChannels[0].audf + 4u) : ((u32)pPokey->aChannels[0].audf + 1u);
-					pPokey->aChannels[1].counter = (u32)pPokey->aChannels[1].audf + 1u;
-				}
-				if(pPokey->audctl & 0x08)
-				{
-					u32 p34 = (((u32)pPokey->aChannels[3].audf) << 8) | (u32)pPokey->aChannels[2].audf;
-					pPokey->aChannels[3].counter = (pPokey->audctl & 0x20) ? (p34 + 7u) : (p34 + 1u);
-				}
-				else
-				{
-					pPokey->aChannels[2].counter = (pPokey->audctl & 0x20) ? ((u32)pPokey->aChannels[2].audf + 4u) : ((u32)pPokey->aChannels[2].audf + 1u);
-					pPokey->aChannels[3].counter = (u32)pPokey->aChannels[3].audf + 1u;
-				}
-			}
-		}
-
-		llNow = PokeyMasterReferenceCycle(pContext);
-
-		period = Pokey_TimerPeriodCpuCycles(pContext, 1);
-		pIoData->llTimer1Cycle = period ? Pokey_TimerFirstCycle(pContext, 1, llNow) : CYCLE_NEVER;
-
-		period = Pokey_TimerPeriodCpuCycles(pContext, 2);
-		pIoData->llTimer2Cycle = period ? Pokey_TimerFirstCycle(pContext, 2, llNow) : CYCLE_NEVER;
-
-		period = Pokey_TimerPeriodCpuCycles(pContext, 4);
-		pIoData->llTimer4Cycle = period ? Pokey_TimerFirstCycle(pContext, 4, llNow) : CYCLE_NEVER;
-
-		/* AHRM 5.3/5.7: STIMER reloads the countdown timers without firing
-		 * them. Clear any stale timer IRQ flags at the same observable point. */
-		RAM[IO_IRQEN_IRQST] |= IRQ_TIMER_1 | IRQ_TIMER_2 | IRQ_TIMER_4;
-		if(pIoData->llSerialOutputTransmissionDoneCycle == CYCLE_NEVER)
-		{
-			RAM[IO_IRQEN_IRQST] &= (u8)~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
-		}
-
+		pIoData->llPokeyTimerResetCycle = pContext->llCycleCounter + 4ull;
 		AtariIoCycleTimedEventUpdate(pContext);
+#ifdef VERBOSE_REGISTER
+		printf("             [%16llu] STIMER: %02X\n", pContext->llCycleCounter, *pValue);
+#endif
+#ifdef VERBOSE_SIO
+		printf("POKEY_TRACE STIMER_WRITE cycle=%llu value=%02X slowOrigin=%llu reset=%llu\n",
+		       (unsigned long long)pContext->llCycleCounter, *pValue,
+		       (unsigned long long)pIoData->llPokeySlowClockOriginCycle,
+		       (unsigned long long)pIoData->llPokeyTimerResetCycle);
+#endif
 	}
 
 	return &RAM[IO_STIMER_KBCODE];
@@ -2138,6 +2176,7 @@ static u64 Pokey_SerialOutputClockPeriod(_6502_Context_t *pContext)
 void Pokey_SerialOutputClockTimerExpired(_6502_Context_t *pContext, u8 timer)
 {
 	IoData_t *pIoData;
+	u8 cBefore;
 
 	if(!pContext || !pContext->pIoData ||
 	   Pokey_SerialOutputClockTimer(pContext) != timer)
@@ -2146,7 +2185,15 @@ void Pokey_SerialOutputClockTimerExpired(_6502_Context_t *pContext, u8 timer)
 	}
 
 	pIoData = (IoData_t *)pContext->pIoData;
+	cBefore = pIoData->cSerialOutputClockHigh;
 	pIoData->cSerialOutputClockHigh ^= 1;
+#ifdef VERBOSE_SIO
+	printf("POKEY_TRACE TIMER_CLOCK_EDGE cycle=%llu pad=%02X timer=%u timerCycle=%llu level=%u>%u\n",
+	       (unsigned long long)pContext->llCycleCounter,
+	       RAM[0x89], timer,
+	       (unsigned long long)(timer == 2 ? pIoData->llTimer2Cycle : pIoData->llTimer4Cycle),
+	       cBefore, pIoData->cSerialOutputClockHigh);
+#endif
 }
 
 static u64 Pokey_SerialOutputClockNextCycle(
@@ -2265,6 +2312,13 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		u8 cClockAvailable = Pokey_SerialOutputClockAvailable(pContext);
 		u64 llSerialClockPeriod = Pokey_SerialOutputClockPeriod(pContext);
 #ifdef VERBOSE_SIO
+		printf("POKEY_TRACE SEROUT_WRITE cycle=%llu value=%02X audctl=%02X audf4=%02X skctl=%02X timer=%u timer2=%llu timer4=%llu level=%u\n",
+		       (unsigned long long)pContext->llCycleCounter, *pValue,
+		       SRAM[IO_AUDCTL_ALLPOT], SRAM[IO_AUDF4_POT6],
+		       SRAM[IO_SKCTL_SKSTAT], Pokey_SerialOutputClockTimer(pContext),
+		       (unsigned long long)pIoData->llTimer2Cycle,
+		       (unsigned long long)pIoData->llTimer4Cycle,
+		       pIoData->cSerialOutputClockHigh);
 		printf("             [%16llu] SEROUT ", pContext->llCycleCounter);
 		printf("(%02X)!\n", *pValue);
 #endif
@@ -2276,13 +2330,32 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 			pIoData->llSerialOutputTransmissionDoneCycle =
 				llNeedDataCycle + llSerialClockPeriod * 20;
 			RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+#ifdef VERBOSE_SIO
+			printf("POKEY_TRACE SEROUT_SCHEDULE cycle=%llu pad=%02X audctl=%02X audf4=%02X skctl=%02X timer=%u period=%llu timerCycle=%llu level=%u need=%llu done=%llu\n",
+			       (unsigned long long)llNow, RAM[0x89],
+			       SRAM[IO_AUDCTL_ALLPOT], SRAM[IO_AUDF4_POT6],
+			       SRAM[IO_SKCTL_SKSTAT],
+			       Pokey_SerialOutputClockTimer(pContext),
+			       (unsigned long long)llSerialClockPeriod,
+			       (unsigned long long)(Pokey_SerialOutputClockTimer(pContext) == 2 ? pIoData->llTimer2Cycle : pIoData->llTimer4Cycle),
+			       pIoData->cSerialOutputClockHigh,
+			       (unsigned long long)pIoData->llSerialOutputNeedDataCycle,
+			       (unsigned long long)pIoData->llSerialOutputTransmissionDoneCycle);
+#endif
 		}
 		else
 		{
 			pIoData->llSerialOutputNeedDataCycle = CYCLE_NEVER;
 			pIoData->llSerialOutputTransmissionDoneCycle = CYCLE_NEVER;
-		RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+			RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_DATA_NEEDED;
 			RAM[IO_IRQEN_IRQST] &= (u8)~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
+#ifdef VERBOSE_SIO
+			printf("POKEY_TRACE SEROUT_SCHEDULE cycle=%llu pad=%02X audctl=%02X audf4=%02X skctl=%02X timer=0 period=0 timerCycle=never level=%u need=never done=never\n",
+			       (unsigned long long)llNow, RAM[0x89],
+			       SRAM[IO_AUDCTL_ALLPOT], SRAM[IO_AUDF4_POT6],
+			       SRAM[IO_SKCTL_SKSTAT],
+			       pIoData->cSerialOutputClockHigh);
+#endif
 		}
 
 		AtariIoCycleTimedEventUpdate(pContext);
@@ -2754,14 +2827,29 @@ u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue)
 		Pokey_Sync(pContext, pContext->llCycleCounter);
 		Pokey_PotPrepareSkctlWrite(pContext);
 		SRAM[IO_SKCTL_SKSTAT] = *pValue;
+		if((cPreviousSkctl & 0x03) != 0 && (*pValue & 0x03) == 0)
+		{
+			Pokey_EnterInitialization(pContext);
+		}
 		if((cPreviousSkctl & 0x03) == 0 && (*pValue & 0x03) != 0)
 		{
-			pIoData->llPokeySlowClockOriginCycle = pContext->llCycleCounter;
+			pIoData->llPokeySlowClockOriginCycle =
+				pContext->llCycleCounter >= 6ull ? pContext->llCycleCounter - 6ull : 0ull;
 		}
 		if((*pValue & 0x70) == 0)
 		{
 			pIoData->cSerialOutputClockHigh = 0;
 		}
+#ifdef VERBOSE_SIO
+		printf("POKEY_TRACE SKCTL_WRITE cycle=%llu previous=%02X value=%02X initializingBefore=%u initializingAfter=%u transition=%s slowOrigin=%llu\n",
+		       (unsigned long long)pContext->llCycleCounter,
+		       cPreviousSkctl, *pValue,
+		       (cPreviousSkctl & 0x03) == 0 ? 1u : 0u,
+		       (*pValue & 0x03) == 0 ? 1u : 0u,
+		       (cPreviousSkctl & 0x03) == 0 && (*pValue & 0x03) != 0 ? "exit" :
+		       (cPreviousSkctl & 0x03) != 0 && (*pValue & 0x03) == 0 ? "enter" : "none",
+		       (unsigned long long)pIoData->llPokeySlowClockOriginCycle);
+#endif
 		Pokey_ArmInactiveTimers(pContext);
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);

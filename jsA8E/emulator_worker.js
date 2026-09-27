@@ -525,6 +525,7 @@
       {
         videoStandard: normalizeVideoStandard(msg.videoStandard) || "pal",
         memoryExpansion: normalizeMemoryExpansion(msg.memoryExpansion) || "none",
+        pokeyTrace: !!msg.pokeyTrace,
       },
     );
 
@@ -596,6 +597,7 @@
         optionOnStart: !!msg.optionOnStart,
         videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
         memoryExpansion: self.A8E_BOOT_OPTIONS.memoryExpansion,
+        pokeyTrace: !!msg.pokeyTrace,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
           queueDebugState(state, force);
@@ -619,6 +621,7 @@
         optionOnStart: !!msg.optionOnStart,
         videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
         memoryExpansion: self.A8E_BOOT_OPTIONS.memoryExpansion,
+        pokeyTrace: !!msg.pokeyTrace,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
           queueDebugState(state, force);

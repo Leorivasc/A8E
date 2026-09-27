@@ -16,6 +16,7 @@
     const serialOutputClockAvailable = cfg.serialOutputClockAvailable;
     const serialOutputClockPeriod = cfg.serialOutputClockPeriod;
     const serialOutputClockNextCycle = cfg.serialOutputClockNextCycle;
+    const traceSerialEvent = cfg.traceSerialEvent;
 
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
 
@@ -97,6 +98,13 @@
         io.serialOutputTransmissionDoneCycle = scheduleNeed
           ? needCycle + period * 20
           : now + doneDelay;
+      }
+      if (typeof traceSerialEvent === "function") {
+        traceSerialEvent(
+          ctx,
+          scheduleNeed ? "SEROUT_SCHEDULE" : "SEROUT_DONE_SCHEDULE",
+          { now: now, period: period, scheduleNeed: !!scheduleNeed },
+        );
       }
       cycleTimedEventUpdate(ctx);
       return true;

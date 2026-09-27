@@ -4,6 +4,77 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-26: rechecked the remaining jsA8E P1 phase discrepancy using the
+  AHRM timing rules, Altirra only as a conceptual reference, and Chromium
+  traces. Two hypotheses were rejected: globally moving the `STIMER` reload
+  to the apparent CPU bus-write cycle, and deferring all POKEY events to an
+  instruction boundary. Both fix P1 in isolation but regress P0/P2/P4 or
+  transmission completion. The restored stable matrix remains
+  `00,05,05,04 / 04,00,05,00 / 3A,3A`; the next change must model the
+  slow-clock-tick versus timer-reload arbitration, not introduce a global or
+  padding-specific offset.
+
+- 2026-09-26: found the jsA8e-only scheduler defect behind the remaining
+  P1/P2 variability. The `STIMER` write created `pokeyTimerResetCycle` but
+  did not republish `ioMasterTimedEventCycle`, so the reset could be applied
+  several CPU cycles late. jsA8e now publishes that deadline immediately;
+  this preserves the cycle-accurate reset boundary instead of tuning a
+  padding-specific offset.
+
+- 2026-09-26: added an opt-in `TIMER_RESET_APPLY` trace record to jsA8e so
+  the scheduled and observed `STIMER` reset cycles can be compared directly
+  while tuning the matrix boundary. This is diagnostic only and does not
+  change emulation behavior.
+
+- 2026-09-26: the Chrome/native trace showed jsA8e carrying a high serial
+  divider phase into later matrix cases because active timer deadlines from
+  the previous case survived the `SKCTL` initialization transition. Both
+  cores now cancel timer deadlines and pending `STIMER` application when
+  entering initialization, then re-arm inactive timers on exit. This keeps
+  the change independent from the four-cycle `STIMER` delay and serial
+  propagation timing.
+
+- 2026-09-26: applied the first targeted P0/P2 correction in both cores without
+  importing Altirra code. `STIMER` now schedules an internal four-cycle timer
+  reset event; the event loop applies the timer reload and clears stale timer
+  IRQ state at that boundary. Leaving POKEY initialization also seeds the slow
+  clock six cycles before the observed transition so the next 64 kHz edge is
+  aligned. This deliberately leaves serial `+2` propagation untouched until
+  the matrix fixture shows whether these two independent phase causes are
+  sufficient.
+
+- 2026-09-26: extended the opt-in AHRM-08 POKEY trace in both cores with
+  `CLOCK_CONFIG_WRITE`, `SKCTL_WRITE`, `STIMER_WRITE`, and `SEROUT_WRITE`
+  events. The events record the write cycle, initialization transition,
+  slow-clock origin, timer deadlines, selected serial clock, and serial
+  divider level. Normal emulation is unchanged; the trace is enabled only by
+  `?a8e_pokey_trace=1` in jsA8E or `VERBOSE_SIO` in native A8E. This is the
+  next diagnostic step before changing the phase model exposed by the matrix
+  fixture.
+
+- 2026-09-26: limited jsA8E's default `?a8e_pokey_trace=1` output to the
+  low-rate phase and serial events. Logging every `TIMER_CLOCK_EDGE` through
+  the browser console can dominate the worker during boot and make the
+  emulator appear hung. Full edge tracing remains available explicitly with
+  `?a8e_pokey_trace=1&a8e_pokey_trace_edges=1`.
+
+- 2026-09-26: `implementation/AHRM08_POKEY_MATRIX_TEST.{asm,XEX,md}` and
+  `jsA8E/tests/ahrm08_pokey_matrix_xex.test.js`: added a matrix diagnostic for
+  the remaining AHRM-08 phase investigation. It repeats the same
+  `STIMER`/`SEROUT` measurement in normal and reverse padding order, resets
+  POKEY before every case, and reports `DATA NEEDED` plus completion polling
+  counts. The fixture is intended to distinguish order-dependent state from
+  a stable IRQ/polling-boundary difference without changing production timing.
+
+- 2026-09-26: three clean jsA8E matrix runs through the browser automation API
+  produced, in fixture-memory order `P0,P1,P2,P4,P4r,P2r,P1r,P0r,TX,TXr`,
+  `03,02,05,01,01,02,02,00,3B,3A` on the first launch and
+  `00,02,05,01,01,02,02,00,3A,3B` on the next two launches. `P2` is stable
+  across launches while `P0` and the completion pair change with the initial
+  phase. Treat P0 and P2 as separate investigations; do not apply one shared
+  padding formula or change production timing until the startup phase is
+  measured directly.
+
 - 2026-09-26: `implementation/AHRM08_POKEY_EDGE_TEST.{asm,XEX,md}` and
   `jsA8E/tests/ahrm08_pokey_edge_xex.test.js`: added a diagnostic that records
   independent timer-4 IRQ and `DATA NEEDED` polling counts from the same
@@ -880,3 +951,13 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   initialization establishes its offset. The phase is persisted in JS
   snapshots, while the serial divide-by-two reset remains controlled by
   `SKCTL[6:4]=000` per AHRM 5.6.
+- 2026-09-26: after the `AHRM-08 Stage 3` safety commit, added an opt-in
+  serial-phase trace to both implementations. Launch jsA8E with
+  `?a8e_pokey_trace=1` to log `SEROUT_SCHEDULE`, selected timer clock edges,
+  `DATA_NEEDED`, and `TRANSMISSION_DONE` in the browser worker console. Native
+  A8E emits the same event names when built with `-DVERBOSE_SIO`. Each record
+  includes the guest pad index at `$89`, `AUDCTL`, `AUDF4`, `SKCTL`, cycle,
+  selected timer and period, timer deadlines, divide-by-two level, serial
+  deadlines, and `IRQST` where available. The trace is observational only and is disabled by default; its
+  purpose is to decide whether the remaining P1 mismatch is a real internal
+  edge difference or merely a guest polling boundary before changing timing.
