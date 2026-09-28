@@ -1,5 +1,6 @@
 build/
 build-mingw/
+build-verbose-sio/
 disks/
 docs/
 node_modules/

@@ -53,6 +53,12 @@
       const record = {
         event: event,
         cycle: ctx.cycleCounter,
+        pc: Number.isFinite(ctx.currentInstructionPc)
+          ? ctx.currentInstructionPc & 0xffff
+          : null,
+        opcode: Number.isFinite(ctx.currentOpcode)
+          ? ctx.currentOpcode & 0xff
+          : null,
         pad: ctx.ram ? ctx.ram[POKEY_TRACE_PAD_INDEX] & 0xff : null,
         audctl: ctx.sram ? ctx.sram[IO_AUDCTL_ALLPOT] & 0xff : null,
         audf4: ctx.sram ? ctx.sram[IO_AUDF4_POT6] & 0xff : null,

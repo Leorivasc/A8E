@@ -1166,7 +1166,9 @@ void _6502_Execute(_6502_Context_t *pContext)
 		return;
 	}
 
+	pContext->sCurrentInstructionPc = CPU.pc;
 	cCode = RAM[CPU.pc++];
+	pContext->cCurrentOpcode = cCode;
 
 	pContext->AccessFunction = NULL;
 	pContext->cPageCrossed = 0;

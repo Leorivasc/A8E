@@ -191,6 +191,31 @@ if(BUILD_TESTING)
   add_test(NAME pokey_timer_period_probe COMMAND pokey_timer_period_probe)
   set_tests_properties(pokey_timer_period_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
 
+  add_executable(pokey_sio_contract_probe
+    tests/pokey_sio_contract_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(pokey_sio_contract_probe PRIVATE
+    A8E_ENABLE_TEST_PROBES=1
+    A8E_TRACE_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../implementation/traces/pokey_sio_contract.jsonl"
+  )
+  a8e_configure_target(pokey_sio_contract_probe)
+
+  add_test(NAME pokey_sio_contract_probe COMMAND pokey_sio_contract_probe)
+  set_tests_properties(pokey_sio_contract_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
+
+  add_executable(keyboard_irq_gate_probe
+    tests/keyboard_irq_gate_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(keyboard_irq_gate_probe PRIVATE A8E_ENABLE_TEST_PROBES=1)
+  a8e_configure_target(keyboard_irq_gate_probe)
+
+  add_test(NAME keyboard_irq_gate_probe COMMAND keyboard_irq_gate_probe)
+  set_tests_properties(keyboard_irq_gate_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
+
   add_executable(memory_expansion_probe
     tests/memory_expansion_probe.c
     ${A8E_CORE_SOURCES}

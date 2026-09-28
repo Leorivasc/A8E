@@ -58,6 +58,8 @@ u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue);
 
 /* Returns the timer period in CPU cycles for timer 1/2/4. AUDF=0 is valid. */
 u64 Pokey_TimerPeriodCpuCycles(_6502_Context_t *pContext, u8 timer);
+/* Returns the timer selected as the synchronous serial output clock. */
+u8 Pokey_SerialOutputClockTimer(_6502_Context_t *pContext);
 void Pokey_SerialOutputClockTimerExpired(_6502_Context_t *pContext, u8 timer);
 void Pokey_EnterInitialization(_6502_Context_t *pContext);
 void Pokey_ApplyTimerReset(_6502_Context_t *pContext);

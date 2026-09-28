@@ -963,9 +963,12 @@ static void AtariIo_ReadRomOrDie(FILE *pFile, const char *pRomFileName, void *pB
 static void AtariIoQueueKeyCode(_6502_Context_t *pContext, IoData_t *pIoData, u8 cKeyCode)
 {
 	RAM[IO_STIMER_KBCODE] = cKeyCode;
-	RAM[IO_IRQEN_IRQST] &= ~IRQ_OTHER_KEY_PRESSED;
+	/* AHRM 5.7/5.8: KBCODE updates even while its IRQ source is masked, but
+	 * a key detected while IRQEN bit 6 is clear must not latch IRQST or be
+	 * delivered later when software re-enables the source. */
 	if(SRAM[IO_IRQEN_IRQST] & IRQ_OTHER_KEY_PRESSED)
 	{
+		RAM[IO_IRQEN_IRQST] &= ~IRQ_OTHER_KEY_PRESSED;
 		_6502_Irq(pContext);
 	}
 	pIoData->lKeyPressCounter++;
@@ -5664,8 +5667,10 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 	{
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIAL_OUTPUT_TRANSMISSION_DONE request!\n", pContext->llCycleCounter);
-		printf("POKEY_TRACE TRANSMISSION_DONE cycle=%llu pad=%02X level=%u need=%llu done=%llu irqst=%02X\n",
-		       (unsigned long long)llMasterCycle, RAM[0x89],
+		printf("POKEY_TRACE TRANSMISSION_DONE cycle=%llu pc=%04X opcode=%02X pad=%02X level=%u need=%llu done=%llu irqst=%02X\n",
+		       (unsigned long long)llMasterCycle,
+		       pContext->sCurrentInstructionPc, pContext->cCurrentOpcode,
+		       RAM[0x89],
 		       pIoData->cSerialOutputClockHigh,
 		       (unsigned long long)pIoData->llSerialOutputNeedDataCycle,
 		       (unsigned long long)pIoData->llSerialOutputTransmissionDoneCycle,
@@ -5684,14 +5689,21 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 	{
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIAL_OUTPUT_DATA_NEEDED request!\n", pContext->llCycleCounter);
-		printf("POKEY_TRACE DATA_NEEDED cycle=%llu pad=%02X level=%u need=%llu done=%llu irqst=%02X\n",
-		       (unsigned long long)llMasterCycle, RAM[0x89],
+		printf("POKEY_TRACE DATA_NEEDED cycle=%llu pc=%04X opcode=%02X pad=%02X level=%u need=%llu done=%llu irqst=%02X\n",
+		       (unsigned long long)llMasterCycle,
+		       pContext->sCurrentInstructionPc, pContext->cCurrentOpcode,
+		       RAM[0x89],
 		       pIoData->cSerialOutputClockHigh,
 		       (unsigned long long)pIoData->llSerialOutputNeedDataCycle,
 		       (unsigned long long)pIoData->llSerialOutputTransmissionDoneCycle,
 		       RAM[IO_IRQEN_IRQST]);
 #endif
-		RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+		/* AHRM 5.7: unlike XMTDONE, a disabled POKEY source keeps its
+		 * IRQST bit high and discards the event. */
+		if(SRAM[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED)
+		{
+			RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+		}
 		/* The queued byte is now loaded into the output shift register. */
 		RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
 		if(SRAM[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED)
@@ -5707,7 +5719,10 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIAL_INPUT_DATA_READY request!\n", pContext->llCycleCounter);
 #endif
-		RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_INPUT_DATA_READY;
+		if(SRAM[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY)
+		{
+			RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_INPUT_DATA_READY;
+		}
 		if(SRAM[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY)
 		{
 			_6502_Irq(pContext);
@@ -5722,7 +5737,10 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] TIMER_1 request!\n", pContext->llCycleCounter);
 #endif
-		RAM[IO_IRQEN_IRQST] &= ~IRQ_TIMER_1;
+		if(SRAM[IO_IRQEN_IRQST] & IRQ_TIMER_1)
+		{
+			RAM[IO_IRQEN_IRQST] &= ~IRQ_TIMER_1;
+		}
 		if(SRAM[IO_IRQEN_IRQST] & IRQ_TIMER_1)
 		{
 			_6502_Irq(pContext);
@@ -5747,7 +5765,10 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] TIMER_2 request!\n", pContext->llCycleCounter);
 #endif
-		RAM[IO_IRQEN_IRQST] &= ~IRQ_TIMER_2;
+		if(SRAM[IO_IRQEN_IRQST] & IRQ_TIMER_2)
+		{
+			RAM[IO_IRQEN_IRQST] &= ~IRQ_TIMER_2;
+		}
 		if(SRAM[IO_IRQEN_IRQST] & IRQ_TIMER_2)
 		{
 			_6502_Irq(pContext);
@@ -5773,7 +5794,10 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] TIMER_4 request!\n", pContext->llCycleCounter);
 #endif
-		RAM[IO_IRQEN_IRQST] &= ~IRQ_TIMER_4;
+		if(SRAM[IO_IRQEN_IRQST] & IRQ_TIMER_4)
+		{
+			RAM[IO_IRQEN_IRQST] &= ~IRQ_TIMER_4;
+		}
 		if(SRAM[IO_IRQEN_IRQST] & IRQ_TIMER_4)
 		{
 			_6502_Irq(pContext);

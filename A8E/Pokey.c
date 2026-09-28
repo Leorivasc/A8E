@@ -1866,8 +1866,10 @@ u8 *Pokey_AUDF4_POT6(_6502_Context_t *pContext, u8 *pValue)
 		}
 		Pokey_ArmInactiveTimers(pContext);
 #ifdef VERBOSE_SIO
-		printf("POKEY_TRACE CLOCK_CONFIG_WRITE cycle=%llu register=AUDF4 value=%02X timer4=%llu\n",
-		       (unsigned long long)pContext->llCycleCounter, *pValue,
+		printf("POKEY_TRACE CLOCK_CONFIG_WRITE cycle=%llu pc=%04X opcode=%02X register=AUDF4 value=%02X timer4=%llu\n",
+		       (unsigned long long)pContext->llCycleCounter,
+		       pContext->sCurrentInstructionPc, pContext->cCurrentOpcode,
+		       *pValue,
 		       (unsigned long long)((IoData_t *)pContext->pIoData)->llTimer4Cycle);
 #endif
 #ifdef VERBOSE_REGISTER
@@ -1920,8 +1922,10 @@ u8 *Pokey_AUDCTL_ALLPOT(_6502_Context_t *pContext, u8 *pValue)
 		}
 		Pokey_ArmInactiveTimers(pContext);
 #ifdef VERBOSE_SIO
-		printf("POKEY_TRACE CLOCK_CONFIG_WRITE cycle=%llu register=AUDCTL value=%02X timer2=%llu timer4=%llu\n",
-		       (unsigned long long)pContext->llCycleCounter, *pValue,
+		printf("POKEY_TRACE CLOCK_CONFIG_WRITE cycle=%llu pc=%04X opcode=%02X register=AUDCTL value=%02X timer2=%llu timer4=%llu\n",
+		       (unsigned long long)pContext->llCycleCounter,
+		       pContext->sCurrentInstructionPc, pContext->cCurrentOpcode,
+		       *pValue,
 		       (unsigned long long)((IoData_t *)pContext->pIoData)->llTimer2Cycle,
 		       (unsigned long long)((IoData_t *)pContext->pIoData)->llTimer4Cycle);
 #endif
@@ -2030,8 +2034,10 @@ u8 *Pokey_STIMER_KBCODE(_6502_Context_t *pContext, u8 *pValue)
 		printf("             [%16llu] STIMER: %02X\n", pContext->llCycleCounter, *pValue);
 #endif
 #ifdef VERBOSE_SIO
-		printf("POKEY_TRACE STIMER_WRITE cycle=%llu value=%02X slowOrigin=%llu reset=%llu\n",
-		       (unsigned long long)pContext->llCycleCounter, *pValue,
+		printf("POKEY_TRACE STIMER_WRITE cycle=%llu pc=%04X opcode=%02X value=%02X slowOrigin=%llu reset=%llu\n",
+		       (unsigned long long)pContext->llCycleCounter,
+		       pContext->sCurrentInstructionPc, pContext->cCurrentOpcode,
+		       *pValue,
 		       (unsigned long long)pIoData->llPokeySlowClockOriginCycle,
 		       (unsigned long long)pIoData->llPokeyTimerResetCycle);
 #endif
@@ -2117,7 +2123,7 @@ static u16 sSioPendingBytes = 0;
  * Modes 000/001/011/101 do not provide a usable output clock here: the first
  * two are externally clocked and the latter two hold timers 3+4 in reset for
  * asynchronous input until a start bit arrives. */
-static u8 Pokey_SerialOutputClockTimer(_6502_Context_t *pContext)
+u8 Pokey_SerialOutputClockTimer(_6502_Context_t *pContext)
 {
 	u8 cMode;
 
@@ -2188,8 +2194,9 @@ void Pokey_SerialOutputClockTimerExpired(_6502_Context_t *pContext, u8 timer)
 	cBefore = pIoData->cSerialOutputClockHigh;
 	pIoData->cSerialOutputClockHigh ^= 1;
 #ifdef VERBOSE_SIO
-	printf("POKEY_TRACE TIMER_CLOCK_EDGE cycle=%llu pad=%02X timer=%u timerCycle=%llu level=%u>%u\n",
+	printf("POKEY_TRACE TIMER_CLOCK_EDGE cycle=%llu pc=%04X opcode=%02X pad=%02X timer=%u timerCycle=%llu level=%u>%u\n",
 	       (unsigned long long)pContext->llCycleCounter,
+	       pContext->sCurrentInstructionPc, pContext->cCurrentOpcode,
 	       RAM[0x89], timer,
 	       (unsigned long long)(timer == 2 ? pIoData->llTimer2Cycle : pIoData->llTimer4Cycle),
 	       cBefore, pIoData->cSerialOutputClockHigh);
@@ -2312,8 +2319,10 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		u8 cClockAvailable = Pokey_SerialOutputClockAvailable(pContext);
 		u64 llSerialClockPeriod = Pokey_SerialOutputClockPeriod(pContext);
 #ifdef VERBOSE_SIO
-		printf("POKEY_TRACE SEROUT_WRITE cycle=%llu value=%02X audctl=%02X audf4=%02X skctl=%02X timer=%u timer2=%llu timer4=%llu level=%u\n",
-		       (unsigned long long)pContext->llCycleCounter, *pValue,
+		printf("POKEY_TRACE SEROUT_WRITE cycle=%llu pc=%04X opcode=%02X value=%02X audctl=%02X audf4=%02X skctl=%02X timer=%u timer2=%llu timer4=%llu level=%u\n",
+		       (unsigned long long)pContext->llCycleCounter,
+		       pContext->sCurrentInstructionPc, pContext->cCurrentOpcode,
+		       *pValue,
 		       SRAM[IO_AUDCTL_ALLPOT], SRAM[IO_AUDF4_POT6],
 		       SRAM[IO_SKCTL_SKSTAT], Pokey_SerialOutputClockTimer(pContext),
 		       (unsigned long long)pIoData->llTimer2Cycle,
@@ -2331,8 +2340,10 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 				llNeedDataCycle + llSerialClockPeriod * 20;
 			RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_DATA_NEEDED;
 #ifdef VERBOSE_SIO
-			printf("POKEY_TRACE SEROUT_SCHEDULE cycle=%llu pad=%02X audctl=%02X audf4=%02X skctl=%02X timer=%u period=%llu timerCycle=%llu level=%u need=%llu done=%llu\n",
-			       (unsigned long long)llNow, RAM[0x89],
+			printf("POKEY_TRACE SEROUT_SCHEDULE cycle=%llu pc=%04X opcode=%02X pad=%02X audctl=%02X audf4=%02X skctl=%02X timer=%u period=%llu timerCycle=%llu level=%u need=%llu done=%llu\n",
+			       (unsigned long long)llNow,
+			       pContext->sCurrentInstructionPc, pContext->cCurrentOpcode,
+			       RAM[0x89],
 			       SRAM[IO_AUDCTL_ALLPOT], SRAM[IO_AUDF4_POT6],
 			       SRAM[IO_SKCTL_SKSTAT],
 			       Pokey_SerialOutputClockTimer(pContext),
@@ -2350,8 +2361,10 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 			RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_DATA_NEEDED;
 			RAM[IO_IRQEN_IRQST] &= (u8)~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
 #ifdef VERBOSE_SIO
-			printf("POKEY_TRACE SEROUT_SCHEDULE cycle=%llu pad=%02X audctl=%02X audf4=%02X skctl=%02X timer=0 period=0 timerCycle=never level=%u need=never done=never\n",
-			       (unsigned long long)llNow, RAM[0x89],
+			printf("POKEY_TRACE SEROUT_SCHEDULE cycle=%llu pc=%04X opcode=%02X pad=%02X audctl=%02X audf4=%02X skctl=%02X timer=0 period=0 timerCycle=never level=%u need=never done=never\n",
+			       (unsigned long long)llNow,
+			       pContext->sCurrentInstructionPc, pContext->cCurrentOpcode,
+			       RAM[0x89],
 			       SRAM[IO_AUDCTL_ALLPOT], SRAM[IO_AUDF4_POT6],
 			       SRAM[IO_SKCTL_SKSTAT],
 			       pIoData->cSerialOutputClockHigh);
@@ -2841,8 +2854,9 @@ u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue)
 			pIoData->cSerialOutputClockHigh = 0;
 		}
 #ifdef VERBOSE_SIO
-		printf("POKEY_TRACE SKCTL_WRITE cycle=%llu previous=%02X value=%02X initializingBefore=%u initializingAfter=%u transition=%s slowOrigin=%llu\n",
+		printf("POKEY_TRACE SKCTL_WRITE cycle=%llu pc=%04X opcode=%02X previous=%02X value=%02X initializingBefore=%u initializingAfter=%u transition=%s slowOrigin=%llu\n",
 		       (unsigned long long)pContext->llCycleCounter,
+		       pContext->sCurrentInstructionPc, pContext->cCurrentOpcode,
 		       cPreviousSkctl, *pValue,
 		       (cPreviousSkctl & 0x03) == 0 ? 1u : 0u,
 		       (*pValue & 0x03) == 0 ? 1u : 0u,

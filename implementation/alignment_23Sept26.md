@@ -518,11 +518,62 @@ Implemented in both A8E and jsA8E:
 
 External AHRM-07 validation:
 
-- Run `implementation/AHRM07_PMG_TEST.XEX` on jsA8E, native A8E, Altirra, and
-  hardware. Confirm `P0/P1 COLLISION: PASS`, compare the alternating PMBASE
-  patterns, and observe stable DLI-driven HPOS/PRIOR changes.
+- AHRM 6.5 phantom P/M DMA is now represented for the display-list-to-missile
+  path. After a visible line with display-list DMA enabled and both P/M DMA
+  bits disabled, the next cycle-1 display-list instruction fetch is sent to
+  GRAFM if GTIA missile reception is still enabled. It uses the existing
+  display-list DMA slot, retains the VDELAY per-missile merge, and records a
+  cycle-1 raster event without a second CPU steal. Native and JS scheduler
+  probes verify the source byte, event, and contention contract; the JS
+  pending state is serialised in snapshots. This is a general AHRM rule, not
+  an AtariBlast branch.
+- AHRM 4.13/6.5 review on 2026-09-27 corrected VDELAY DMA timing in both
+  cores: VDELAY retains a prior graphics latch on an even line, but does not
+  remove ANTIC's missile/player DMA cycle. Missile VDELAY is per object, so
+  only the associated two GRAFM bits are retained; unmasked missiles receive
+  their bits from the same fetch. Native and JS probes verify the partial
+  merge, absence of a replay event for a fully masked load, and preserved CPU
+  steal. This is a general PMG correction, not an AtariBlast-specific rule.
+- AHRM 4.13 also requires `DMACTL` P/M enable bits to take effect two ANTIC
+  cycles after a write. Both cores now pipeline only those gates for PMG
+  slots: a cycle-113 `$3E` to `$32` transition still permits the next cycle-0
+  missile DMA, but player cycle 2 already observes the disable; enabling
+  follows the same boundary and the P/M addressing mode remains live. The JS
+  state is serialised in snapshots. Native and JS regressions cover the timing
+  and contention behavior.
+- Paired NTSC/128K captures supplied on 2026-09-27 exposed missing PRIOR=0
+  player/playfield color mixing in both cores relative to Altirra. The
+  interleaved player path is corrected per AHRM 6.7/6.8 and covered by native
+  and JS probes. The updated NTSC/128K two-phase visual comparison is
+  certified: Chromium/jsA8E and native A8E match Altirra for the PMG bars,
+  player/playfield mixing, DLI position/priority transition, and `PASS`;
+  hardware was visually equivalent to Altirra.
+- The 2026-09-27 ROM-backed headless HostFS regression now verifies XEX
+  startup, display-list/DLI vectors, 65 balanced DLI returns, both phase
+  transitions, and collision PASS. The subsequent two-phase Chromium
+  worker/native/Altirra visual comparison passed, and the hardware image was
+  visually equivalent to Altirra. See `implementation/AHRM07_PMG_TEST.md`.
+- Retain `implementation/AHRM07_PMG_TEST.XEX` as the PMG/GTIA regression gate:
+  confirm `P0/P1 COLLISION: PASS`, compare the alternating PMBASE patterns,
+  and observe stable DLI-driven HPOS/PRIOR changes after future changes.
 - Validate real raster-content titles and confirm parity between native A8E,
   jsA8E, Altirra, and hardware where available.
+- AtariBlast now supplies a focused real-content case: its vertical-scrolling
+  level-one demo shows detached PMG fragments in both NTSC RAMBO 1088K cores
+  but not in Altirra. Its trace has DMACTL changing from `$3E` to `$32` at
+  cycles 112-113. Beam-level tracing resolved that GRACTL clears at cycle 0
+  of the following line, so its cycle-1 phantom-missile path is not exercised
+  in that sample. The late DMACTL disable does exercise the now-corrected
+  AHRM 4.13 gate. The subsequent level-one rerun still displayed the fragments
+  in both A8E cores, so that correction is not sufficient. The register trace
+  also established that `$D407` is PMBASE (not HSCROL): PMBASE alternates only
+  in VBL, and the actual HSCROL/VSCROL writes are outside the visible region.
+  The reproducible snapshot instead has normal continuous player DMA from
+  about lines 31-207; suppressing just players removes the detached pieces,
+  while missile output remains. The observed HPOS/SIZE writes miss their
+  comparator windows. Capture the exact player-latch/output transition and
+  compare it with Altirra before adding AHRM 6.5 phantom-player samples at
+  cycles 3-7 or investigating abnormal playfield-DMA overlap under AHRM 4.12.
 
 ### AHRM-08: Align POKEY serial, timer, paddle, and audio fidelity
 
@@ -534,8 +585,9 @@ Viability: **high** for timers/SIO and **medium** for audio/paddles.
 
 Current gap:
 
-- Timer and SIO behavior is substantially aligned, but the models still need
-  broader cross-core differential coverage.
+- Timer and SIO behavior is substantially aligned. The shared eight-mode
+  SIO clock/timer-period contract now provides the first broader cross-core
+  differential fixture; exact STIMER phase still needs an external trace.
 - The audio mixer, DAC curve, DC blocker, clipping, and paddle model are
   approximations rather than a complete analog POKEY model.
 
@@ -585,8 +637,9 @@ Status: **in progress; timer minimum divisor and live POT reads corrected and co
 - Added `implementation/AHRM08_POKEY_TEST.XEX`, a portable guest-level
   diagnostic that records timer IRQ, SEROUT, and POT/ALLPOT observations for
   external comparison on jsA8E, native A8E, Altirra, and hardware.
-- STIMER pipeline/SIO event differential fixtures, capacitor
-  discharge/threshold behavior, and audio calibration are still pending.
+- STIMER pipeline/SIO event differential fixtures beyond clock selection,
+  capacitor discharge/threshold behavior, and audio calibration are still
+  pending.
 
 Completion boundary requiring external reference:
 
@@ -646,6 +699,11 @@ Completion boundary requiring external reference:
   and `D:4E/4F` for timer 2. This certifies the AHRM-08 Stage 2 guest-level
   digital contract. The N-field differences are polling-boundary variation,
   while DAC/audio calibration remains outside this certification.
+- The shared `implementation/traces/pokey_sio_contract.jsonl` fixture now
+  covers all eight `SKCTL` modes, the selected serial output timer, and the
+  `AUDF`-derived timer period. Native CTest and jsA8E automation consume the
+  same fixture, extending the AHRM-09 differential harness without changing
+  runtime timing behavior.
 
 ### AHRM-09: Build a cross-core AHRM differential harness
 

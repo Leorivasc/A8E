@@ -71,6 +71,9 @@ typedef struct _6502_Context
 	u16 sAccessAddress;
 	u8 cPageCrossed;
 	u8 cCurrentInstructionCycles;
+	/* Diagnostic identity of the instruction currently being executed. */
+	u16 sCurrentInstructionPc;
+	u8 cCurrentOpcode;
 
 	u64 llCycleCounter;
 	u64 llStallCycleCounter;

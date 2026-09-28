@@ -49,7 +49,7 @@ Mapped bitmap modes consume bytes MSB-first per AHRM 4.5. Mode 8 repeats each tw
 
 ## Player-Missile Graphics
 
-PMG DMA fetches happen in `fetchPmgDmaCycle` (in `gtia.js`, called from `clockAction`): missile at lineCycle 0, players 0–3 at lineCycles 2–5. `VDELAY` masks per-sprite fetches on even scan lines (holds the previous latch); it does not shift PMG memory rows. Player DMA keeps the missile slot active regardless (AHRM 4.13).
+PMG DMA fetches happen in `fetchPmgDmaCycle` (in `gtia.js`, called from `clockAction`): missile at lineCycle 0, players 0–3 at lineCycles 2–5. `VDELAY` masks the corresponding GTIA latch load on even scan lines while ANTIC still takes the DMA slot; it does not shift PMG memory rows. Player DMA keeps the missile slot active regardless. The P/M enable bits of `DMACTL` are sampled two ANTIC cycles earlier, while the resolution/addressing bit stays live (AHRM 4.13).
 
 `PMBASE` is read live at each DMA cycle. This means a DLI write to PMBASE between cycles 5 and 0 of adjacent scanlines applies cleanly; a write during cycles 0–5 of an active scanline will cause a mixed-base fetch for that scanline (missiles use old base, late players use new base). This matches real hardware behavior.
 
@@ -59,7 +59,7 @@ PM graphics are drawn interleaved with playfield pixels via `drawPlayerMissilesC
 
 Pot scans track an accumulated counter rather than a fixed 28-cycle divider. Slow scans advance once per scanline; fast scans advance once per machine cycle and can expose the `229` terminal count (held for one extra cycle before forcing `ALLPOT` low). Scans run through the terminal hold cycle even after `ALLPOT` has cleared. `SKCTL` mode changes resync the active scan counter from the current cycle. JS snapshots preserve mid-scan state (`lastCycle`, `terminalCycle`, current count).
 
-POKEY IRQ state follows the AHRM 5.7 level-sensitive model. A write to `IRQEN/$D20E` recomputes the CPU IRQ level from the active-low `IRQST` bits and enabled sources in both directions. This preserves an asserted keyboard IRQ when the OS temporarily changes `IRQEN`, allowing consecutive key presses to reach the OS keyboard handler and `$02FC` just as on hardware.
+POKEY IRQ state follows the AHRM 5.7 level-sensitive model. A write to `IRQEN/$D20E` recomputes the CPU IRQ level from the active-low `IRQST` bits and enabled sources in both directions. Every latched source, including keyboard and timers, keeps `IRQST` high and discards an event while its `IRQEN` bit is clear; XMTDONE is the documented exception. This prevents disabled timer edges from starving the OS keyboard handler.
 
 ## CPU
 

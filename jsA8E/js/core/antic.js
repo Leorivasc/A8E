@@ -441,6 +441,10 @@
           drawLine(ctx);
           if (!io.drawLine.playerMissileInterleaved) drawPlayerMissiles(ctx);
           evaluateModeLineEnd(ctx);
+          io.pmgPhantomMissileDmaPending =
+            (sram[IO_DMACTL] & 0x2c) === 0x20 &&
+            io.video.currentDisplayLine >= FIRST_VISIBLE_LINE &&
+            io.video.currentDisplayLine <= LAST_VISIBLE_LINE;
           io.displayListFetchCycle += CYCLES_PER_LINE;
           advanceScanline(ctx);
         } finally {
@@ -512,7 +516,10 @@
       if (masterEff >= io.serialOutputNeedDataCycle) {
         if (typeof pokeyTraceEvent === "function")
           pokeyTraceEvent(ctx, "DATA_NEEDED", { eventCycle: masterEff });
-        ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+        // AHRM 5.7: all latched sources except XMTDONE remain inactive
+        // in IRQST while masked by IRQEN.
+        if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED)
+          {ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;}
         // The queued byte is now loaded into the output shift register.
         ram[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED) CPU.irq(ctx);
@@ -520,14 +527,16 @@
       }
 
       if (masterEff >= io.serialInputDataReadyCycle) {
-        ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_INPUT_DATA_READY;
+        if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY)
+          {ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_INPUT_DATA_READY;}
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY) CPU.irq(ctx);
         io.serialInputDataReadyCycle = CYCLE_NEVER;
       }
 
       if (masterEff >= io.timer1Cycle) {
         const p1 = pokeyTimerPeriodCpuCycles(ctx, 1);
-        ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_1;
+        if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_1)
+          {ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_1;}
         if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_1) CPU.irq(ctx);
         if (p1 === 0) io.timer1Cycle = CYCLE_NEVER;
         else {
@@ -537,7 +546,8 @@
 
       if (masterEff >= io.timer2Cycle) {
         const p2 = pokeyTimerPeriodCpuCycles(ctx, 2);
-        ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_2;
+        if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_2)
+          {ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_2;}
         if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_2) CPU.irq(ctx);
         if (p2 === 0) io.timer2Cycle = CYCLE_NEVER;
         else {
@@ -556,7 +566,8 @@
 
       if (masterEff >= io.timer4Cycle) {
         const p4 = pokeyTimerPeriodCpuCycles(ctx, 4);
-        ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_4;
+        if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_4)
+          {ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_4;}
         if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_4) CPU.irq(ctx);
         if (p4 === 0) io.timer4Cycle = CYCLE_NEVER;
         else {

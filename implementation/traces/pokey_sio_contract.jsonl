@@ -1,0 +1,8 @@
+{"step":"mode-0-external","skctl":3,"audctl":0,"audf2":2,"audf4":1,"timer":0,"period":0}
+{"step":"mode-1-external","skctl":19,"audctl":0,"audf2":2,"audf4":1,"timer":0,"period":0}
+{"step":"mode-2-timer4","skctl":35,"audctl":0,"audf2":2,"audf4":1,"timer":4,"period":56}
+{"step":"mode-3-async-input","skctl":51,"audctl":0,"audf2":2,"audf4":1,"timer":0,"period":0}
+{"step":"mode-4-timer4","skctl":67,"audctl":0,"audf2":2,"audf4":1,"timer":4,"period":56}
+{"step":"mode-5-async-input","skctl":83,"audctl":0,"audf2":2,"audf4":1,"timer":0,"period":0}
+{"step":"mode-6-timer2","skctl":99,"audctl":0,"audf2":2,"audf4":1,"timer":2,"period":84}
+{"step":"mode-7-timer2-async","skctl":115,"audctl":0,"audf2":2,"audf4":1,"timer":2,"period":84}

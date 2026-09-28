@@ -35,7 +35,7 @@ certification gate. The stable jsA8E result, in screen order, is:
 
 ```
 NORM: P0=00 P1=05 P2=05 P4=04
-REV:  P4=04 P2=00 P1=05 P0=00
+REV:  P4=04 P2=05 P1=05 P0=00
 TX:   NORM=3A REV=3A
 ```
 
@@ -47,7 +47,28 @@ STIMER-to-SEROUT boundary case.
 The deviation is accepted for the current AHRM-08 scope because normal SIO,
 audio, and the Stage 2 guest-level serial behavior remain validated. It can
 affect only software that polls `IRQST` or rewrites `SEROUT` at this exact
-phase boundary. Do not tune a padding-specific delay to make this screen
-match. Reopen the issue only with a model of the arbitration between the
-64 kHz slow-clock tick and the queued STIMER timer reload, validated against
-the complete normal/reverse matrix and transmission values.
+phase boundary. The current direct comparison shows that jsA8E enters P1
+with the serial divide-by-two phase high, so `DATA NEEDED` waits one complete
+output-clock period; native A8E, Altirra, and hardware enter P1 low. Do not
+tune a padding-specific delay to make this screen match. Reopen the issue
+only with a model of CPU bus timing and the AHRM initialization/STIMER
+arbitration, validated against the complete normal/reverse matrix and
+transmission values.
+
+## Direct Trace Finding
+
+The current native trace uses a 56-cycle timer period. For P1, the serial
+clock phase is low and `DATA NEEDED` is scheduled on the next timer edge. For
+P2/P4, the phase is high and the next usable rising edge is one additional
+half-bit period later. jsA8E produces the latter phase for P1, which explains
+the extra `05` polling count. The ten-bit completion interval remains
+consistent at `20 * 56` cycles after the selected load edge. This localizes
+the remaining issue to phase initialization/arbitration at the CPU timed-event
+boundary; it does not justify changing the timer period or adding a padding
+delay.
+
+The opt-in trace records `pc` and `opcode` for these events in both cores.
+Native A8E requires a `VERBOSE_SIO` build; jsA8E requires
+`?a8e_pokey_trace=1`. These fields identify the CPU instruction context at
+the event boundary and are intended to diagnose the remaining one-cycle P1
+difference without changing the matrix fixture.
