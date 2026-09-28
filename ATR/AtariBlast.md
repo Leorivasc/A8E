@@ -20,6 +20,63 @@ fabricated SIO response is used.
 Remaining work concerns broader AHRM regression coverage (for example DDRB and
 reset/snapshot edge cases), not the title's normal startup path.
 
+## Open gameplay graphics report (2026-09-27)
+
+The user supplied two jsA8E captures and one native A8E capture of vertical
+scrolling gameplay. Small colored fragments resembling the descending enemies'
+feet appear detached above the enemies. This is an open rendering issue,
+separate from the previously validated boot path and the AHRM-07 PRIOR=0
+color-mixing correction. The screenshots alone do not identify whether the
+fragments originate in player, missile, or playfield data.
+
+The user reproduced it with the same AtariBlast ATR in NTSC RAMBO 1088K on
+both cores; Altirra is clean. jsA8E takes a long time to boot the ATR, then
+shows a scrolling menu before entering the level-one demo. Trace the affected
+lines' PMBASE, DMACTL, GRACTL, VDELAY, graphics latches, HPOS writes, and DMA
+source bytes against AHRM 4.13 and 6.5.
+
+The initial coarse trace showed DMACTL changing from `$3E` to `$32` at cycles
+112-113. Beam-level tracing refined the sequence: GRACTL is cleared at cycle
+0 of the following line, before the cycle-1 display-list fetch. AHRM 6.5's
+phantom-missile path is therefore not active in this captured interval. Both
+cores retain the generic cycle-1 latch model, including VDELAY masking and
+raster history, without adding a CPU DMA steal, but it is not yet evidence
+for this title's fragments. GRACTL is also disabled before the documented
+phantom-player cycles, so player bus sampling has not been added speculatively.
+
+The same 20-frame beam trace contains 41 `$3E` to `$32` writes at cycle 113.
+AHRM 4.13 requires each to preserve the next line's cycle-0 missile DMA,
+though player DMA is disabled by cycle 2. Both cores now pipeline only the
+P/M DMACTL enable bits by two ANTIC cycles; the addressing mode remains live.
+Native/JS regressions cover that boundary. An isolated 20-frame replay from
+the saved NTSC RAMBO 1088K gameplay snapshot produced byte-identical PNG
+frames before and after this correction. The subsequent live NTSC/RAMBO-1088K
+rerun still showed detached fragments in both A8E cores, while Altirra remains
+clean. AHRM 4.13 is therefore a required general correction but not a
+sufficient AtariBlast fix.
+
+A follow-up register trace corrected an earlier register label: `$D407` is
+`PMBASE`, not `HSCROL`. AtariBlast alternates `PMBASE` between `$30` and `$38`
+only in VBL (line 248, cycles 90-107), before the next visible P/M DMA slots.
+The actual scroll registers, `HSCROL` (`$D404`) and `VSCROL` (`$D405`), also
+change only outside the visible region in the captured interval. The live
+PMBASE implementation and normal scrolling timing are therefore not current
+candidates; the next trace must retain the actual graphics-latch values and
+their beam positions for the lines showing a fragment.
+
+The reproducible gameplay snapshot narrows the fault further. `DMACTL=$3E`
+and `GRACTL=$03` run from about line 31 to line 207, so this is ordinary,
+continuous one-line P/M DMA rather than a two-scanline DMA burst. The CPU
+does not stream nonzero player graphics during that region; it supplies a
+setup write to `GRAFP0` before enabling the DMA, then clears the graphics
+registers after disabling it. A temporary renderer capture with all four
+players suppressed removes the detached colored pieces, while the remaining
+missile output stays normal. The comparison therefore locates the mismatch in
+the player DMA/latch/output path. HSCROL, VSCROL, PMBASE, direct graphics
+writes, and the missile path have been excluded for this sample. Position and
+size writes are not near their horizontal comparators, so their documented
+five-color-clock latency is not exercised by this state.
+
 ## ATR geometry
 
 The image is 368272 bytes and has this ATR header:

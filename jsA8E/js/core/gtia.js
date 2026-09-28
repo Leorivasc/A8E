@@ -292,8 +292,9 @@
       startIndex,
       special,
       overlap,
+      playfieldColors,
+      mixMask,
     ) {
-      const cColor = color & 0xff;
       const cPriorityMask = priorityMask & 0xffff;
       const cPriorityBit = priorityBit & 0xffff;
       const cOverlap = overlap & 0xffff;
@@ -301,6 +302,9 @@
 
       for (let pi = startIndex | 0, end = (startIndex + 2) | 0; pi < end; pi++) {
         const p = prio[pi] & 0xffff;
+        // Mix with the original playfield, never a lower player's output.
+        const pfColor = (playfieldColors >> ((pi - startIndex) * 8)) & 0xff;
+        const cColor = (color | ((p & mixMask) ? pfColor : 0)) & 0xff;
         if (cOverlap && (p & cOverlap)) {
           if (special && (p & PRIO_PF1)) {
             dst[pi] = ((cColor & 0xf0) | dst[pi]) & 0xff;
@@ -534,11 +538,26 @@
       }
     }
 
-    function fetchPmgDmaCycle(ctx, lineCycle, y) {
+    function mergeMissileDmaValue(sram, y, value) {
+      if ((y & 0x01) !== 0) return value & 0xff;
+
+      const vdelay = sram[IO_VDELAY] & 0x0f;
+      let merged = value & 0xff;
+      for (let missile = 0; missile < 4; missile++) {
+        if ((vdelay & (1 << missile)) !== 0) {
+          const bits = 0x03 << (missile * 2);
+          merged = (merged & ~bits) | (sram[IO_GRAFM_TRIG1] & bits);
+        }
+      }
+      return merged & 0xff;
+    }
+
+    function fetchPmgDmaCycle(ctx, lineCycle, y, delayedDmaCtl) {
       if (y >= 248) return 0;
 
       const sram = ctx.sram;
-      const dmactl = sram[IO_DMACTL] & 0xff;
+      const dmactl =
+        delayedDmaCtl === undefined ? sram[IO_DMACTL] & 0xff : delayedDmaCtl & 0xff;
 
       const pmDmaPlayers = (dmactl & 0x08) !== 0;
       const pmDmaMissiles = ((dmactl & 0x04) !== 0) || pmDmaPlayers;
@@ -556,43 +575,46 @@
         return (base + offset + (lineIndex & 0xffff)) & 0xffff;
       }
 
-      function vdelayAllowsFetch(vdelayMask) {
+      function vdelayAllowsLoad(vdelayMask) {
         return ((sram[IO_VDELAY] & vdelayMask) === 0) || ((y & 0x01) !== 0);
       }
 
       if (lineCycle === 0 && pmDmaMissiles) {
-        if (!vdelayAllowsFetch(0x08)) return 0;
         if (pmReceiveMissiles) {
-          sram[IO_GRAFM_TRIG1] = ctx.ram[fetchPmAddr(hires ? 768 : 384)];
-          recordPmgRegisterEvent(ctx, IO_GRAFM_TRIG1, sram[IO_GRAFM_TRIG1], lineCycle);
+          const oldValue = sram[IO_GRAFM_TRIG1] & 0xff;
+          const newValue = mergeMissileDmaValue(
+            sram,
+            y,
+            ctx.ram[fetchPmAddr(hires ? 768 : 384)],
+          );
+          sram[IO_GRAFM_TRIG1] = newValue;
+          if (newValue !== oldValue) {
+            recordPmgRegisterEvent(ctx, IO_GRAFM_TRIG1, newValue, lineCycle);
+          }
         }
         return 1;
       }
       if (pmDmaPlayers) {
         if (lineCycle === 2) {
-          if (!vdelayAllowsFetch(0x10)) return 0;
-          if (pmReceivePlayers) {
+          if (pmReceivePlayers && vdelayAllowsLoad(0x10)) {
             sram[IO_GRAFP0_P1PL] = ctx.ram[fetchPmAddr(hires ? 1024 : 512)];
             recordPmgRegisterEvent(ctx, IO_GRAFP0_P1PL, sram[IO_GRAFP0_P1PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 3) {
-          if (!vdelayAllowsFetch(0x20)) return 0;
-          if (pmReceivePlayers) {
+          if (pmReceivePlayers && vdelayAllowsLoad(0x20)) {
             sram[IO_GRAFP1_P2PL] = ctx.ram[fetchPmAddr(hires ? 1280 : 640)];
             recordPmgRegisterEvent(ctx, IO_GRAFP1_P2PL, sram[IO_GRAFP1_P2PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 4) {
-          if (!vdelayAllowsFetch(0x40)) return 0;
-          if (pmReceivePlayers) {
+          if (pmReceivePlayers && vdelayAllowsLoad(0x40)) {
             sram[IO_GRAFP2_P3PL] = ctx.ram[fetchPmAddr(hires ? 1536 : 768)];
             recordPmgRegisterEvent(ctx, IO_GRAFP2_P3PL, sram[IO_GRAFP2_P3PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 5) {
-          if (!vdelayAllowsFetch(0x80)) return 0;
-          if (pmReceivePlayers) {
+          if (pmReceivePlayers && vdelayAllowsLoad(0x80)) {
             sram[IO_GRAFP3_TRIG0] = ctx.ram[fetchPmAddr(hires ? 1792 : 896)];
             recordPmgRegisterEvent(ctx, IO_GRAFP3_TRIG0, sram[IO_GRAFP3_TRIG0], lineCycle);
           }
@@ -600,6 +622,19 @@
         }
       }
       return 0;
+    }
+
+    function fetchPhantomMissileDmaCycle(ctx, lineCycle, y, displayListByte) {
+      const sram = ctx.sram;
+      if (lineCycle !== 1 || (sram[IO_GRACTL] & 0x01) === 0) return 0;
+
+      const oldValue = sram[IO_GRAFM_TRIG1] & 0xff;
+      const newValue = mergeMissileDmaValue(sram, y, displayListByte);
+      sram[IO_GRAFM_TRIG1] = newValue;
+      if (newValue !== oldValue) {
+        recordPmgRegisterEvent(ctx, IO_GRAFM_TRIG1, newValue, lineCycle);
+      }
+      return 1;
     }
 
     function drawPlayerMissilesClock(ctx, spanStart) {
@@ -751,6 +786,8 @@
       }
 
       for (let x = visibleSpanStart; x < spanPixelEnd; x += 2) {
+        const playfieldColors = dst[lineBase + x] | (dst[lineBase + x + 1] << 8);
+        const mixModeZero = (prior & 0xcf) === 0;
         let data = sram[IO_GRAFP3_TRIG0] & 0xff;
         let hpos = pmgStartX(sram[IO_HPOSP3_M3PF] & 0xff);
         let size = sram[IO_SIZEP3_M3PL] & 0xff;
@@ -765,6 +802,8 @@
             lineBase + x,
             special,
             0,
+            playfieldColors,
+            mixModeZero ? (PRIO_PF2 | PRIO_PF3 | (special ? PRIO_PF1 : 0)) : 0,
           );
         }
         advancePlayerShift(playerShift, playerState, 3, size);
@@ -783,6 +822,8 @@
             lineBase + x,
             special,
             prior & 0x20 ? PRIO_PM3 : 0,
+            playfieldColors,
+            mixModeZero ? (PRIO_PF2 | PRIO_PF3 | (special ? PRIO_PF1 : 0)) : 0,
           );
         }
         advancePlayerShift(playerShift, playerState, 2, size);
@@ -801,6 +842,8 @@
             lineBase + x,
             special,
             0,
+            playfieldColors,
+            mixModeZero ? (special ? 0 : PRIO_PF0 | PRIO_PF1) : 0,
           );
         }
         advancePlayerShift(playerShift, playerState, 1, size);
@@ -819,6 +862,8 @@
             lineBase + x,
             special,
             prior & 0x20 ? PRIO_PM1 : 0,
+            playfieldColors,
+            mixModeZero ? (special ? 0 : PRIO_PF0 | PRIO_PF1) : 0,
           );
         }
         advancePlayerShift(playerShift, playerState, 0, size);
@@ -1175,6 +1220,7 @@
     return {
       drawPlayerMissilesClock: drawPlayerMissilesClock,
       fetchPmgDmaCycle: fetchPmgDmaCycle,
+      fetchPhantomMissileDmaCycle: fetchPhantomMissileDmaCycle,
       drawPlayerMissiles: drawPlayerMissiles,
       recordPmgRegisterEvent: recordPmgRegisterEvent,
       recordPmgRegisterWrite: recordPmgRegisterWrite,

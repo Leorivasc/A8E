@@ -189,6 +189,11 @@ typedef struct
 	u16 sRowDisplayMemoryAddress;
 	u16 sDisplayMemoryAddress;
 	u8 bFirstRowScanline;
+	u8 cPmgPhantomMissileDmaPending;
+	/* AHRM 4.13: P/M DMA enable bits take effect two ANTIC cycles later. */
+	u8 bPmgDmaCtlTimingInitialized;
+	u8 cPmgDmaCtlOneCycleAgo;
+	u8 cPmgDmaCtlTwoCyclesAgo;
 
 	/* AHRM 4.7: 4-bit mode-line row (delta) counter.  A mode line normally
 	 * ends when the counter reaches its static end row; the first line after

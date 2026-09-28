@@ -45,6 +45,7 @@
     const ANTIC_MODE_INFO = cfg.ANTIC_MODE_INFO;
     const drawPlayerMissilesClock = cfg.drawPlayerMissilesClock;
     const fetchPmgDmaCycle = cfg.fetchPmgDmaCycle;
+    const fetchPhantomMissileDmaCycle = cfg.fetchPhantomMissileDmaCycle;
     const drawPlayerMissiles = cfg.drawPlayerMissiles;
     const pokeyTimerPeriodCpuCycles = cfg.pokeyTimerPeriodCpuCycles;
     const pokeySerialOutputClockTimer = cfg.pokeySerialOutputClockTimer;
@@ -199,6 +200,7 @@
             fillLine: fillLine,
             drawPlayerMissilesClock: drawPlayerMissilesClock,
             fetchPmgDmaCycle: fetchPmgDmaCycle,
+            fetchPhantomMissileDmaCycle: fetchPhantomMissileDmaCycle,
             ioCycleTimedEvent: function (c) {
               ioCycleTimedEvent(c);
             },

@@ -1237,10 +1237,68 @@ static u8 AtariIo_FetchUnbufferedDisplayByte(_6502_Context_t *pContext, u16 sAdd
 	return AtariIo_ReadVirtualPlayfieldBus(pContext, lCycleOffset);
 }
 
-static u8 AtariIo_PmgVdelayAllowsFetch(_6502_Context_t *pContext, u32 lDisplayLine, u8 cVdelayMask)
+static u8 AtariIo_PmgVdelayAllowsLoad(_6502_Context_t *pContext, u32 lDisplayLine, u8 cVdelayMask)
 {
-	// VDELAY masks DMA fetches on even scan lines; it does not shift the source row.
+	// VDELAY masks the GTIA data load on even scan lines; ANTIC still owns the DMA cycle.
 	return ((SRAM[IO_VDELAY] & cVdelayMask) == 0) || ((lDisplayLine & 0x01) != 0);
+}
+
+static u8 AtariIo_MergeMissileDmaValue(
+	_6502_Context_t *pContext,
+	u32 lDisplayLine,
+	u8 cOldValue,
+	u8 cFetchedValue)
+{
+	u8 cVdelay;
+	u8 cResult = cFetchedValue;
+	u8 cMissile;
+
+	if((lDisplayLine & 0x01) != 0) return cResult;
+
+	cVdelay = SRAM[IO_VDELAY] & 0x0f;
+	for(cMissile = 0; cMissile < 4; cMissile++)
+	{
+		if(cVdelay & (1u << cMissile))
+		{
+			u8 cBits = (u8)(0x03u << (cMissile * 2u));
+			cResult = (u8)((cResult & ~cBits) | (cOldValue & cBits));
+		}
+	}
+
+	return cResult;
+}
+
+static u8 AtariIo_PmgDmaCtlForCycle(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u8 cDmactl = SRAM[IO_DMACTL];
+
+	/* AHRM 4.13 delays only the P/M DMA enable gates.  Addressing mode and
+	 * playfield bits remain live DMACTL state. */
+	if(pIoData->bPmgDmaCtlTimingInitialized)
+	{
+		cDmactl = (u8)((cDmactl & (u8)~0x0c) |
+			(pIoData->cPmgDmaCtlTwoCyclesAgo & 0x0c));
+	}
+
+	return cDmactl;
+}
+
+static void AtariIo_AdvancePmgDmaCtlTiming(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u8 cDmactl = SRAM[IO_DMACTL];
+
+	if(!pIoData->bPmgDmaCtlTimingInitialized)
+	{
+		pIoData->bPmgDmaCtlTimingInitialized = 1;
+		pIoData->cPmgDmaCtlOneCycleAgo = cDmactl;
+		pIoData->cPmgDmaCtlTwoCyclesAgo = cDmactl;
+		return;
+	}
+
+	pIoData->cPmgDmaCtlTwoCyclesAgo = pIoData->cPmgDmaCtlOneCycleAgo;
+	pIoData->cPmgDmaCtlOneCycleAgo = cDmactl;
 }
 
 static u16 AtariIo_PmgFetchAddress(u16 usPmbaseHi, u8 cHires, u32 lDisplayLine, u16 usOffset)
@@ -1251,14 +1309,18 @@ static u16 AtariIo_PmgFetchAddress(u16 usPmbaseHi, u8 cHires, u32 lDisplayLine, 
 	return (u16)(usBase + usOffset + (u16)lLineIndex);
 }
 
-static int AtariIo_FetchPmgDmaCycle(_6502_Context_t *pContext, u32 lCycleInLine, u32 lDisplayLine)
+static int AtariIo_FetchPmgDmaCycle(
+	_6502_Context_t *pContext,
+	u32 lCycleInLine,
+	u32 lDisplayLine,
+	u8 cDmactl)
 {
-	u8 cDmactl = SRAM[IO_DMACTL];
 	u8 cPmDmaPlayers = (cDmactl & 0x08) != 0;
 	// Missile DMA stays active when player DMA is enabled.
 	u8 cPmDmaMissiles = ((cDmactl & 0x04) != 0) || cPmDmaPlayers;
 	u8 cPmReceivePlayers = (SRAM[IO_GRACTL] & 0x02) != 0;
 	u8 cPmReceiveMissiles = (SRAM[IO_GRACTL] & 0x01) != 0;
+	u8 cOldValue;
 
 	if(lDisplayLine >= 248) return 0;
 	if(!cPmDmaPlayers && !cPmDmaMissiles) return 0;
@@ -1267,38 +1329,41 @@ static int AtariIo_FetchPmgDmaCycle(_6502_Context_t *pContext, u32 lCycleInLine,
 	u8 cHires = (cDmactl & 0x10) != 0;
 
 	if(lCycleInLine == 0 && cPmDmaMissiles) {
-		if(!AtariIo_PmgVdelayAllowsFetch(pContext, lDisplayLine, 0x08)) return 0;
 		if(cPmReceiveMissiles) {
-			SRAM[IO_GRAFM_TRIG1] = AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 768u : 384u));
-			AtariIo_RecordPmgDmaWrite(pContext, IO_GRAFM_TRIG1, SRAM[IO_GRAFM_TRIG1], lCycleInLine);
+			cOldValue = SRAM[IO_GRAFM_TRIG1];
+			SRAM[IO_GRAFM_TRIG1] = AtariIo_MergeMissileDmaValue(
+				pContext,
+				lDisplayLine,
+				cOldValue,
+				AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 768u : 384u)));
+			if(SRAM[IO_GRAFM_TRIG1] != cOldValue)
+			{
+				AtariIo_RecordPmgDmaWrite(pContext, IO_GRAFM_TRIG1, SRAM[IO_GRAFM_TRIG1], lCycleInLine);
+			}
 		}
 		return 1;
 	}
 	if(cPmDmaPlayers) {
 		if(lCycleInLine == 2) {
-			if(!AtariIo_PmgVdelayAllowsFetch(pContext, lDisplayLine, 0x10)) return 0;
-			if(cPmReceivePlayers) {
+			if(cPmReceivePlayers && AtariIo_PmgVdelayAllowsLoad(pContext, lDisplayLine, 0x10)) {
 				SRAM[IO_GRAFP0_P1PL] = AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1024u : 512u));
 				AtariIo_RecordPmgDmaWrite(pContext, IO_GRAFP0_P1PL, SRAM[IO_GRAFP0_P1PL], lCycleInLine);
 			}
 			return 1;
 		} else if(lCycleInLine == 3) {
-			if(!AtariIo_PmgVdelayAllowsFetch(pContext, lDisplayLine, 0x20)) return 0;
-			if(cPmReceivePlayers) {
+			if(cPmReceivePlayers && AtariIo_PmgVdelayAllowsLoad(pContext, lDisplayLine, 0x20)) {
 				SRAM[IO_GRAFP1_P2PL] = AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1280u : 640u));
 				AtariIo_RecordPmgDmaWrite(pContext, IO_GRAFP1_P2PL, SRAM[IO_GRAFP1_P2PL], lCycleInLine);
 			}
 			return 1;
 		} else if(lCycleInLine == 4) {
-			if(!AtariIo_PmgVdelayAllowsFetch(pContext, lDisplayLine, 0x40)) return 0;
-			if(cPmReceivePlayers) {
+			if(cPmReceivePlayers && AtariIo_PmgVdelayAllowsLoad(pContext, lDisplayLine, 0x40)) {
 				SRAM[IO_GRAFP2_P3PL] = AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1536u : 768u));
 				AtariIo_RecordPmgDmaWrite(pContext, IO_GRAFP2_P3PL, SRAM[IO_GRAFP2_P3PL], lCycleInLine);
 			}
 			return 1;
 		} else if(lCycleInLine == 5) {
-			if(!AtariIo_PmgVdelayAllowsFetch(pContext, lDisplayLine, 0x80)) return 0;
-			if(cPmReceivePlayers) {
+			if(cPmReceivePlayers && AtariIo_PmgVdelayAllowsLoad(pContext, lDisplayLine, 0x80)) {
 				SRAM[IO_GRAFP3_TRIG0] = AtariIo_ReadAnticMemory(pContext, AtariIo_PmgFetchAddress(usPmbaseHi, cHires, lDisplayLine, cHires ? 1792u : 896u));
 				AtariIo_RecordPmgDmaWrite(pContext, IO_GRAFP3_TRIG0, SRAM[IO_GRAFP3_TRIG0], lCycleInLine);
 			}
@@ -1306,6 +1371,29 @@ static int AtariIo_FetchPmgDmaCycle(_6502_Context_t *pContext, u32 lCycleInLine,
 		}
 	}
 	return 0;
+}
+
+static void AtariIo_FetchPhantomMissileDmaCycle(
+	_6502_Context_t *pContext,
+	u32 lDisplayLine,
+	u8 cDisplayListByte)
+{
+	u8 cOldValue;
+	u8 cNewValue;
+
+	if((SRAM[IO_GRACTL] & 0x01) == 0) return;
+
+	cOldValue = SRAM[IO_GRAFM_TRIG1];
+	cNewValue = AtariIo_MergeMissileDmaValue(
+		pContext,
+		lDisplayLine,
+		cOldValue,
+		cDisplayListByte);
+	SRAM[IO_GRAFM_TRIG1] = cNewValue;
+	if(cNewValue != cOldValue)
+	{
+		AtariIo_RecordPmgDmaWrite(pContext, IO_GRAFM_TRIG1, cNewValue, DISPLAY_LIST_INSTRUCTION_CYCLE);
+	}
 }
 
 static void AtariIo_DrawClockAction(_6502_Context_t *pContext)
@@ -1365,7 +1453,11 @@ static void AtariIo_DrawClockAction(_6502_Context_t *pContext)
 
 	if(lCycleInLine == 0 || (lCycleInLine >= 2 && lCycleInLine <= 5))
 	{
-		if(AtariIo_FetchPmgDmaCycle(pContext, lCycleInLine, pIoData->tVideoData.lCurrentDisplayLine))
+		if(AtariIo_FetchPmgDmaCycle(
+			pContext,
+			lCycleInLine,
+			pIoData->tVideoData.lCurrentDisplayLine,
+			AtariIo_PmgDmaCtlForCycle(pContext)))
 		{
 			pContext->llCycleCounter++;
 		}
@@ -1374,6 +1466,19 @@ static void AtariIo_DrawClockAction(_6502_Context_t *pContext)
 	if(cPlayfieldDmaStealCount)
 	{
 		pContext->llCycleCounter += cPlayfieldDmaStealCount;
+	}
+
+	if(lCycleInLine == DISPLAY_LIST_INSTRUCTION_CYCLE &&
+	   pIoData->cPmgPhantomMissileDmaPending)
+	{
+		if(pIoData->tDrawLineData.cDisplayListInstructionDmaPending)
+		{
+			AtariIo_FetchPhantomMissileDmaCycle(
+				pContext,
+				pIoData->tVideoData.lCurrentDisplayLine,
+				pIoData->cCurrentDisplayListCommand);
+		}
+		pIoData->cPmgPhantomMissileDmaPending = 0;
 	}
 
 	if(pIoData->tDrawLineData.cDisplayListInstructionDmaPending &&
@@ -1430,6 +1535,7 @@ static void AtariIo_DrawClockAction(_6502_Context_t *pContext)
 	{
 		_6502_Execute(pContext);
 	}
+	AtariIo_AdvancePmgDmaCtlTiming(pContext);
 	pIoData->llCycle++;
 }
 
@@ -3968,7 +4074,9 @@ static u8 AtariIo_DrawPlayerClockCell(
 	u8 *pLineDestination,
 	u32 lStartX,
 	u8 cSpecial,
-	u8 cOverlap)
+	u8 cOverlap,
+	u16 sPlayfieldColors,
+	u8 cMixMask)
 {
 	u8 cCollision = 0;
 	u32 lPixel;
@@ -3976,27 +4084,30 @@ static u8 AtariIo_DrawPlayerClockCell(
 	for(lPixel = lStartX; lPixel < lStartX + 2; lPixel++)
 	{
 		u8 cPixelPriority = pLinePriorityData[lPixel];
+		/* Preserve the playfield contribution independently of lower players. */
+		u8 cMixedColor = cColor | ((cPixelPriority & cMixMask)
+			? (u8)(sPlayfieldColors >> ((lPixel - lStartX) * 8)) : 0);
 
 		if(cOverlap && (cPixelPriority & cOverlap))
 		{
 			if(cSpecial && (cPixelPriority & PRIO_PF1))
 			{
-				pLineDestination[lPixel] |= cColor & 0xf0;
+				pLineDestination[lPixel] |= cMixedColor & 0xf0;
 			}
 			else if(!(cPixelPriority & cPriorityMask))
 			{
-				pLineDestination[lPixel] |= cColor;
+				pLineDestination[lPixel] |= cMixedColor;
 			}
 		}
 		else
 		{
 			if(cSpecial && (cPixelPriority & PRIO_PF1))
 			{
-				pLineDestination[lPixel] = (pLineDestination[lPixel] & 0x0f) | (cColor & 0xf0);
+				pLineDestination[lPixel] = (pLineDestination[lPixel] & 0x0f) | (cMixedColor & 0xf0);
 			}
 			else if(!(cPixelPriority & cPriorityMask))
 			{
-				pLineDestination[lPixel] = cColor;
+				pLineDestination[lPixel] = cMixedColor;
 			}
 		}
 
@@ -4501,6 +4612,9 @@ static void AtariIo_DrawPlayerMissilesClock(_6502_Context_t *pContext)
 
 	for(lClockX = lVisibleSpanStartX; lClockX < lSpanEndX; lClockX += 2)
 	{
+		u16 sPlayfieldColors = pLineDestination[lClockX] |
+			((u16)pLineDestination[lClockX + 1] << 8);
+		u8 cMixModeZero = (cPrior & 0xcf) == 0;
 		cData = SRAM[IO_GRAFP3_TRIG0];
 		cHpos = SRAM[IO_HPOSP3_M3PF];
 		if(lClockX == AtariIo_PmgStartX(cHpos) && cData)
@@ -4517,7 +4631,9 @@ static void AtariIo_DrawPlayerMissilesClock(_6502_Context_t *pContext)
 				pLineDestination,
 				lClockX,
 				cSpecial,
-				0);
+				0,
+				sPlayfieldColors,
+				cMixModeZero ? (PRIO_PF2 | PRIO_PF3 | (cSpecial ? PRIO_PF1 : 0)) : 0);
 		}
 		AtariIo_AdvancePlayerShift(&pPlayerShift[3], &pPlayerState[3], SRAM[IO_SIZEP3_M3PL]);
 
@@ -4537,7 +4653,9 @@ static void AtariIo_DrawPlayerMissilesClock(_6502_Context_t *pContext)
 				pLineDestination,
 				lClockX,
 				cSpecial,
-				(cPrior & 0x20) ? PRIO_PM3 : 0);
+				(cPrior & 0x20) ? PRIO_PM3 : 0,
+				sPlayfieldColors,
+				cMixModeZero ? (PRIO_PF2 | PRIO_PF3 | (cSpecial ? PRIO_PF1 : 0)) : 0);
 		}
 		AtariIo_AdvancePlayerShift(&pPlayerShift[2], &pPlayerState[2], SRAM[IO_SIZEP2_M2PL]);
 
@@ -4557,7 +4675,9 @@ static void AtariIo_DrawPlayerMissilesClock(_6502_Context_t *pContext)
 				pLineDestination,
 				lClockX,
 				cSpecial,
-				0);
+				0,
+				sPlayfieldColors,
+				cMixModeZero ? (cSpecial ? 0 : PRIO_PF0 | PRIO_PF1) : 0);
 		}
 		AtariIo_AdvancePlayerShift(&pPlayerShift[1], &pPlayerState[1], SRAM[IO_SIZEP1_M1PL]);
 
@@ -4577,7 +4697,9 @@ static void AtariIo_DrawPlayerMissilesClock(_6502_Context_t *pContext)
 				pLineDestination,
 				lClockX,
 				cSpecial,
-				(cPrior & 0x20) ? PRIO_PM1 : 0);
+				(cPrior & 0x20) ? PRIO_PM1 : 0,
+				sPlayfieldColors,
+				cMixModeZero ? (cSpecial ? 0 : PRIO_PF0 | PRIO_PF1) : 0);
 		}
 		AtariIo_AdvancePlayerShift(&pPlayerShift[0], &pPlayerState[0], SRAM[IO_SIZEP0_M0PL]);
 
@@ -5457,6 +5579,10 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 
 		AtariIoDrawLine(pContext);
 		AtariIoEvaluateModeLineEnd(pContext);
+		pIoData->cPmgPhantomMissileDmaPending =
+			((SRAM[IO_DMACTL] & 0x2c) == 0x20) &&
+			pIoData->tVideoData.lCurrentDisplayLine >= 8 &&
+			pIoData->tVideoData.lCurrentDisplayLine < 248;
 		pIoData->llDisplayListFetchCycle += CYCLES_PER_LINE;
 		AtariIoAdvanceScanline(pContext);
 		pIoData->bInDrawLine = 0;

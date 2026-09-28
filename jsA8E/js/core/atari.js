@@ -553,6 +553,7 @@
           ANTIC_MODE_INFO: ANTIC_MODE_INFO,
           drawPlayerMissilesClock: drawPlayerMissilesClock,
           fetchPmgDmaCycle: gtiaApi.fetchPmgDmaCycle,
+          fetchPhantomMissileDmaCycle: gtiaApi.fetchPhantomMissileDmaCycle,
           drawPlayerMissiles: drawPlayerMissiles,
           pokeyTimerPeriodCpuCycles: pokeyTimerPeriodCpuCycles,
           pokeySerialOutputClockTimer: pokeySerialOutputClockTimer,

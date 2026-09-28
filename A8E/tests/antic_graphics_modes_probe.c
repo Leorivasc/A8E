@@ -103,6 +103,9 @@ static void ProbeMachine_ResetVideo(ProbeMachine_t *pMachine)
 	pIoData->bModeLineScrollExit = 0;
 	pIoData->bModeLineExitDli = 0;
 	pIoData->bModeLineEndsThisLine = 0;
+	pIoData->bPmgDmaCtlTimingInitialized = 0;
+	pIoData->cPmgDmaCtlOneCycleAgo = 0;
+	pIoData->cPmgDmaCtlTwoCyclesAgo = 0;
 }
 
 static void ProbeMachine_PrepareModeLine(
@@ -559,6 +562,187 @@ static int TestPmgPmbaseChangeKeepsMixedLineDmaHistory(void)
 	return 1;
 }
 
+static int TestPmgVdelayKeepsDmaSteals(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	DrawLineData_t *pDrawLine = &pIoData->tDrawLineData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetVideo(&tMachine);
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->tVideoData.lCurrentDisplayLine = 8;
+	pIoData->bInDrawLine = 1;
+	pContext->llIoBeamTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoMasterTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoCycleTimedEventCycle = CYCLE_NEVER;
+
+	SRAM[IO_DMACTL] = 0x08;
+	SRAM[IO_GRACTL] = 0x03;
+	SRAM[IO_VDELAY] = 0x1f;
+	SRAM[IO_PMBASE] = 0x20;
+	SRAM[IO_GRAFM_TRIG1] = 0x12;
+	SRAM[IO_GRAFP0_P1PL] = 0x34;
+	RAM[0x2184] = 0x56;
+	RAM[0x2204] = 0x78;
+
+	pIoData->llCycle = 0;
+	pContext->llCycleCounter = 0;
+	AtariIoTimingProbeStepClock(pContext);
+	REQUIRE(pContext->llCycleCounter == 1,
+			"VDELAY-masked missile DMA did not steal its cycle");
+
+	pIoData->llCycle = 2;
+	pContext->llCycleCounter = 2;
+	AtariIoTimingProbeStepClock(pContext);
+	REQUIRE(pContext->llCycleCounter == 3,
+			"VDELAY-masked player DMA did not steal its cycle");
+	REQUIRE(SRAM[IO_GRAFM_TRIG1] == 0x12 && SRAM[IO_GRAFP0_P1PL] == 0x34,
+			"VDELAY-masked DMA changed a GTIA graphics latch");
+	REQUIRE(pDrawLine->cPmgEventCount == 0,
+			"VDELAY-masked DMA recorded a GTIA graphics latch write");
+
+	SRAM[IO_VDELAY] = 0x01;
+	SRAM[IO_GRAFM_TRIG1] = 0x03;
+	RAM[0x2184] = 0xe4;
+	pIoData->llCycle = 0;
+	pContext->llCycleCounter = 0;
+	AtariIoTimingProbeStepClock(pContext);
+	REQUIRE(SRAM[IO_GRAFM_TRIG1] == 0xe7,
+			"VDELAY did not retain only missile 0's graphics bits");
+	REQUIRE(pDrawLine->cPmgEventCount == 1,
+			"partially masked missile DMA did not record its changed latch");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestPmgDmaCtlTakesEffectAfterTwoCycles(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetVideo(&tMachine);
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->tVideoData.lCurrentDisplayLine = 8;
+	pIoData->bInDrawLine = 1;
+	pContext->llIoBeamTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoMasterTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoCycleTimedEventCycle = CYCLE_NEVER;
+	SRAM[IO_PMBASE] = 0x20;
+	SRAM[IO_GRACTL] = 0x03;
+	SRAM[IO_GRAFM_TRIG1] = 0x00;
+	SRAM[IO_GRAFP0_P1PL] = 0x4c;
+	RAM[0x2308] = 0xa5;
+	RAM[0x2408] = 0x5a;
+
+	/* AHRM 4.13: DMACTL=$32 on cycle 113 is too late to cancel cycle 0. */
+	SRAM[IO_DMACTL] = 0x32;
+	pIoData->bPmgDmaCtlTimingInitialized = 1;
+	pIoData->cPmgDmaCtlOneCycleAgo = 0x32;
+	pIoData->cPmgDmaCtlTwoCyclesAgo = 0x3e;
+	pIoData->llCycle = 0;
+	pContext->llCycleCounter = 0;
+	AtariIoTimingProbeStepClock(pContext);
+	REQUIRE(SRAM[IO_GRAFM_TRIG1] == 0xa5,
+			"late DMACTL disable suppressed the next line's missile fetch");
+	REQUIRE(pContext->llCycleCounter == 1,
+			"late DMACTL disable did not retain the missile DMA steal");
+
+	/* Player DMA starts at cycle 2, after the two-cycle delay has elapsed. */
+	pIoData->llCycle = 2;
+	pContext->llCycleCounter = 2;
+	AtariIoTimingProbeStepClock(pContext);
+	REQUIRE(SRAM[IO_GRAFP0_P1PL] == 0x4c,
+			"late DMACTL disable incorrectly kept player DMA active at cycle 2");
+	REQUIRE(pContext->llCycleCounter == 2,
+			"disabled player DMA stole cycle 2 after the delay elapsed");
+
+	/* Enabling P/M DMA likewise waits two cycles before player cycle 2. */
+	SRAM[IO_DMACTL] = 0x3e;
+	pIoData->bPmgDmaCtlTimingInitialized = 1;
+	pIoData->cPmgDmaCtlOneCycleAgo = 0x32;
+	pIoData->cPmgDmaCtlTwoCyclesAgo = 0x32;
+	pIoData->llCycle = 0;
+	pContext->llCycleCounter = 0;
+	AtariIoTimingProbeStepClock(pContext);
+	REQUIRE(pContext->llCycleCounter == 0,
+			"DMACTL enable took effect before two ANTIC cycles elapsed");
+	pIoData->llCycle = 1;
+	pContext->llCycleCounter = 1;
+	AtariIoTimingProbeStepClock(pContext);
+	pIoData->llCycle = 2;
+	pContext->llCycleCounter = 2;
+	AtariIoTimingProbeStepClock(pContext);
+	REQUIRE(SRAM[IO_GRAFP0_P1PL] == 0x5a,
+			"DMACTL enable did not start player DMA after two ANTIC cycles");
+	REQUIRE(pContext->llCycleCounter == 3,
+			"enabled player DMA did not steal cycle 2 after the delay");
+
+	/* Only P/M enable bits are delayed.  DMACTL's one-line address mode stays
+	 * live while the old enable gate admits this cycle-0 missile fetch. */
+	SRAM[IO_DMACTL] = 0x3e;
+	pIoData->bPmgDmaCtlTimingInitialized = 1;
+	pIoData->cPmgDmaCtlOneCycleAgo = 0x2e;
+	pIoData->cPmgDmaCtlTwoCyclesAgo = 0x2e;
+	SRAM[IO_GRAFM_TRIG1] = 0x00;
+	RAM[0x2184] = 0x3c;
+	RAM[0x2308] = 0xa5;
+	pIoData->llCycle = 0;
+	pContext->llCycleCounter = 0;
+	AtariIoTimingProbeStepClock(pContext);
+	REQUIRE(SRAM[IO_GRAFM_TRIG1] == 0xa5,
+			"live DMACTL one-line mode did not select the one-line missile address");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestPmgPhantomMissileDmaUsesDisplayListByte(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	DrawLineData_t *pDrawLine = &pIoData->tDrawLineData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetVideo(&tMachine);
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->llCycle = 1;
+	pIoData->tVideoData.lCurrentDisplayLine = 8;
+	pIoData->cCurrentDisplayListCommand = 0xe4;
+	pIoData->cPmgPhantomMissileDmaPending = 1;
+	pIoData->bInDrawLine = 1;
+	pDrawLine->cDisplayListInstructionDmaPending = 1;
+	pContext->llCycleCounter = 1;
+	pContext->llIoBeamTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoMasterTimedEventCycle = CYCLE_NEVER;
+	pContext->llIoCycleTimedEventCycle = CYCLE_NEVER;
+
+	SRAM[IO_DMACTL] = 0x32;
+	SRAM[IO_GRACTL] = 0x01;
+	SRAM[IO_GRAFM_TRIG1] = 0x00;
+	AtariIoTimingProbeStepClock(pContext);
+
+	REQUIRE(SRAM[IO_GRAFM_TRIG1] == 0xe4,
+			"phantom missile DMA did not load the display-list byte");
+	REQUIRE(pDrawLine->cPmgEventCount == 1 && pDrawLine->aPmgEventCycles[0] == 1,
+			"phantom missile DMA did not record its cycle-1 latch event");
+	REQUIRE(pIoData->cPmgPhantomMissileDmaPending == 0,
+			"phantom missile DMA remained pending after display-list DMA");
+	REQUIRE(pContext->llCycleCounter == 2,
+			"phantom missile DMA added a CPU steal beyond display-list DMA");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
 static int TestPmgMidLinePriorWriteAffectsLaterPixels(void)
 {
 	ProbeMachine_t tMachine = ProbeMachine_Open();
@@ -603,6 +787,48 @@ static int TestPmgMidLinePriorWriteAffectsLaterPixels(void)
 		ProbeMachine_PixelAt(&tMachine, 8, 100) == 0x66,
 		"PRIOR change did not affect the later span");
 
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestPmgModeZeroPlayfieldMix(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	DrawLineData_t *pDrawLine = &pIoData->tDrawLineData;
+	unsigned special, multi;
+	REQUIRE(pContext != NULL, "machine open failed");
+	for(special = 0; special < 2; special++)
+	for(multi = 0; multi < 2; multi++)
+	{
+		u8 *pPixels = (u8 *)pIoData->tVideoData.pSdlAtariSurface->pixels + 8 * PIXELS_PER_LINE;
+		u8 *pPriority = pIoData->tVideoData.pPriorityData + 8 * PIXELS_PER_LINE;
+		ProbeMachine_ResetVideo(&tMachine);
+		pIoData->bInDrawLine = 1;
+		pIoData->cCurrentDisplayListCommand = special ? 2 : 4;
+		pIoData->llCycle = pContext->llCycleCounter = 18;
+		pContext->llIoBeamTimedEventCycle = CYCLE_NEVER;
+		pContext->llIoMasterTimedEventCycle = CYCLE_NEVER;
+		pContext->llIoCycleTimedEventCycle = CYCLE_NEVER;
+		SRAM[IO_PRIOR] = multi ? 0x20 : 0;
+		SRAM[IO_HPOSP2_M2PF] = SRAM[IO_HPOSP3_M3PF] = 0x30;
+		SRAM[IO_GRAFP2_P3PL] = SRAM[IO_GRAFP3_TRIG0] = 0x80;
+		SRAM[IO_COLPM2_PAL] = 0x48;
+		SRAM[IO_COLPM3] = 0x22;
+		pDrawLine->cPmgFirstVisibleSpan = 1;
+		pDrawLine->aPmgInitialRegisters[2] = pDrawLine->aPmgInitialRegisters[3] = 0x30;
+		pDrawLine->aPmgInitialRegisters[15] = pDrawLine->aPmgInitialRegisters[16] = 0x80;
+		pPriority[96] = 4;
+		pPriority[97] = special ? 2 : 4;
+		pPixels[96] = 0x94;
+		pPixels[97] = special ? 0x96 : 0x94;
+		AtariIoTimingProbeStepClock(pContext);
+		REQUIRE(pPixels[96] == (multi ? 0xfe : 0xdc), "mode 0 must mix PF2 with selected player colors");
+		REQUIRE(pPixels[97] == (special ? (multi ? 0xf6 : 0xd6) : (multi ? 0xfe : 0xdc)),
+			"high-resolution PF1 luminance must survive player/playfield mixing");
+		REQUIRE((RAM[IO_HPOSM2_P2PF] & 4) == 4, "mixing must preserve PF2 collisions");
+	}
 	ProbeMachine_Close(&tMachine);
 	return 1;
 }
@@ -679,8 +905,12 @@ int main(int argc, char *argv[])
 	bOk &= TestMode7FetchesCharacterDataOnOddRepeatedScanlines();
 	bOk &= TestPmgHiddenPrefixReplaysMidLineHposHistory();
 	bOk &= TestPmgPmbaseChangeKeepsMixedLineDmaHistory();
+	bOk &= TestPmgVdelayKeepsDmaSteals();
+	bOk &= TestPmgDmaCtlTakesEffectAfterTwoCycles();
+	bOk &= TestPmgPhantomMissileDmaUsesDisplayListByte();
 	bOk &= TestPmgMidLinePriorWriteAffectsLaterPixels();
 	bOk &= TestPmgPlayerCollisionSetsBothPlayerLatches();
+	bOk &= TestPmgModeZeroPlayfieldMix();
 
 	SDL_Quit();
 

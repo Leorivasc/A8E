@@ -38,6 +38,7 @@
     const ioCycleTimedEvent = cfg.ioCycleTimedEvent;
     const drawPlayerMissilesClock = cfg.drawPlayerMissilesClock;
     const fetchPmgDmaCycle = cfg.fetchPmgDmaCycle;
+    const fetchPhantomMissileDmaCycle = cfg.fetchPhantomMissileDmaCycle;
 
     const ACTIVE_LINE_HSYNC_PIXELS = 24;
     const ACTIVE_LINE_COLOR_BURST_CYCLES = 6;
@@ -109,6 +110,27 @@
     function currentLineCycle(ctx, cycleOffset) {
       const io = ctx.ioData;
       return ((io.clock - io.displayListFetchCycle) | 0) + (cycleOffset | 0);
+    }
+
+    function pmgDmaCtlForCycle(ctx) {
+      const io = ctx.ioData;
+      const dmactl = ctx.sram[IO_DMACTL] & 0xff;
+      if (!io.pmgDmaCtlTimingInitialized) return dmactl;
+      // AHRM 4.13 delays only P/M DMA enable bits; addressing mode is live.
+      return (dmactl & ~0x0c) | (io.pmgDmaCtlTwoCyclesAgo & 0x0c);
+    }
+
+    function advancePmgDmaCtlTiming(ctx) {
+      const io = ctx.ioData;
+      const dmactl = ctx.sram[IO_DMACTL] & 0xff;
+      if (!io.pmgDmaCtlTimingInitialized) {
+        io.pmgDmaCtlTimingInitialized = true;
+        io.pmgDmaCtlOneCycleAgo = dmactl;
+        io.pmgDmaCtlTwoCyclesAgo = dmactl;
+        return;
+      }
+      io.pmgDmaCtlTwoCyclesAgo = io.pmgDmaCtlOneCycleAgo & 0xff;
+      io.pmgDmaCtlOneCycleAgo = dmactl;
     }
 
     function playfieldDmaAllowedAtCycle(ctx, cycleOffset) {
@@ -225,7 +247,12 @@
 
       if (fetchPmgDmaCycle) {
         if (lineCycle === 0 || (lineCycle >= 2 && lineCycle <= 5)) {
-          if (fetchPmgDmaCycle(ctx, lineCycle, io.video.currentDisplayLine | 0)) {
+          if (fetchPmgDmaCycle(
+            ctx,
+            lineCycle,
+            io.video.currentDisplayLine | 0,
+            pmgDmaCtlForCycle(ctx),
+          )) {
             ctx.cycleCounter++;
             // PMG DMA is invisible to playfield DMA steals since it does not delay ANTIC itself,
             // but we delay the CPU by bumping cycleCounter.
@@ -234,6 +261,20 @@
       }
       if (playfieldDmaStealCount > 0) {
         ctx.cycleCounter += playfieldDmaStealCount;
+      }
+      if (lineCycle === DISPLAY_LIST_INSTRUCTION_CYCLE && io.pmgPhantomMissileDmaPending) {
+        if (
+          fetchPhantomMissileDmaCycle &&
+          (drawLine.displayListInstructionDmaPending | 0) !== 0
+        ) {
+          fetchPhantomMissileDmaCycle(
+            ctx,
+            lineCycle,
+            io.video.currentDisplayLine | 0,
+            io.currentDisplayListCommand | 0,
+          );
+        }
+        io.pmgPhantomMissileDmaPending = false;
       }
       const refreshSlot =
         lineCycle >= REFRESH_FIRST_CYCLE &&
@@ -287,6 +328,7 @@
         );
       }
       if (ctx.cycleCounter < io.clock) CPU.executeOne(ctx);
+      advancePmgDmaCtlTiming(ctx);
       io.clock++;
     }
 

@@ -12,6 +12,8 @@ const IO_PRIOR = 0xd01b;
 const IO_VCOUNT = 0xd40b;
 
 function loadRendererBaseApi() {
+  const phantomMissileCalls = [];
+  const pmgDmaCalls = [];
   const source = fs.readFileSync(
     path.join(__dirname, "..", "js", "core", "playfield", "renderer_base.js"),
     "utf8",
@@ -27,7 +29,7 @@ function loadRendererBaseApi() {
   vm.createContext(context);
   vm.runInContext(source, context, { filename: "renderer_base.js" });
 
-  return context.window.A8EPlayfieldRendererBase.createApi({
+  const api = context.window.A8EPlayfieldRendererBase.createApi({
     CPU: {
       executeOne: function () {},
     },
@@ -50,8 +52,17 @@ function loadRendererBaseApi() {
     PRIO_M10_PM3: 0x800,
     ioCycleTimedEvent: function () {},
     drawPlayerMissilesClock: function () {},
-    fetchPmgDmaCycle: function () {},
+    fetchPmgDmaCycle: function (_, cycle, line, dmactl) {
+      pmgDmaCalls.push({ cycle: cycle, line: line, dmactl: dmactl });
+      return 0;
+    },
+    fetchPhantomMissileDmaCycle: function (_, cycle, line, value) {
+      phantomMissileCalls.push({ cycle: cycle, line: line, value: value });
+    },
   });
+  api.phantomMissileCalls = phantomMissileCalls;
+  api.pmgDmaCalls = pmgDmaCalls;
+  return api;
 }
 
 function makeCtx(clock, firstRowScanline) {
@@ -70,6 +81,11 @@ function makeCtx(clock, firstRowScanline) {
     ioData: {
       clock: clock | 0,
       displayListFetchCycle: 0,
+      currentDisplayListCommand: 0,
+      pmgPhantomMissileDmaPending: false,
+      pmgDmaCtlTimingInitialized: false,
+      pmgDmaCtlOneCycleAgo: 0,
+      pmgDmaCtlTwoCyclesAgo: 0,
       firstRowScanline: !!firstRowScanline,
       drawLine: {
         playfieldDmaStealCount: 0,
@@ -173,8 +189,59 @@ function testVirtualDisplayFetchLatchesRefreshDropArtifactIntoLineBuffer() {
   );
 }
 
+function testPhantomMissileDmaUsesTheCycleOneDisplayListFetch() {
+  const api = loadRendererBaseApi();
+  const ctx = makeCtx(1, false);
+  ctx.ioData.video.currentDisplayLine = 8;
+  ctx.ioData.currentDisplayListCommand = 0xe4;
+  ctx.ioData.pmgPhantomMissileDmaPending = true;
+  ctx.ioData.drawLine.displayListInstructionDmaPending = 1;
+
+  api.stepClockActions(ctx, 1);
+
+  assert.deepEqual(api.phantomMissileCalls, [{ cycle: 1, line: 8, value: 0xe4 }]);
+  assert.equal(ctx.ioData.pmgPhantomMissileDmaPending, false);
+  assert.equal(ctx.ioData.drawLine.displayListInstructionDmaPending, 0);
+  assert.equal(ctx.cycleCounter, 1, "display-list DMA remains the only CPU steal");
+}
+
+function testPmgDmaCtlTakesEffectAfterTwoCycles() {
+  const api = loadRendererBaseApi();
+  const ctx = makeCtx(0, false);
+  const io = ctx.ioData;
+
+  io.video.currentDisplayLine = 8;
+  ctx.sram[IO_DMACTL] = 0x32;
+  io.pmgDmaCtlTimingInitialized = true;
+  io.pmgDmaCtlOneCycleAgo = 0x32;
+  io.pmgDmaCtlTwoCyclesAgo = 0x3e;
+
+  api.stepClockActions(ctx, 3);
+
+  assert.deepEqual(api.pmgDmaCalls, [
+    { cycle: 0, line: 8, dmactl: 0x3e },
+    { cycle: 2, line: 8, dmactl: 0x32 },
+  ]);
+  assert.equal(io.pmgDmaCtlTwoCyclesAgo, 0x32);
+  assert.equal(io.pmgDmaCtlOneCycleAgo, 0x32);
+
+  const resolutionApi = loadRendererBaseApi();
+  const resolutionCtx = makeCtx(0, false);
+  resolutionCtx.sram[IO_DMACTL] = 0x3e;
+  resolutionCtx.ioData.pmgDmaCtlTimingInitialized = true;
+  resolutionCtx.ioData.pmgDmaCtlOneCycleAgo = 0x2e;
+  resolutionCtx.ioData.pmgDmaCtlTwoCyclesAgo = 0x2e;
+
+  resolutionApi.stepClockActions(resolutionCtx, 1);
+  assert.deepEqual(resolutionApi.pmgDmaCalls, [
+    { cycle: 0, line: 0, dmactl: 0x3e },
+  ]);
+}
+
 testScheduledCharacterDmaStealsOnCycle105();
 testVirtualCharacterFetchUsesCpuBusWithoutSchedulingDma();
 testVirtualCharacterFetchUsesZeroPageCpuBusAddress();
 testVirtualDisplayFetchLatchesRefreshDropArtifactIntoLineBuffer();
+testPhantomMissileDmaUsesTheCycleOneDisplayListFetch();
+testPmgDmaCtlTakesEffectAfterTwoCycles();
 console.log("playfield_dma_contention_regression tests passed");

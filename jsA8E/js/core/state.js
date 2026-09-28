@@ -88,6 +88,11 @@
         modeLineScrollExit: false,
         modeLineExitDli: false,
         modeLineEndsThisLine: false,
+        pmgPhantomMissileDmaPending: false,
+        // AHRM 4.13: P/M DMA enable bits take effect two ANTIC cycles later.
+        pmgDmaCtlTimingInitialized: false,
+        pmgDmaCtlOneCycleAgo: 0,
+        pmgDmaCtlTwoCyclesAgo: 0,
         nmiTiming: {
           enabledByCycle7: 0,
           enabledByCycle8: 0,

@@ -1962,6 +1962,10 @@
           modeLineScrollExit: !!io.modeLineScrollExit,
           modeLineExitDli: !!io.modeLineExitDli,
           modeLineEndsThisLine: !!io.modeLineEndsThisLine,
+          pmgPhantomMissileDmaPending: !!io.pmgPhantomMissileDmaPending,
+          pmgDmaCtlTimingInitialized: !!io.pmgDmaCtlTimingInitialized,
+          pmgDmaCtlOneCycleAgo: io.pmgDmaCtlOneCycleAgo | 0,
+          pmgDmaCtlTwoCyclesAgo: io.pmgDmaCtlTwoCyclesAgo | 0,
           nmiTiming: io.nmiTiming
             ? {
                 enabledByCycle7: io.nmiTiming.enabledByCycle7 | 0,
@@ -2095,6 +2099,12 @@
           io.modeLineScrollExit = !!state.modeLineScrollExit;
           io.modeLineExitDli = !!state.modeLineExitDli;
           io.modeLineEndsThisLine = !!state.modeLineEndsThisLine;
+          io.pmgPhantomMissileDmaPending = !!state.pmgPhantomMissileDmaPending;
+        }
+        if (state.pmgDmaCtlTimingInitialized !== undefined) {
+          io.pmgDmaCtlTimingInitialized = !!state.pmgDmaCtlTimingInitialized;
+          io.pmgDmaCtlOneCycleAgo = state.pmgDmaCtlOneCycleAgo | 0;
+          io.pmgDmaCtlTwoCyclesAgo = state.pmgDmaCtlTwoCyclesAgo | 0;
         }
         if (state.nmiTiming && typeof state.nmiTiming === "object") {
           io.nmiTiming.enabledByCycle7 = state.nmiTiming.enabledByCycle7 | 0;
