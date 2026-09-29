@@ -142,11 +142,17 @@ Desktop behavior (`>980px`):
 
 Responsive behavior (`<=980px`):
 
-- collapse two-column layouts into a single vertical flow;
-- keep the screen before the lower-priority panels where possible;
-- allow panel sections to scroll independently;
-- keep the compact layout buttons in the primary toolbar; at widths up to
-  `600px`, the toolbar's primary file control may occupy a full row.
+- collapse the emulator area to one full-width screen column;
+- keep the screen as the primary content and reserve the bottom inset for the
+  fixed mobile action bar;
+- replace the stacked desktop tools column with one focused, scrollable panel
+  overlay at a time;
+- expose joystick, keyboard, Disk Library, HostFS, and additional tools from
+  the fixed bottom action bar;
+- keep ROM loading, CRT, turbo, fullscreen, assembler, snapshots, and machine
+  selectors reachable from the `More` tools sheet;
+- at widths up to `600px`, the toolbar's primary file control may occupy a full
+  row.
 
 The layout change must not alter the existing PAL/NTSC selection, memory
 profile, worker selection, ROMs, disks, HostFS files, or emulator lifecycle.
@@ -176,7 +182,7 @@ longer available, the UI falls back to `work`.
 
 ## Implementation Direction
 
-The implementation should extend the existing UI structure and shared panel
+The implementation extends the existing UI structure and shared panel
 styles rather than introduce separate copies of panel components.
 
 Likely files:
@@ -210,6 +216,8 @@ joystick, or screen components.
   optional keyboard and joystick below.
 - `Development` shows the assembler/debugger, HostFS, and Disk Library beside
   the screen on desktop, with the optional keyboard below.
+- On mobile, the screen remains full width and the bottom action bar opens one
+  input or tool panel at a time without duplicating the existing panel logic.
 - Disk activity remains visible and screen-relative in all three layouts.
 - The selected layout survives a page reload.
 - A future arrangement can be added by registering a new layout definition and
