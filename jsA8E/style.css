@@ -432,6 +432,23 @@ button:hover:not(:disabled) {
   display: none;
 }
 
+.crt-stack {
+  position: relative;
+}
+
+.crt-off-mark {
+  display: none;
+  position: absolute;
+  right: -0.04em;
+  bottom: -0.08em;
+  font-size: 0.8em;
+  color: #ef4444;
+}
+
+.toggle-btn:not(.active) .crt-off-mark {
+  display: inline;
+}
+
 .joystick-stack {
   position: relative;
 }
