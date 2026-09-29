@@ -4,6 +4,10 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-29: replaced the jsA8E CRT toolbar button text with a Font Awesome
+  retro-TV icon. When the filter is disabled, the existing toggle state now
+  adds a red slash overlay; title and ARIA labels remain unchanged.
+
 - 2026-09-29: corrected the linked POKEY audio divider in both cores: high
   underflow now reloads the low counter as well as the high counter (AHRM
   5.3), without generating an extra low-channel pulse. The 2026-09-28 change
