@@ -3,6 +3,7 @@
 
   function createApi(cfg) {
     const PIXELS_PER_LINE = cfg.PIXELS_PER_LINE;
+    const CYCLES_PER_LINE = cfg.CYCLES_PER_LINE || 114;
 
     const IO_COLPF3 = cfg.IO_COLPF3;
     const IO_COLPM0_TRIG2 = cfg.IO_COLPM0_TRIG2;
@@ -34,6 +35,64 @@
     const IO_VDELAY = cfg.IO_VDELAY;
     const PLAYFIELD_SCRATCH_VIEW_X = cfg.PLAYFIELD_SCRATCH_VIEW_X || 0;
     const PMG_POSITION_BIAS_PIXELS = 0;
+
+    function pmgRegisterIndex(address) {
+      switch (address) {
+        case IO_HPOSP0_M0PF: return 0;
+        case IO_HPOSP1_M1PF: return 1;
+        case IO_HPOSP2_M2PF: return 2;
+        case IO_HPOSP3_M3PF: return 3;
+        case IO_HPOSM0_P0PF: return 4;
+        case IO_HPOSM1_P1PF: return 5;
+        case IO_HPOSM2_P2PF: return 6;
+        case IO_HPOSM3_P3PF: return 7;
+        case IO_SIZEP0_M0PL: return 8;
+        case IO_SIZEP1_M1PL: return 9;
+        case IO_SIZEP2_M2PL: return 10;
+        case IO_SIZEP3_M3PL: return 11;
+        case IO_SIZEM_P0PL: return 12;
+        case IO_GRAFP0_P1PL: return 13;
+        case IO_GRAFP1_P2PL: return 14;
+        case IO_GRAFP2_P3PL: return 15;
+        case IO_GRAFP3_TRIG0: return 16;
+        case IO_GRAFM_TRIG1: return 17;
+        default: return -1;
+      }
+    }
+
+    function recordPmgRegisterEvent(ctx, address, value, lineCycle) {
+      const drawLine = ctx.ioData.drawLine;
+      const registerIndex = pmgRegisterIndex(address);
+      if (
+        !drawLine ||
+        !drawLine.pmgEventRegisters ||
+        !drawLine.pmgEventValues ||
+        !drawLine.pmgEventCycles ||
+        registerIndex < 0 ||
+        lineCycle < 0 ||
+        lineCycle >= CYCLES_PER_LINE
+      ) return;
+      if (drawLine.pmgEventCount >= drawLine.pmgEventRegisters.length) {
+        drawLine.pmgEventOverflow = true;
+        return;
+      }
+      const eventIndex = drawLine.pmgEventCount++;
+      drawLine.pmgEventRegisters[eventIndex] = registerIndex;
+      drawLine.pmgEventValues[eventIndex] = value & 0xff;
+      drawLine.pmgEventCycles[eventIndex] = lineCycle & 0xff;
+    }
+
+    function recordPmgRegisterWrite(ctx, address, value) {
+      const io = ctx.ioData;
+      const writeCycle =
+        (io.clock | 0) + Math.max((ctx.currentInstructionCycles | 0) - 1, 0);
+      recordPmgRegisterEvent(
+        ctx,
+        address,
+        value,
+        writeCycle - (io.displayListFetchCycle | 0),
+      );
+    }
 
     const PRIO_PF0 = cfg.PRIO_PF0;
     const PRIO_PF1 = cfg.PRIO_PF1;
@@ -233,8 +292,9 @@
       startIndex,
       special,
       overlap,
+      playfieldColors,
+      mixMask,
     ) {
-      const cColor = color & 0xff;
       const cPriorityMask = priorityMask & 0xffff;
       const cPriorityBit = priorityBit & 0xffff;
       const cOverlap = overlap & 0xffff;
@@ -242,6 +302,9 @@
 
       for (let pi = startIndex | 0, end = (startIndex + 2) | 0; pi < end; pi++) {
         const p = prio[pi] & 0xffff;
+        // Mix with the original playfield, never a lower player's output.
+        const pfColor = (playfieldColors >> ((pi - startIndex) * 8)) & 0xff;
+        const cColor = (color | ((p & mixMask) ? pfColor : 0)) & 0xff;
         if (cOverlap && (p & cOverlap)) {
           if (special && (p & PRIO_PF1)) {
             dst[pi] = ((cColor & 0xf0) | dst[pi]) & 0xff;
@@ -475,11 +538,42 @@
       }
     }
 
-    function fetchPmgDmaCycle(ctx, lineCycle, y) {
+    function mergeMissileDmaValue(sram, y, value) {
+      if ((y & 0x01) !== 0) return value & 0xff;
+
+      const vdelay = sram[IO_VDELAY] & 0x0f;
+      let merged = value & 0xff;
+      for (let missile = 0; missile < 4; missile++) {
+        if ((vdelay & (1 << missile)) !== 0) {
+          const bits = 0x03 << (missile * 2);
+          merged = (merged & ~bits) | (sram[IO_GRAFM_TRIG1] & bits);
+        }
+      }
+      return merged & 0xff;
+    }
+
+    // Diagnostic seam for real-content investigations. It is intentionally
+    // inert unless a host installs the callback; normal PMG timing and state
+    // remain unchanged.
+    function tracePmgDma(ctx, lineCycle, y, address, value, latchAddress) {
+      const trace = ctx.ioData && ctx.ioData.pmgDmaTrace;
+      if (typeof trace !== "function") return;
+      trace({
+        line: y | 0,
+        cycle: lineCycle | 0,
+        address: address & 0xffff,
+        value: value & 0xff,
+        latchAddress: latchAddress & 0xffff,
+        latchValue: ctx.sram[latchAddress & 0xffff] & 0xff,
+      });
+    }
+
+    function fetchPmgDmaCycle(ctx, lineCycle, y, delayedDmaCtl) {
       if (y >= 248) return 0;
 
       const sram = ctx.sram;
-      const dmactl = sram[IO_DMACTL] & 0xff;
+      const dmactl =
+        delayedDmaCtl === undefined ? sram[IO_DMACTL] & 0xff : delayedDmaCtl & 0xff;
 
       const pmDmaPlayers = (dmactl & 0x08) !== 0;
       const pmDmaMissiles = ((dmactl & 0x04) !== 0) || pmDmaPlayers;
@@ -497,45 +591,81 @@
         return (base + offset + (lineIndex & 0xffff)) & 0xffff;
       }
 
-      function vdelayAllowsFetch(vdelayMask) {
+      function vdelayAllowsLoad(vdelayMask) {
         return ((sram[IO_VDELAY] & vdelayMask) === 0) || ((y & 0x01) !== 0);
       }
 
       if (lineCycle === 0 && pmDmaMissiles) {
-        if (!vdelayAllowsFetch(0x08)) return 0;
         if (pmReceiveMissiles) {
-          sram[IO_GRAFM_TRIG1] = ctx.ram[fetchPmAddr(hires ? 768 : 384)];
+          const oldValue = sram[IO_GRAFM_TRIG1] & 0xff;
+          const address = fetchPmAddr(hires ? 768 : 384);
+          const value = ctx.ram[address] & 0xff;
+          const newValue = mergeMissileDmaValue(
+            sram,
+            y,
+            value,
+          );
+          sram[IO_GRAFM_TRIG1] = newValue;
+          tracePmgDma(ctx, lineCycle, y, address, value, IO_GRAFM_TRIG1);
+          if (newValue !== oldValue) {
+            recordPmgRegisterEvent(ctx, IO_GRAFM_TRIG1, newValue, lineCycle);
+          }
         }
         return 1;
       }
       if (pmDmaPlayers) {
         if (lineCycle === 2) {
-          if (!vdelayAllowsFetch(0x10)) return 0;
-          if (pmReceivePlayers) {
-            sram[IO_GRAFP0_P1PL] = ctx.ram[fetchPmAddr(hires ? 1024 : 512)];
+          if (pmReceivePlayers && vdelayAllowsLoad(0x10)) {
+            const address = fetchPmAddr(hires ? 1024 : 512);
+            const value = ctx.ram[address] & 0xff;
+            sram[IO_GRAFP0_P1PL] = value;
+            tracePmgDma(ctx, lineCycle, y, address, value, IO_GRAFP0_P1PL);
+            recordPmgRegisterEvent(ctx, IO_GRAFP0_P1PL, sram[IO_GRAFP0_P1PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 3) {
-          if (!vdelayAllowsFetch(0x20)) return 0;
-          if (pmReceivePlayers) {
-            sram[IO_GRAFP1_P2PL] = ctx.ram[fetchPmAddr(hires ? 1280 : 640)];
+          if (pmReceivePlayers && vdelayAllowsLoad(0x20)) {
+            const address = fetchPmAddr(hires ? 1280 : 640);
+            const value = ctx.ram[address] & 0xff;
+            sram[IO_GRAFP1_P2PL] = value;
+            tracePmgDma(ctx, lineCycle, y, address, value, IO_GRAFP1_P2PL);
+            recordPmgRegisterEvent(ctx, IO_GRAFP1_P2PL, sram[IO_GRAFP1_P2PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 4) {
-          if (!vdelayAllowsFetch(0x40)) return 0;
-          if (pmReceivePlayers) {
-            sram[IO_GRAFP2_P3PL] = ctx.ram[fetchPmAddr(hires ? 1536 : 768)];
+          if (pmReceivePlayers && vdelayAllowsLoad(0x40)) {
+            const address = fetchPmAddr(hires ? 1536 : 768);
+            const value = ctx.ram[address] & 0xff;
+            sram[IO_GRAFP2_P3PL] = value;
+            tracePmgDma(ctx, lineCycle, y, address, value, IO_GRAFP2_P3PL);
+            recordPmgRegisterEvent(ctx, IO_GRAFP2_P3PL, sram[IO_GRAFP2_P3PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 5) {
-          if (!vdelayAllowsFetch(0x80)) return 0;
-          if (pmReceivePlayers) {
-            sram[IO_GRAFP3_TRIG0] = ctx.ram[fetchPmAddr(hires ? 1792 : 896)];
+          if (pmReceivePlayers && vdelayAllowsLoad(0x80)) {
+            const address = fetchPmAddr(hires ? 1792 : 896);
+            const value = ctx.ram[address] & 0xff;
+            sram[IO_GRAFP3_TRIG0] = value;
+            tracePmgDma(ctx, lineCycle, y, address, value, IO_GRAFP3_TRIG0);
+            recordPmgRegisterEvent(ctx, IO_GRAFP3_TRIG0, sram[IO_GRAFP3_TRIG0], lineCycle);
           }
           return 1;
         }
       }
       return 0;
+    }
+
+    function fetchPhantomMissileDmaCycle(ctx, lineCycle, y, displayListByte) {
+      const sram = ctx.sram;
+      if (lineCycle !== 1 || (sram[IO_GRACTL] & 0x01) === 0) return 0;
+
+      const oldValue = sram[IO_GRAFM_TRIG1] & 0xff;
+      const newValue = mergeMissileDmaValue(sram, y, displayListByte);
+      sram[IO_GRAFM_TRIG1] = newValue;
+      if (newValue !== oldValue) {
+        recordPmgRegisterEvent(ctx, IO_GRAFM_TRIG1, newValue, lineCycle);
+      }
+      return 1;
     }
 
     function drawPlayerMissilesClock(ctx, spanStart) {
@@ -623,21 +753,72 @@
         advanceMissileShift(missileShift, missileState, index, size);
       }
 
+      function primePlayerClockFromRegisters(index, x, registers) {
+        const data = registers[13 + index] & 0xff;
+        const hpos = pmgStartX(registers[index] & 0xff);
+        const size = registers[8 + index] & 0xff;
+        if (x === hpos && data) reloadPlayerShift(playerShift, playerState, index, data);
+        advancePlayerShift(playerShift, playerState, index, size);
+      }
+
+      function primeMissileClockFromRegisters(index, x, registers) {
+        const data = (registers[17] & missileMasks[index]) >> (index * 2);
+        const hpos = pmgStartX(registers[4 + index] & 0xff);
+        const size = registers[12] & 0xff;
+        if (x === hpos && data) reloadMissileShift(missileShift, missileState, index, data);
+        advanceMissileShift(missileShift, missileState, index, size);
+      }
+
       if (io.drawLine.pmgFirstVisibleSpan) {
-        for (let x = 0; x < visibleSpanStart; x += 2) {
-          primePlayerClock(3, x);
-          primePlayerClock(2, x);
-          primePlayerClock(1, x);
-          primePlayerClock(0, x);
-          primeMissileClock(3, x);
-          primeMissileClock(2, x);
-          primeMissileClock(1, x);
-          primeMissileClock(0, x);
+        const drawLine = io.drawLine;
+        const canReplayPmgHistory =
+          !drawLine.pmgEventOverflow &&
+          drawLine.pmgInitialRegisters &&
+          drawLine.pmgReplayRegisters &&
+          drawLine.pmgEventRegisters &&
+          drawLine.pmgEventValues &&
+          drawLine.pmgEventCycles;
+        if (canReplayPmgHistory) {
+          const replayRegisters = drawLine.pmgReplayRegisters;
+          replayRegisters.set(drawLine.pmgInitialRegisters);
+          let eventIndex = 0;
+          for (let x = 0; x < visibleSpanStart; x += 2) {
+            const lineCycle = Math.floor((x - 24) / 4);
+            while (
+              eventIndex < drawLine.pmgEventCount &&
+              drawLine.pmgEventCycles[eventIndex] <= lineCycle
+            ) {
+              replayRegisters[drawLine.pmgEventRegisters[eventIndex]] =
+                drawLine.pmgEventValues[eventIndex];
+              eventIndex++;
+            }
+            primePlayerClockFromRegisters(3, x, replayRegisters);
+            primePlayerClockFromRegisters(2, x, replayRegisters);
+            primePlayerClockFromRegisters(1, x, replayRegisters);
+            primePlayerClockFromRegisters(0, x, replayRegisters);
+            primeMissileClockFromRegisters(3, x, replayRegisters);
+            primeMissileClockFromRegisters(2, x, replayRegisters);
+            primeMissileClockFromRegisters(1, x, replayRegisters);
+            primeMissileClockFromRegisters(0, x, replayRegisters);
+          }
+        } else {
+          for (let x = 0; x < visibleSpanStart; x += 2) {
+            primePlayerClock(3, x);
+            primePlayerClock(2, x);
+            primePlayerClock(1, x);
+            primePlayerClock(0, x);
+            primeMissileClock(3, x);
+            primeMissileClock(2, x);
+            primeMissileClock(1, x);
+            primeMissileClock(0, x);
+          }
         }
         io.drawLine.pmgFirstVisibleSpan = false;
       }
 
       for (let x = visibleSpanStart; x < spanPixelEnd; x += 2) {
+        const playfieldColors = dst[lineBase + x] | (dst[lineBase + x + 1] << 8);
+        const mixModeZero = (prior & 0xcf) === 0;
         let data = sram[IO_GRAFP3_TRIG0] & 0xff;
         let hpos = pmgStartX(sram[IO_HPOSP3_M3PF] & 0xff);
         let size = sram[IO_SIZEP3_M3PL] & 0xff;
@@ -652,6 +833,8 @@
             lineBase + x,
             special,
             0,
+            playfieldColors,
+            mixModeZero ? (PRIO_PF2 | PRIO_PF3 | (special ? PRIO_PF1 : 0)) : 0,
           );
         }
         advancePlayerShift(playerShift, playerState, 3, size);
@@ -670,6 +853,8 @@
             lineBase + x,
             special,
             prior & 0x20 ? PRIO_PM3 : 0,
+            playfieldColors,
+            mixModeZero ? (PRIO_PF2 | PRIO_PF3 | (special ? PRIO_PF1 : 0)) : 0,
           );
         }
         advancePlayerShift(playerShift, playerState, 2, size);
@@ -688,6 +873,8 @@
             lineBase + x,
             special,
             0,
+            playfieldColors,
+            mixModeZero ? (special ? 0 : PRIO_PF0 | PRIO_PF1) : 0,
           );
         }
         advancePlayerShift(playerShift, playerState, 1, size);
@@ -706,6 +893,8 @@
             lineBase + x,
             special,
             prior & 0x20 ? PRIO_PM1 : 0,
+            playfieldColors,
+            mixModeZero ? (special ? 0 : PRIO_PF0 | PRIO_PF1) : 0,
           );
         }
         advancePlayerShift(playerShift, playerState, 0, size);
@@ -1062,7 +1251,10 @@
     return {
       drawPlayerMissilesClock: drawPlayerMissilesClock,
       fetchPmgDmaCycle: fetchPmgDmaCycle,
+      fetchPhantomMissileDmaCycle: fetchPhantomMissileDmaCycle,
       drawPlayerMissiles: drawPlayerMissiles,
+      recordPmgRegisterEvent: recordPmgRegisterEvent,
+      recordPmgRegisterWrite: recordPmgRegisterWrite,
     };
   }
 

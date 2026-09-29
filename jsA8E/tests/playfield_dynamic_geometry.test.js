@@ -33,8 +33,37 @@ function loadPlayfieldApi(stepperFactory) {
     createApi: function (cfg) {
       const base = context.window.A8EPlayfieldRendererBase.createApi(cfg);
       return Object.assign({}, base, {
-        createModeStepper: function (mode, ctx) {
-          return stepperFactory(base, mode, ctx);
+        drawModeLine: function (mode, ctx) {
+          const stepper = stepperFactory(base, mode, ctx);
+          const video = ctx.ioData.videoOut;
+          const drawLine = ctx.ioData.drawLine;
+          let dstIndex = drawLine.destIndex | 0;
+          let previousHscroll = ctx.sram[IO_HSCROL] & 0x0f;
+
+          // Keep the fixture deterministic while exercising register writes
+          // between successive ANTIC mode-render cycles.
+          for (let i = 0; i < 3; i++) {
+            const currentDmaCtl = ctx.sram[IO_DMACTL] & 0xff;
+            const drawEnabled =
+              (currentDmaCtl & 0x20) !== 0 && (currentDmaCtl & 0x03) !== 0;
+            const previousPixels = video.pixels.slice(dstIndex, dstIndex + 4);
+            const previousPriority = video.priority.slice(dstIndex, dstIndex + 4);
+            dstIndex = stepper.renderCycle(
+              video.pixels,
+              video.priority,
+              dstIndex,
+            );
+            if (!drawEnabled) {
+              video.pixels.set(previousPixels, dstIndex - 4);
+              video.priority.set(previousPriority, dstIndex - 4);
+            }
+
+            const currentHscroll = ctx.sram[IO_HSCROL] & 0x0f;
+            if ((currentHscroll ^ previousHscroll) & 0x01) dstIndex += 2;
+            previousHscroll = currentHscroll;
+          }
+          if (stepper.finalize) stepper.finalize();
+          return true;
         },
       });
     },

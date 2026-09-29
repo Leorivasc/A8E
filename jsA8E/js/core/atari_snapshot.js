@@ -202,6 +202,7 @@
           nmiPending: machine.ctx.nmiPending | 0,
           nmiActive: machine.ctx.nmiActive | 0,
           irqPending: machine.ctx.irqPending | 0,
+          irqNmiLossWindow: machine.ctx.irqNmiLossWindow | 0,
           instructionCounter: machine.ctx.instructionCounter >>> 0,
           cycleAccum: +machine.cycleAccum || 0,
           frameCycleAccum: machine.frameCycleAccum | 0,
@@ -330,6 +331,7 @@
       machine.ctx.nmiPending = snapshot.nmiPending ? 1 : 0;
       machine.ctx.nmiActive = snapshot.nmiActive ? 1 : 0;
       machine.ctx.irqPending = snapshot.irqPending | 0;
+      machine.ctx.irqNmiLossWindow = snapshot.irqNmiLossWindow ? 1 : 0;
       machine.ctx.instructionCounter = snapshot.instructionCounter >>> 0;
       machine.ctx.breakRun = false;
       machine.ctx.pcHooks = Object.create(null);

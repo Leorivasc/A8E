@@ -20,6 +20,63 @@ fabricated SIO response is used.
 Remaining work concerns broader AHRM regression coverage (for example DDRB and
 reset/snapshot edge cases), not the title's normal startup path.
 
+## Open gameplay graphics report (2026-09-27)
+
+The user supplied two jsA8E captures and one native A8E capture of vertical
+scrolling gameplay. Small colored fragments resembling the descending enemies'
+feet appear detached above the enemies. This is an open rendering issue,
+separate from the previously validated boot path and the AHRM-07 PRIOR=0
+color-mixing correction. The screenshots alone do not identify whether the
+fragments originate in player, missile, or playfield data.
+
+The user reproduced it with the same AtariBlast ATR in NTSC RAMBO 1088K on
+both cores; Altirra is clean. jsA8E takes a long time to boot the ATR, then
+shows a scrolling menu before entering the level-one demo. Trace the affected
+lines' PMBASE, DMACTL, GRACTL, VDELAY, graphics latches, HPOS writes, and DMA
+source bytes against AHRM 4.13 and 6.5.
+
+The initial coarse trace showed DMACTL changing from `$3E` to `$32` at cycles
+112-113. Beam-level tracing refined the sequence: GRACTL is cleared at cycle
+0 of the following line, before the cycle-1 display-list fetch. AHRM 6.5's
+phantom-missile path is therefore not active in this captured interval. Both
+cores retain the generic cycle-1 latch model, including VDELAY masking and
+raster history, without adding a CPU DMA steal, but it is not yet evidence
+for this title's fragments. GRACTL is also disabled before the documented
+phantom-player cycles, so player bus sampling has not been added speculatively.
+
+The same 20-frame beam trace contains 41 `$3E` to `$32` writes at cycle 113.
+AHRM 4.13 requires each to preserve the next line's cycle-0 missile DMA,
+though player DMA is disabled by cycle 2. Both cores now pipeline only the
+P/M DMACTL enable bits by two ANTIC cycles; the addressing mode remains live.
+Native/JS regressions cover that boundary. An isolated 20-frame replay from
+the saved NTSC RAMBO 1088K gameplay snapshot produced byte-identical PNG
+frames before and after this correction. The subsequent live NTSC/RAMBO-1088K
+rerun still showed detached fragments in both A8E cores, while Altirra remains
+clean. AHRM 4.13 is therefore a required general correction but not a
+sufficient AtariBlast fix.
+
+A follow-up register trace corrected an earlier register label: `$D407` is
+`PMBASE`, not `HSCROL`. AtariBlast alternates `PMBASE` between `$30` and `$38`
+only in VBL (line 248, cycles 90-107), before the next visible P/M DMA slots.
+The actual scroll registers, `HSCROL` (`$D404`) and `VSCROL` (`$D405`), also
+change only outside the visible region in the captured interval. The live
+PMBASE implementation and normal scrolling timing are therefore not current
+candidates; the next trace must retain the actual graphics-latch values and
+their beam positions for the lines showing a fragment.
+
+The reproducible gameplay snapshot narrows the fault further. `DMACTL=$3E`
+and `GRACTL=$03` run from about line 31 to line 207, so this is ordinary,
+continuous one-line P/M DMA rather than a two-scanline DMA burst. The CPU
+does not stream nonzero player graphics during that region; it supplies a
+setup write to `GRAFP0` before enabling the DMA, then clears the graphics
+registers after disabling it. A temporary renderer capture with all four
+players suppressed removes the detached colored pieces, while the remaining
+missile output stays normal. The comparison therefore locates the mismatch in
+the player DMA/latch/output path. HSCROL, VSCROL, PMBASE, direct graphics
+writes, and the missile path have been excluded for this sample. Position and
+size writes are not near their horizontal comparators, so their documented
+five-color-clock latency is not exercised by this state.
+
 ## ATR geometry
 
 The image is 368272 bytes and has this ATR header:
@@ -600,3 +657,55 @@ La corrección fue validada ejecutando nuevamente ambos medios con el loader XEX
 La causa no era un parche específico de ninguno de los juegos. Era la combinación de un handoff RUNAD que descartaba direcciones con byte alto cero y una relocalización incompleta del loader después de ampliar esa comprobación. Las correcciones se mantienen genéricas y se aplican por igual al loader JavaScript y al nativo.
 
 Los puntos restantes de la lista de compatibilidad siguen siendo mejoras generales del modelo AHRM (agregación de IRQ de POKEY/PIA/PBI, DDRB efectivo, prioridad de overlays, transiciones de bancos, acceso ANTIC y semántica de reset/snapshot). No son necesarios para que AtariBlast y Mikie completen actualmente su arranque.
+
+### Reconstrucción estática del dibujo P/M (2026-09-28)
+
+Se analizó el estado reproducible NTSC/RAMBO-1088K `blast-game.a8s` y el
+código activo del banco 13. AtariBlast no usa una secuencia por-raster de
+escrituras a `GRAFP0-3` para dibujar los enemigos: los bytes de las capturas
+proceden del DMA ordinario de P/M.
+
+La rutina residente que alterna las páginas está en `$2391-$2496`. Selecciona
+`PMBASE=$30` o `$38`, programa HPOS, SIZE y los colores desde sus tablas y
+habilita el DMA con `DMACTL=$3E`, `GRACTL=$03`. En resolución de una línea esto
+define dos buffers completos:
+
+| PMBASE | P0 | P1 | P2 | P3 |
+|---|---|---|---|---|
+| `$30` | `$3400-$34FF` | `$3500-$35FF` | `$3600-$36FF` | `$3700-$37FF` |
+| `$38` | `$3C00-$3CFF` | `$3D00-$3DFF` | `$3E00-$3EFF` | `$3F00-$3FFF` |
+
+Las rutinas bancadas, por ejemplo `$77AA`, estampan los bytes de las formas
+en pares de páginas mediante `STA abs,Y`; otros generadores (`$6638`, `$7904`
+en el estado inspeccionado) rellenan las partes de los enemigos. Las entradas
+de los jugadores son por tanto mapas de bits de pantalla ya compuestos, no
+sprites que GTIA deba construir desde GRAFP.
+
+Una traza de 120000 ciclos, que abarca cinco alternancias de PMBASE y registra
+todas las escrituras —incluidos ceros— en `$3400-$3FFF`, no encontró ninguna
+escritura en el buffer activo. Siempre se completa el buffer inactivo antes de
+la siguiente alternancia. Esto descarta una carrera de escritura CPU/DMA del
+juego como causa de los fragmentos de las piernas. También confirma que una
+solución no debe introducir una regla específica para AtariBlast ni retrasar
+sus stores.
+
+La investigación queda reducida al camino genérico que convierte el byte de
+la página activa en el latch y salida de cada jugador: dirección vertical de
+DMA de una línea, momento de carga de GRAFP y estado del desplazador. AHRM
+4.13 especifica para este caso `PMBASE + $400/$500/$600/$700 + scanline` y
+DMA en los ciclos 2-5; AHRM 6.5 especifica el latch y el desplazador. La
+siguiente prueba debe comparar por línea esos cuatro bytes y latches contra
+Altirra/hardware en un fotograma con artefacto, sin cambiar el juego ni el
+doble buffer.
+
+La sonda opt-in `pmgDmaTrace` se añadió en jsA8E para esa comparación. En una
+repetición de 40000 ciclos del snapshot capturó 706 cargas P0/P1: para cada una
+la dirección fue la esperada y el byte de memoria fue idéntico al latch
+resultante. Por ejemplo, línea 123: P0 `$3C7B=$F0` en ciclo 2 y P1
+`$3D7B=$30` en ciclo 3. Las filas que contienen las formas cuestionadas siguen
+ese mismo patrón. Ensayos reversibles de `scanline-1`, `scanline+1` y
+`scanline+2` deforman o trasladan figuras completas; no eliminan sólo los
+fragmentos y no constituyen una corrección. Se descartan por tanto tanto un
+offset vertical fijo como una pérdida de carga GRAFP. El siguiente candidato
+es la salida del desplazador GTIA después de que el latch ya contiene el byte
+correcto.

@@ -51,6 +51,11 @@
 #define COLOR_CLOCKS_PER_LINE (PIXELS_PER_LINE / 2)
 #define CYCLES_PER_LINE (COLOR_CLOCKS_PER_LINE / 2)
 
+/* AHRM 4.13: PMG replay needs the source register history for one line.
+ * Keep the log bounded; normal raster effects use only a small fraction of it. */
+#define PMG_REGISTER_COUNT 18
+#define PMG_EVENT_CAPACITY 64
+
 #define ATARI_CPU_HZ_NTSC 1789773u
 #define ATARI_CPU_HZ_PAL 1773447u
 
@@ -65,6 +70,7 @@ typedef enum
 	ATARI_MEMORY_NONE = 0,
 	ATARI_MEMORY_130XE_128K = 1,
 	ATARI_MEMORY_RAMBO_192K,
+	ATARI_MEMORY_RAMBO_256K,
 	ATARI_MEMORY_RAMBO_320K,
 	ATARI_MEMORY_COMPY_320K,
 	ATARI_MEMORY_RAMBO_576K,
@@ -75,7 +81,7 @@ typedef enum
 
 #define CYCLE_NEVER 0xffffffffffffffffLL
 
-#define CONSOL_HACK
+#define ATARI_MODE_OPTION_ON_START 0x04
 
 #define SERIAL_OUTPUT_DATA_NEEDED_CYCLES 900
 #define SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES 1500
@@ -119,10 +125,16 @@ typedef struct
 	u8 cDisplayListInstructionDmaPending;
 	u8 cDisplayListAddressDmaRemaining;
 	u8 cPmgFirstVisibleSpan;
+	u8 cPmgEventCount;
+	u8 cPmgEventOverflow;
 	u8 aPlayerPmgShift[4];
 	u8 aPlayerPmgState[4];
 	u8 aMissilePmgShift[4];
 	u8 aMissilePmgState[4];
+	u8 aPmgInitialRegisters[PMG_REGISTER_COUNT];
+	u8 aPmgEventRegisters[PMG_EVENT_CAPACITY];
+	u8 aPmgEventValues[PMG_EVENT_CAPACITY];
+	u8 aPmgEventCycles[PMG_EVENT_CAPACITY];
 	u8 aPlayfieldLineBuffer[48];
 	u8 aScheduledPlayfieldDma[CYCLES_PER_LINE];
 } DrawLineData_t;
@@ -146,6 +158,9 @@ typedef struct
 	u64 llTimer1Cycle;
 	u64 llTimer2Cycle;
 	u64 llTimer4Cycle;
+	u64 llPokeyTimerResetCycle;
+	u64 llPokeySlowClockOriginCycle;
+	u8 cSerialOutputClockHigh;
 	u8 bInDrawLine;
 	u8 cNmienEnabledByCycle7;
 	u8 cNmienEnabledByCycle8;
@@ -158,6 +173,14 @@ typedef struct
 	u8 cChbasePendingValue;
 	u64 llChbasePendingCycle;
 
+	/* VSCROL bus-write timing (AHRM 4.7/4.8: deadline samples must see
+	 * the value on the final 6502 write cycle, not at instruction start). */
+	u8 bVscrolTimingInitialized;
+	u8 cVscrolRawValue;
+	u8 cVscrolActiveValue;
+	u8 cVscrolPendingValue;
+	u64 llVscrolPendingCycle;
+
 	void *pPokey;
 
 	u8 cCurrentDisplayListCommand;
@@ -166,6 +189,11 @@ typedef struct
 	u16 sRowDisplayMemoryAddress;
 	u16 sDisplayMemoryAddress;
 	u8 bFirstRowScanline;
+	u8 cPmgPhantomMissileDmaPending;
+	/* AHRM 4.13: P/M DMA enable bits take effect two ANTIC cycles later. */
+	u8 bPmgDmaCtlTimingInitialized;
+	u8 cPmgDmaCtlOneCycleAgo;
+	u8 cPmgDmaCtlTwoCyclesAgo;
 
 	/* AHRM 4.7: 4-bit mode-line row (delta) counter.  A mode line normally
 	 * ends when the counter reaches its static end row; the first line after
@@ -179,7 +207,20 @@ typedef struct
 	u8 bModeLineExitDli;
 	u8 bModeLineEndsThisLine;
 	u8 cValuePortA;
-	u8 cValuePortB;
+	u8 bOptionOnStart;
+	u8 cConsolReadValue;
+	u8 cOutputPortB;
+	u8 cDirectionPortB;
+	/* PIA control-line levels and edge-latched interrupt state. */
+	u8 cPiaCa1Level;
+	u8 cPiaCa2Level;
+	u8 cPiaCb1Level;
+	u8 cPiaCb2Level;
+	u8 cPiaStatusA;
+	u8 cPiaStatusB;
+	u8 bPiaCb2WasRaisedOutput;
+	u64 llPiaCa2PulseEndCycle;
+	u64 llPiaCb2PulseEndCycle;
 	AtariMemoryExpansion_t eMemoryExpansion;
 	u8 *pExtendedMemory;
 	u8 *pMainWindowShadow;
@@ -209,6 +250,8 @@ typedef struct
 	u8 cPotScanCounter;
 	u8 aPotValues[8]; /* target values per pot (set by input layer) */
 	u8 aPotLatched[8]; /* 1 = latched at target */
+	u8 aPotCharge[8]; /* residual charge, in POT-count equivalents */
+	u64 llPotChargeLastCycle;
 
 	u8 *pDisk1;
 	u32 lDiskSize;
@@ -234,6 +277,15 @@ void AtariIoClose(_6502_Context_t *pContext);
 
 void AtariIoCycleTimedEventUpdate(_6502_Context_t *pContext);
 void AtariIoStatus(_6502_Context_t *pContext);
+void AtariIo_RecordPmgRegisterWrite(
+	_6502_Context_t *pContext,
+	u16 sAddress,
+	u8 cValue);
+void AtariIo_RecordPmgDmaWrite(
+	_6502_Context_t *pContext,
+	u16 sAddress,
+	u8 cValue,
+	u32 lCycleInLine);
 
 #ifdef A8E_ENABLE_TEST_PROBES
 void AtariIoTimingProbeStepClock(_6502_Context_t *pContext);

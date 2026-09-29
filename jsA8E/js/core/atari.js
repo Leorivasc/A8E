@@ -11,6 +11,7 @@
     if (text === "" || text === "none" || text === "64k" || text === "64kb" || text === "no-expansion") return "none";
     if (text === "130xe" || text === "128k" || text === "128kb" || text === "130xe-128k") return "130xe-128k";
     if (text === "192k" || text === "192kb" || text === "rambo-192k") return "rambo-192k";
+    if (text === "256k" || text === "256kb" || text === "rambo-256k") return "rambo-256k";
     if (text === "320k" || text === "320kb" || text === "rambo-320k") return "rambo-320k";
     if (text === "compy-320k" || text === "320k-compy") return "compy-320k";
     if (text === "576k" || text === "576kb" || text === "rambo-576k") return "rambo-576k";
@@ -298,6 +299,7 @@
     window.A8EPokeyAudio && window.A8EPokeyAudio.createApi
       ? window.A8EPokeyAudio.createApi({
           ATARI_CPU_HZ_PAL: ATARI_CPU_HZ_PAL,
+          CYCLES_PER_LINE: CYCLES_PER_LINE,
           POKEY_AUDIO_MAX_CATCHUP_CYCLES: POKEY_AUDIO_MAX_CATCHUP_CYCLES,
           CYCLE_NEVER: CYCLE_NEVER,
           SERIAL_OUTPUT_DATA_NEEDED_CYCLES: SERIAL_OUTPUT_DATA_NEEDED_CYCLES,
@@ -317,6 +319,7 @@
           IO_AUDCTL_ALLPOT: IO_AUDCTL_ALLPOT,
           IO_STIMER_KBCODE: IO_STIMER_KBCODE,
           IO_SKCTL_SKSTAT: IO_SKCTL_SKSTAT,
+          IO_IRQEN_IRQST: IO_IRQEN_IRQST,
           IO_SEROUT_SERIN: IO_SEROUT_SERIN,
           cycleTimedEventUpdate: cycleTimedEventUpdate,
         })
@@ -337,8 +340,16 @@
   const pokeyPotPrepareSkctlWrite = pokeyAudioApi.potPrepareSkctlWrite;
   const pokeyPotStartScan = pokeyAudioApi.potStartScan;
   const pokeyPotUpdate = pokeyAudioApi.potUpdate;
+  const pokeyPotReadValue = pokeyAudioApi.potReadValue;
+  const pokeyPotStepCycles = pokeyAudioApi.potStepCycles;
   const pokeyTimerPeriodCpuCycles = pokeyAudioApi.timerPeriodCpuCycles;
+  const pokeySerialOutputClockTimer = pokeyAudioApi.serialOutputClockTimer;
+  const pokeySerialOutputClockTimerExpired =
+    pokeyAudioApi.serialOutputClockTimerExpired;
+  const pokeyTraceEvent = pokeyAudioApi.traceEvent;
   const pokeyRestartTimers = pokeyAudioApi.restartTimers;
+  const pokeyEnterInitialization = pokeyAudioApi.enterInitialization;
+  const pokeyApplyTimerReset = pokeyAudioApi.applyTimerReset;
   const pokeyArmInactiveTimers = pokeyAudioApi.armInactiveTimers;
   const pokeySeroutWrite = pokeyAudioApi.seroutWrite;
   const pokeySerinRead = pokeyAudioApi.serinRead;
@@ -348,6 +359,7 @@
       ? window.A8EIo.createApi({
           CPU: CPU,
           CYCLES_PER_LINE: CYCLES_PER_LINE,
+          CYCLE_NEVER: CYCLE_NEVER,
           NMI_DLI: NMI_DLI,
           NMI_VBI: NMI_VBI,
           NMI_RESET: NMI_RESET,
@@ -392,6 +404,11 @@
           IO_HPOSP3_M3PF: IO_HPOSP3_M3PF,
           IO_HSCROL: IO_HSCROL,
           IO_IRQEN_IRQST: IO_IRQEN_IRQST,
+          IRQ_TIMER_1: IRQ_TIMER_1,
+          IRQ_TIMER_2: IRQ_TIMER_2,
+          IRQ_TIMER_4: IRQ_TIMER_4,
+          IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE:
+            IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE,
           IO_NMIEN: IO_NMIEN,
           IO_NMIRES_NMIST: IO_NMIRES_NMIST,
           IO_PACTL: IO_PACTL,
@@ -416,16 +433,23 @@
           IO_VDELAY: IO_VDELAY,
           IO_VSCROL: IO_VSCROL,
           IO_WSYNC: IO_WSYNC,
+          cycleTimedEventUpdate: cycleTimedEventUpdate,
           pokeyAudioSync: pokeyAudioSync,
           pokeyAudioOnRegisterWrite: pokeyAudioOnRegisterWrite,
+          pokeyTraceEvent: pokeyTraceEvent,
           pokeyPotPrepareSkctlWrite: pokeyPotPrepareSkctlWrite,
           pokeyPotStartScan: pokeyPotStartScan,
           pokeyRestartTimers: pokeyRestartTimers,
+          pokeyEnterInitialization: pokeyEnterInitialization,
           pokeyArmInactiveTimers: pokeyArmInactiveTimers,
           pokeySyncLfsr17: pokeySyncLfsr17,
           pokeySeroutWrite: pokeySeroutWrite,
           pokeySerinRead: pokeySerinRead,
           pokeyPotUpdate: pokeyPotUpdate,
+          pokeyPotReadValue: pokeyPotReadValue,
+          recordPmgRegisterWrite: function (ctx, address, value) {
+            return gtiaApi.recordPmgRegisterWrite(ctx, address, value);
+          },
         })
       : null;
   if (!ioApi) throw new Error("A8EIo is not loaded");
@@ -434,6 +458,7 @@
     window.A8EGtia && window.A8EGtia.createApi
       ? window.A8EGtia.createApi({
           PIXELS_PER_LINE: PIXELS_PER_LINE,
+          CYCLES_PER_LINE: CYCLES_PER_LINE,
           IO_COLPF3: IO_COLPF3,
           IO_COLPM0_TRIG2: IO_COLPM0_TRIG2,
           IO_COLPM1_TRIG3: IO_COLPM1_TRIG3,
@@ -517,11 +542,25 @@
           IO_COLPM0_TRIG2: IO_COLPM0_TRIG2,
           IO_PRIOR: IO_PRIOR,
           IO_HSCROL: IO_HSCROL,
+          PMG_REGISTER_ADDRESSES: [
+            IO_HPOSP0_M0PF, IO_HPOSP1_M1PF, IO_HPOSP2_M2PF, IO_HPOSP3_M3PF,
+            IO_HPOSM0_P0PF, IO_HPOSM1_P1PF, IO_HPOSM2_P2PF, IO_HPOSM3_P3PF,
+            IO_SIZEP0_M0PL, IO_SIZEP1_M1PL, IO_SIZEP2_M2PL, IO_SIZEP3_M3PL,
+            IO_SIZEM_P0PL,
+            IO_GRAFP0_P1PL, IO_GRAFP1_P2PL, IO_GRAFP2_P3PL, IO_GRAFP3_TRIG0,
+            IO_GRAFM_TRIG1,
+          ],
           ANTIC_MODE_INFO: ANTIC_MODE_INFO,
           drawPlayerMissilesClock: drawPlayerMissilesClock,
           fetchPmgDmaCycle: gtiaApi.fetchPmgDmaCycle,
+          fetchPhantomMissileDmaCycle: gtiaApi.fetchPhantomMissileDmaCycle,
           drawPlayerMissiles: drawPlayerMissiles,
           pokeyTimerPeriodCpuCycles: pokeyTimerPeriodCpuCycles,
+          pokeySerialOutputClockTimer: pokeySerialOutputClockTimer,
+          pokeySerialOutputClockTimerExpired:
+            pokeySerialOutputClockTimerExpired,
+          pokeyApplyTimerReset: pokeyApplyTimerReset,
+          pokeyTraceEvent: pokeyTraceEvent,
           cycleTimedEventUpdate: cycleTimedEventUpdate,
           PRIO_BKG: PRIO_BKG,
           PRIO_PF0: PRIO_PF0,
@@ -734,6 +773,19 @@
         skctl: ctx.sram[IO_SKCTL_SKSTAT] & 0xff,
         timer4PeriodCpuCycles: pokeyTimerPeriodCpuCycles(ctx, 4) >>> 0,
         timer4Cycle: io.timer4Cycle,
+        potScanActive: !!io.pokeyPotScanActive,
+        potCounter: io.pokeyPotCounter & 0xff,
+        potLastCycle: io.pokeyPotScanLastCycle >>> 0,
+        potTerminalCycle:
+          io.pokeyPotScanTerminalCycle === CYCLE_NEVER
+            ? null
+            : io.pokeyPotScanTerminalCycle >>> 0,
+        allpot: ctx.ram[IO_AUDCTL_ALLPOT] & 0xff,
+        pot0: ctx.ram[IO_AUDF1_POT0] & 0xff,
+        potStepCycles: pokeyPotStepCycles(ctx),
+        allpotIoMapped: ctx.accessFunctionList[IO_AUDCTL_ALLPOT] === ioAccess,
+        potgoIoMapped: ctx.accessFunctionList[IO_POTGO] === ioAccess,
+        skctlIoMapped: ctx.accessFunctionList[IO_SKCTL_SKSTAT] === ioAccess,
         cpuIrqPending: ctx.irqPending | 0,
         cpuInterruptMask: CPU.getPs(ctx) & 0x04 ? 1 : 0,
       };
@@ -778,6 +830,8 @@
       initHardwareDefaults: initHardwareDefaults,
       installIoHandlers: installIoHandlers,
       ioAccess: ioAccess,
+      piaSetControlLine: ioApi.piaSetControlLine,
+      piaCycleTimedEvent: ioApi.piaCycleTimedEvent,
       getOptionOnStart: function () {
         return optionOnStart;
       },
@@ -986,6 +1040,8 @@
     machine.ctx.ioData = makeIoData(video);
     machine.ctx.ioData.optionOnStart = optionOnStart;
     machine.ctx.ioData.sioTurbo = sioTurbo;
+    machine.ctx.ioData.piaSetControlLine = ioApi.piaSetControlLine;
+    machine.ctx.ioData.piaCycleTimedEvent = ioApi.piaCycleTimedEvent;
     machine.ctx.ioCycleTimedEventFunction = ioCycleTimedEvent;
     cycleTimedEventUpdate(machine.ctx);
 

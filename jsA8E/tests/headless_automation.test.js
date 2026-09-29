@@ -1,6 +1,7 @@
 /* global __dirname, console, process, require */
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 
 const { createHeadlessAutomation } = require("../headless");
@@ -8,10 +9,15 @@ const { createHeadlessAutomation } = require("../headless");
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 async function main() {
+  const repoRoot = path.resolve(__dirname, "..", "..");
+  const buildDir = path.join(repoRoot, "A8E", "build");
+  const romDir = fs.existsSync(path.join(repoRoot, "ATARIXL.ROM"))
+    ? repoRoot
+    : buildDir;
   const runtime = await createHeadlessAutomation({
     roms: {
-      os: path.resolve(__dirname, "..", "..", "ATARIXL.ROM"),
-      basic: path.resolve(__dirname, "..", "..", "ATARIBAS.ROM"),
+      os: path.join(romDir, "ATARIXL.ROM"),
+      basic: path.join(romDir, "ATARIBAS.ROM"),
     },
     turbo: true,
     frameDelayMs: 0,

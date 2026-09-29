@@ -310,7 +310,11 @@ function testMode2ExtendedRowsFollowAhrmMapping() {
   ctxBlank.ram[0] = 0x00;
   fetches.length = 0;
   api.drawLineMode2(ctxBlank);
-  assert.equal(fetches.length, 0, "row 8 must blank a non-descender character");
+  assert.deepEqual(
+    fetches,
+    [0],
+    "row 8 must fetch and discard a non-descender character byte",
+  );
 
   const ctxDesc = createCtx();
   ctxDesc.ioData.modeLineRowCounter = 9;
@@ -329,6 +333,28 @@ function testMode2ExtendedRowsFollowAhrmMapping() {
   fetches.length = 0;
   api.drawLineMode2(ctxWrap);
   assert.deepEqual(fetches, [4], "row 12 must repeat glyph row 4");
+
+  const ctxMode3Blank = createCtx();
+  ctxMode3Blank.ioData.modeLineRowCounter = 0;
+  ctxMode3Blank.ram[0] = 0x60;
+  fetches.length = 0;
+  api.drawLineMode3(ctxMode3Blank);
+  assert.deepEqual(
+    fetches,
+    [0x60 * 8],
+    "mode 3 descender row 0 must fetch and discard its character byte",
+  );
+
+  const ctxMode3Descender = createCtx();
+  ctxMode3Descender.ioData.modeLineRowCounter = 8;
+  ctxMode3Descender.ram[0] = 0x60;
+  fetches.length = 0;
+  api.drawLineMode3(ctxMode3Descender);
+  assert.deepEqual(
+    fetches,
+    [0x60 * 8],
+    "mode 3 descender row 8 must fetch physical row 0",
+  );
 }
 
 testMode2GtiaColorTableOnlyWhenPriorMode2();

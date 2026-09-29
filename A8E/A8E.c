@@ -71,12 +71,18 @@ int main(int argc, char *argv[])
 	{
 		if(argv[lIndex][0] == '-')
 		{
+			if(strcmp(argv[lIndex], "--option-on-start") == 0)
+			{
+				lMode |= ATARI_MODE_OPTION_ON_START;
+				continue;
+			}
 			if(strcmp(argv[lIndex], "-128K") == 0 || strcmp(argv[lIndex], "-128k") == 0)
 			{
 				eMemoryExpansion = ATARI_MEMORY_130XE_128K;
 				continue;
 			}
 			if(strcmp(argv[lIndex], "-192R") == 0) { eMemoryExpansion = ATARI_MEMORY_RAMBO_192K; continue; }
+			if(strcmp(argv[lIndex], "-256R") == 0) { eMemoryExpansion = ATARI_MEMORY_RAMBO_256K; continue; }
 			if(strcmp(argv[lIndex], "-320R") == 0) { eMemoryExpansion = ATARI_MEMORY_RAMBO_320K; continue; }
 			if(strcmp(argv[lIndex], "-320C") == 0) { eMemoryExpansion = ATARI_MEMORY_COMPY_320K; continue; }
 			if(strcmp(argv[lIndex], "-576R") == 0) { eMemoryExpansion = ATARI_MEMORY_RAMBO_576K; continue; }
@@ -87,7 +93,15 @@ int main(int argc, char *argv[])
 			{
 			case 'b':
 			case 'B':
-				lMode = 1;
+				/* Retained as a compatibility alias: BASIC is now the normal
+				 * hardware state, so this option needs no runtime flag. */
+				lMode &= ~ATARI_MODE_OPTION_ON_START;
+
+				break;
+
+			case 'o':
+			case 'O':
+				lMode |= ATARI_MODE_OPTION_ON_START;
 
 				break;
 
@@ -128,6 +142,7 @@ int main(int argc, char *argv[])
 	{
 	case ATARI_MEMORY_130XE_128K: strcpy(cMemoryTitle, "128K (130XE)"); break;
 	case ATARI_MEMORY_RAMBO_192K: strcpy(cMemoryTitle, "192K (RAMBO)"); break;
+	case ATARI_MEMORY_RAMBO_256K: strcpy(cMemoryTitle, "256K (RAMBO)"); break;
 	case ATARI_MEMORY_RAMBO_320K: strcpy(cMemoryTitle, "320K (RAMBO)"); break;
 	case ATARI_MEMORY_COMPY_320K: strcpy(cMemoryTitle, "320K (COMPY)"); break;
 	case ATARI_MEMORY_RAMBO_576K: strcpy(cMemoryTitle, "576K (RAMBO)"); break;

@@ -17,7 +17,7 @@ This file is a handoff note for the next session.
 
 - PAL and NTSC selection works through boot and reset.
 - `peek(53268)` distinguishes the video standard as expected from the browser console.
-- Browser and native AHRM profiles cover 130XE, 192K/320K/576K/1088K RAMBO,
+- Browser and native AHRM profiles cover 130XE, 192K/256K/320K/576K/1088K RAMBO,
   both COMPY variants, and the initial U1MB model.
 - Generic browser memory, XEX, ANTIC, CPU, POKEY, snapshot, automation, and MCP
   regressions pass; native CMake probes cover the corresponding hardware paths.
