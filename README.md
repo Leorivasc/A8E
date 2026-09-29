@@ -7,7 +7,7 @@
 Atari 800 XL emulator with two implementations in this repository:
 
 - `A8E/`: native C/SDL emulator
-- `jsA8E/`: browser JavaScript port (WebGL with CRT post-process, plus 2D canvas fallback)
+- `jsA8E/`: browser JavaScript port (WebGL with optional CRT post-process, plus 2D canvas fallback)
 
 The original codebase is by Sascha Springer (2004). Each subproject has its own README with detailed usage/build notes.
 
@@ -35,10 +35,12 @@ Both emulator cores currently include the following raster-timing behavior:
 - The VBI follows the AHRM cycle-7 NMIST / cycle-8 NMI model with full NMIEN cycle-7/8 gating, matching the DLI path.
 - Vertical scrolling runs on a live 4-bit mode-line row counter with the AHRM VSCROL deadlines (entry latch at cycle 0, exit comparison through cycle 108, DLI decision through cycle 5), enabling GTIA 9++-style extended mode lines and mid-line VSCROL rewrites.
 - Mid-scanline CHBASE writes latch with the AHRM 2-color-clock delay in both cores.
+- POKEY timer, serial, paddle, and keyboard-IRQ behavior is covered by shared native/JavaScript regression contracts; linked timer modes retain their intermediate audio transitions.
+- Player/missile DMA follows the AHRM DMACTL timing gate, VDELAY latch behavior, and the current GTIA/PMG compositor model.
 
 PAL and NTSC machine timing, palettes, `$D014`, POKEY behavior, XEX/ATR loading, and the browser WebGL/2D rendering paths are implemented in the corresponding native and browser cores.
 
-The legacy-style per-color-clock rendering pass is implemented in both cores. Remaining work is verification against real raster-effect content (including VSCROL corner cases such as Atomix Plus! and GTIA 9++ demos) and any localized title-specific timing differences found during that sweep.
+The legacy-style per-color-clock rendering pass is implemented in both cores. The AHRM-07 synthetic PMG/GTIA diagnostic is certified for its stated scope; broader title-level visual comparisons, analog POKEY calibration, and the accepted jsA8E P1 CPU/POKEY phase follow-up remain separate validation work.
 
 For the current verification checklist and signoff notes, see [legacy/COLOR_CLOCK_ACCURACY.md](legacy/COLOR_CLOCK_ACCURACY.md).
 
@@ -51,6 +53,7 @@ The native and browser implementations support the AHRM memory-map profiles belo
 | 64K | *(default)* | `none` |
 | 128K (130XE) | `-128K` | `130xe-128k` |
 | 192K (RAMBO) | `-192R` | `rambo-192k` |
+| 256K (RAMBO) | `-256R` | `rambo-256k` |
 | 320K (RAMBO) | `-320R` | `rambo-320k` |
 | 320K (COMPY) | `-320C` | `compy-320k` |
 | 576K (RAMBO) | `-576R` | `rambo-576k` |
@@ -62,6 +65,21 @@ RAMBO and COMPY bank-bit layouts, CPU/ANTIC window behavior, BASIC/Self-Test ove
 
 The repository includes two standalone Atari diagnostics for expanded-memory validation: [`U1MB_MEMORY_TEST.XEX`](implementation/U1MB_MEMORY_TEST.XEX) performs full bank, system-window, configuration, and visual ANTIC checks; [`MEMORY_STRESS_TEST.XEX`](implementation/MEMORY_STRESS_TEST.XEX) performs repeated bank-switching and PORTB-map checks. See [implementation/memory_tests.md](implementation/memory_tests.md).
 
+### Browser Presentation
+
+The browser toolbar includes a persistent **CRT** toggle. CRT is enabled by
+default; disabling it bypasses the WebGL post-process and renders the indexed
+framebuffer and palette directly with nearest-neighbor sampling for a clean,
+sharp image. The setting applies immediately in both worker and main-thread
+backends and is saved between sessions. The 2D canvas fallback already renders
+without CRT post-processing.
+
+The presentation selector provides `Emulation`, `Work`, and `Development`
+layouts. The selected layout is saved locally; `Work` is the default when no
+preference exists. The toolbar also provides display and workspace fullscreen,
+CPU and SIO turbo, audio, virtual joystick and keyboard, HostFS, Disk Library,
+assembler/debugger, and snapshot controls.
+
 ### Regression Tests
 
 The browser regression suite can be run without a browser or ROM files:
@@ -72,6 +90,11 @@ npm run test:automation
 ```
 
 The native CMake project includes probe targets for ANTIC timing, ANTIC DMA and graphics modes, POKEY POT scanning, and memory-expansion behavior. Configure with `-DBUILD_TESTING=ON` to include those targets in the build.
+
+The current alignment baseline is covered by the full JavaScript automation
+suite and the native CTest probes, including shared PIA/PORTB, POKEY,
+ANTIC/NMI, and PMG/DMACTL contract fixtures. Detailed scope boundaries and
+open validation items are tracked in [implementation/NOTES.md](implementation/NOTES.md).
 
 ### Compatibility Validation
 
