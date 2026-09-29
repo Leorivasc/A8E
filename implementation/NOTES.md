@@ -4,6 +4,13 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-28: `A8E/Pokey.c` and `jsA8E/js/core/pokey.js` now preserve the
+  AHRM 5.3 linked-timer low-channel audio path. The low channel emits its
+  initial AUDF-derived pulse and subsequent 256-tick pulses while linked, is
+  mixed normally, and channel 3 can still clock channel 1's high-pass latch.
+  Linked modes remain cycle-stepped in JS so these intermediate transitions
+  cannot be skipped by the independent-channel fast path.
+
 - 2026-09-28: `A8E/{AtariIo.h,Pokey.c}` and
   `jsA8E/js/core/{state,pokey}.js` now retain per-channel POT residual charge
   across an early `POTGO`, per AHRM 5.9. A restarted scan subtracts the

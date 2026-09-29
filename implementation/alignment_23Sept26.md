@@ -640,6 +640,10 @@ Status: **in progress; digital timer/SIO, live POT reads, and continuous ALLPOT 
   roughly 100 CPU cycles. Fast scan retains charge because it disables the
   dump transistors. Native and JS probes cover the documented 64-count
   truncated-scan case.
+- Linked POKEY timers now retain the low channel's audio clocking path in both
+  cores: it emits its initial low-divisor pulse and subsequent 256-tick pulses
+  before the high channel resets the pair. This also restores the channel-3
+  high-pass source for linked channels 3+4.
 - Added `implementation/traces/pokey_timer_contract.jsonl`, consumed by both
   native and JS probes, for the shared AUDF=0 normal/fast/linked timer
   contract. This is a digital period contract, not a claim of cycle-perfect
