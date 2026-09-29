@@ -718,10 +718,20 @@ Completion boundary requiring external reference:
   `AUDF`-derived timer period. Native CTest and jsA8E automation consume the
   same fixture, extending the AHRM-09 differential harness without changing
   runtime timing behavior.
+- `implementation/traces/pokey_pot_contract.jsonl` is consumed by both POT
+  scan probes for the AHRM 5.9 truncated-scan sequence, extending the shared
+  harness beyond PIA and digital timer/SIO contracts.
+- `implementation/traces/pokey_keyboard_irq_contract.jsonl` is consumed by
+  native and JS keyboard IRQ probes for the AHRM 5.7/5.8 masked and enabled
+  key outcomes. CPU pending is intentionally asserted in runner-specific
+  tests at each core's instruction boundary.
+- `implementation/traces/antic_nmi_contract.jsonl` is consumed by both
+  ANTIC timing probes for the AHRM 4.8 DLI cycle-7 `NMIST` and cycle-8 NMI
+  boundary. Late `NMIEN` variations remain covered in the same probes.
 
 ### AHRM-09: Build a cross-core AHRM differential harness
 
-Status: **foundation implemented; expand incrementally with each AHRM item**
+Status: **complete for the current digital alignment scope; extend when a new AHRM feature gains a deterministic observable contract**
 
 Priority: **P3**, but useful before completing P1/P2 work.
 
@@ -764,10 +774,24 @@ Acceptance criteria:
 
 - A change to one core cannot silently alter the other core's documented
   behavior.
-- The implemented PIA/PORTB contract has a reproducible regression trace;
-  each subsequent AHRM item must add its own fixture before being marked
-  complete.
+- The implemented PIA/PORTB, POKEY, ANTIC/NMI, and PMG/DMACTL contracts have
+  reproducible regression traces; each subsequent AHRM item must add its own
+  fixture before being marked complete.
 - Normal emulation has no measurable trace overhead when diagnostics are off.
+
+Current shared fixtures:
+
+- `pia_portb_contract.jsonl`: PIA DDRB/ORB and pull-ups.
+- `pokey_timer_contract.jsonl` and `pokey_sio_contract.jsonl`: timer periods
+  and all SIO clock modes.
+- `pokey_pot_contract.jsonl` and `pokey_keyboard_irq_contract.jsonl`:
+  truncated paddle scans and keyboard IRQ gating.
+- `antic_nmi_contract.jsonl`: DLI `NMIST`/NMI boundaries and late `NMIEN`.
+- `pmg_dmactl_contract.jsonl`: AHRM 4.13 delayed P/M DMA enables and latches.
+
+Audio calibration and title-level visual comparison are deliberately outside
+this digital harness; they remain external-reference work under AHRM-08 and
+AHRM-07.
 
 ## Recommended execution order
 

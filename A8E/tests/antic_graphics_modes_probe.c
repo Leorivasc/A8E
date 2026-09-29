@@ -624,8 +624,19 @@ static int TestPmgDmaCtlTakesEffectAfterTwoCycles(void)
 	ProbeMachine_t tMachine = ProbeMachine_Open();
 	_6502_Context_t *pContext = tMachine.pContext;
 	IoData_t *pIoData = tMachine.pIoData;
+	FILE *pFixture;
+	char aLine[256], aStep[64];
+	unsigned uDmactl0, uOne0, uTwo0, uCycle0, uLatch0, uSteal0;
+	unsigned uDmactl1, uOne1, uTwo1, uCycle1, uLatch1, uSteal1;
+	unsigned uDmactl2, uOne2, uTwo2, uCycle2, uLatch2, uSteal2;
 
 	REQUIRE(pContext != NULL, "machine open failed");
+	pFixture = fopen("implementation/traces/pmg_dmactl_contract.jsonl", "r");
+	REQUIRE(pFixture != NULL, "cannot open PMG DMACTL fixture");
+	REQUIRE(fgets(aLine, sizeof(aLine), pFixture) && sscanf(aLine, "{\"step\":\"%63[^\"]\",\"dmactl\":%u,\"one_ago\":%u,\"two_ago\":%u,\"cycle\":%u,\"latch\":%u,\"steal\":%u}", aStep, &uDmactl0, &uOne0, &uTwo0, &uCycle0, &uLatch0, &uSteal0) == 7, "invalid PMG fixture row 1");
+	REQUIRE(fgets(aLine, sizeof(aLine), pFixture) && sscanf(aLine, "{\"step\":\"%63[^\"]\",\"dmactl\":%u,\"one_ago\":%u,\"two_ago\":%u,\"cycle\":%u,\"latch\":%u,\"steal\":%u}", aStep, &uDmactl1, &uOne1, &uTwo1, &uCycle1, &uLatch1, &uSteal1) == 7, "invalid PMG fixture row 2");
+	REQUIRE(fgets(aLine, sizeof(aLine), pFixture) && sscanf(aLine, "{\"step\":\"%63[^\"]\",\"dmactl\":%u,\"one_ago\":%u,\"two_ago\":%u,\"cycle\":%u,\"latch\":%u,\"steal\":%u}", aStep, &uDmactl2, &uOne2, &uTwo2, &uCycle2, &uLatch2, &uSteal2) == 7, "invalid PMG fixture row 3");
+	fclose(pFixture);
 
 	ProbeMachine_ResetVideo(&tMachine);
 	pIoData->llDisplayListFetchCycle = 0;
@@ -642,32 +653,32 @@ static int TestPmgDmaCtlTakesEffectAfterTwoCycles(void)
 	RAM[0x2408] = 0x5a;
 
 	/* AHRM 4.13: DMACTL=$32 on cycle 113 is too late to cancel cycle 0. */
-	SRAM[IO_DMACTL] = 0x32;
+	SRAM[IO_DMACTL] = (u8)uDmactl0;
 	pIoData->bPmgDmaCtlTimingInitialized = 1;
-	pIoData->cPmgDmaCtlOneCycleAgo = 0x32;
-	pIoData->cPmgDmaCtlTwoCyclesAgo = 0x3e;
-	pIoData->llCycle = 0;
-	pContext->llCycleCounter = 0;
+	pIoData->cPmgDmaCtlOneCycleAgo = (u8)uOne0;
+	pIoData->cPmgDmaCtlTwoCyclesAgo = (u8)uTwo0;
+	pIoData->llCycle = uCycle0;
+	pContext->llCycleCounter = uCycle0;
 	AtariIoTimingProbeStepClock(pContext);
-	REQUIRE(SRAM[IO_GRAFM_TRIG1] == 0xa5,
+	REQUIRE(SRAM[IO_GRAFM_TRIG1] == uLatch0,
 			"late DMACTL disable suppressed the next line's missile fetch");
 	REQUIRE(pContext->llCycleCounter == 1,
 			"late DMACTL disable did not retain the missile DMA steal");
 
 	/* Player DMA starts at cycle 2, after the two-cycle delay has elapsed. */
-	pIoData->llCycle = 2;
-	pContext->llCycleCounter = 2;
+	pIoData->llCycle = uCycle1;
+	pContext->llCycleCounter = uCycle1;
 	AtariIoTimingProbeStepClock(pContext);
-	REQUIRE(SRAM[IO_GRAFP0_P1PL] == 0x4c,
+	REQUIRE(SRAM[IO_GRAFP0_P1PL] == uLatch1,
 			"late DMACTL disable incorrectly kept player DMA active at cycle 2");
 	REQUIRE(pContext->llCycleCounter == 2,
 			"disabled player DMA stole cycle 2 after the delay elapsed");
 
 	/* Enabling P/M DMA likewise waits two cycles before player cycle 2. */
-	SRAM[IO_DMACTL] = 0x3e;
+	SRAM[IO_DMACTL] = (u8)uDmactl2;
 	pIoData->bPmgDmaCtlTimingInitialized = 1;
-	pIoData->cPmgDmaCtlOneCycleAgo = 0x32;
-	pIoData->cPmgDmaCtlTwoCyclesAgo = 0x32;
+	pIoData->cPmgDmaCtlOneCycleAgo = (u8)uOne2;
+	pIoData->cPmgDmaCtlTwoCyclesAgo = (u8)uTwo2;
 	pIoData->llCycle = 0;
 	pContext->llCycleCounter = 0;
 	AtariIoTimingProbeStepClock(pContext);
@@ -676,10 +687,10 @@ static int TestPmgDmaCtlTakesEffectAfterTwoCycles(void)
 	pIoData->llCycle = 1;
 	pContext->llCycleCounter = 1;
 	AtariIoTimingProbeStepClock(pContext);
-	pIoData->llCycle = 2;
-	pContext->llCycleCounter = 2;
+	pIoData->llCycle = uCycle2;
+	pContext->llCycleCounter = uCycle2;
 	AtariIoTimingProbeStepClock(pContext);
-	REQUIRE(SRAM[IO_GRAFP0_P1PL] == 0x5a,
+	REQUIRE(SRAM[IO_GRAFP0_P1PL] == uLatch2,
 			"DMACTL enable did not start player DMA after two ANTIC cycles");
 	REQUIRE(pContext->llCycleCounter == 3,
 			"enabled player DMA did not steal cycle 2 after the delay");

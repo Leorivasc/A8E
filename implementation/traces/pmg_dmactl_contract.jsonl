@@ -1,0 +1,3 @@
+{"step":"late-disable-missile","dmactl":50,"one_ago":50,"two_ago":62,"cycle":0,"latch":165,"steal":1}
+{"step":"late-disable-player","dmactl":50,"one_ago":50,"two_ago":62,"cycle":2,"latch":76,"steal":0}
+{"step":"late-enable-player","dmactl":62,"one_ago":50,"two_ago":50,"cycle":2,"latch":90,"steal":1}

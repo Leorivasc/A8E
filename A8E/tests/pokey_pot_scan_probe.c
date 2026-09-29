@@ -26,6 +26,7 @@ typedef struct
 	} while(0)
 
 #define POKEY_POT_DEFAULT_VALUE 229
+#define A8E_POT_TRACE_FIXTURE_PATH "implementation/traces/pokey_pot_contract.jsonl"
 
 static ProbeMachine_t ProbeMachine_Open(void)
 {
@@ -280,19 +281,29 @@ static int TestEarlyPotgoRetainsResidualCharge(void)
 	_6502_Context_t *pContext = tMachine.pContext;
 	IoData_t *pIoData = tMachine.pIoData;
 	u32 i;
+	FILE *pFixture;
+	char aLine[256];
+	char aStep[96];
+	unsigned uSkctl, uTarget, uFirst, uSecond, uPot0, uAllpot;
 
 	REQUIRE(pContext != NULL, "machine open failed");
+	pFixture = fopen(A8E_POT_TRACE_FIXTURE_PATH, "r");
+	REQUIRE(pFixture != NULL, "cannot open POT fixture");
+	REQUIRE(fgets(aLine, sizeof(aLine), pFixture) != NULL, "POT fixture is empty");
+	fclose(pFixture);
+	REQUIRE(sscanf(aLine, "{\"step\":\"%95[^\"]\",\"skctl\":%u,\"target\":%u,\"first\":%u,\"second\":%u,\"pot0\":%u,\"allpot\":%u}", aStep, &uSkctl, &uTarget, &uFirst, &uSecond, &uPot0, &uAllpot) == 7, "invalid POT fixture");
 	ProbeMachine_ResetPotState(&tMachine);
-	for(i = 0; i < 8; i++) pIoData->aPotValues[i] = 100;
+	pContext->pShadowMemory[IO_SKCTL_SKSTAT] = (u8)uSkctl;
+	for(i = 0; i < 8; i++) pIoData->aPotValues[i] = (u8)uTarget;
 	Pokey_PotStartScan(pContext);
-	pContext->llCycleCounter = 64 * CYCLES_PER_LINE;
+	pContext->llCycleCounter = (u64)uFirst * CYCLES_PER_LINE;
 	Pokey_PotUpdate(pContext);
 	Pokey_PotStartScan(pContext);
-	pContext->llCycleCounter += 36 * CYCLES_PER_LINE;
+	pContext->llCycleCounter += (u64)uSecond * CYCLES_PER_LINE;
 	Pokey_PotUpdate(pContext);
-	REQUIRE(pContext->pMemory[IO_AUDF1_POT0] == 36 &&
-		pContext->pMemory[IO_AUDCTL_ALLPOT] == 0x00,
-		"early POTGO did not retain the prior 64 counts of charge");
+	REQUIRE(pContext->pMemory[IO_AUDF1_POT0] == uPot0 &&
+		pContext->pMemory[IO_AUDCTL_ALLPOT] == uAllpot,
+		"POT fixture %s mismatch", aStep);
 	ProbeMachine_Close(&tMachine);
 	return 1;
 }

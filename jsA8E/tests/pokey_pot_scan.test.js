@@ -205,16 +205,20 @@ function testInputBelowThresholdReassertsAllpot() {
 function testEarlyPotgoRetainsResidualCharge() {
   const api = loadPokeyApi();
   const ctx = makeContext();
-  ctx.sram[IO_SKCTL_SKSTAT] = 0x03;
-  ctx.ioData.pokeyPotValues.fill(100);
+  const testCase = JSON.parse(fs.readFileSync(
+    path.join(__dirname, "..", "..", "implementation", "traces", "pokey_pot_contract.jsonl"),
+    "utf8",
+  ));
+  ctx.sram[IO_SKCTL_SKSTAT] = testCase.skctl;
+  ctx.ioData.pokeyPotValues.fill(testCase.target);
   api.potStartScan(ctx);
-  ctx.cycleCounter = 64 * CYCLES_PER_LINE;
+  ctx.cycleCounter = testCase.first * CYCLES_PER_LINE;
   api.potUpdate(ctx);
   api.potStartScan(ctx);
-  ctx.cycleCounter += 36 * CYCLES_PER_LINE;
+  ctx.cycleCounter += testCase.second * CYCLES_PER_LINE;
   api.potUpdate(ctx);
-  assert.equal(ctx.ram[IO_AUDF1_POT0], 36);
-  assert.equal(ctx.ram[IO_AUDCTL_ALLPOT], 0x00);
+  assert.equal(ctx.ram[IO_AUDF1_POT0], testCase.pot0, testCase.step);
+  assert.equal(ctx.ram[IO_AUDCTL_ALLPOT], testCase.allpot, testCase.step);
 }
 
 function main() {
