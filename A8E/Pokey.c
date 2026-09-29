@@ -522,6 +522,19 @@ static u8 PokeyAudio_PairTick(
 {
 	u32 period = (((u32)pChHigh->audf) << 8) | (u32)pChLow->audf;
 	u32 reload;
+	u8 cPulses = 0;
+
+	/* AHRM 5.3: linking suppresses the low counter's automatic reload,
+	 * but it still clocks its audio output: first after AUDF low, then every
+	 * 256 input ticks until the pair is reset. */
+	if(pChLow->counter > 0)
+		pChLow->counter--;
+	if(pChLow->counter == 0)
+	{
+		pChLow->counter = 256;
+		PokeyAudio_ChannelClockOut(pPokey, pChLow, audctl);
+		cPulses |= 1;
+	}
 
 	if(pChHigh->counter > 0)
 	{
@@ -530,7 +543,7 @@ static u8 PokeyAudio_PairTick(
 
 	if(pChHigh->counter != 0)
 	{
-		return 0;
+		return cPulses;
 	}
 
 	reload = period + 1u;
@@ -545,7 +558,7 @@ static u8 PokeyAudio_PairTick(
 	pChHigh->counter = reload ? reload : 1u;
 
 	PokeyAudio_ChannelClockOut(pPokey, pChHigh, audctl);
-	return 1;
+	return (u8)(cPulses | 2);
 }
 
 static void PokeyAudio_StepCpuCycle(
@@ -606,11 +619,12 @@ static void PokeyAudio_StepCpuCycle(
 
 	if(pair34)
 	{
-		/* In 16-bit pair mode ch3 is a prescaler; only ch4 (chHigh) independently
-		   underflows.  pulse2 (ch3 clock used for HP filter on ch1) stays 0. */
+		u8 cPairPulses;
 		if(pChannels[2].clk_div_cycles == 1)
 		{
-			pulse3 = PokeyAudio_PairTick(pPokey, &pChannels[2], &pChannels[3], audctl);
+			cPairPulses = PokeyAudio_PairTick(pPokey, &pChannels[2], &pChannels[3], audctl);
+			pulse2 = cPairPulses & 1;
+			pulse3 = (cPairPulses >> 1) & 1;
 		}
 		else
 		{
@@ -618,7 +632,9 @@ static void PokeyAudio_StepCpuCycle(
 			if(pChannels[2].clk_acc_cycles >= pChannels[2].clk_div_cycles)
 			{
 				pChannels[2].clk_acc_cycles -= pChannels[2].clk_div_cycles;
-				pulse3 = PokeyAudio_PairTick(pPokey, &pChannels[2], &pChannels[3], audctl);
+				cPairPulses = PokeyAudio_PairTick(pPokey, &pChannels[2], &pChannels[3], audctl);
+				pulse2 = cPairPulses & 1;
+				pulse3 = (cPairPulses >> 1) & 1;
 			}
 		}
 	}
@@ -701,14 +717,6 @@ static int32_t PokeyAudio_MixCycleLevel(PokeyState_t *pPokey, PokeyAudioChannel_
 
 	for(i = 0; i < 4; i++)
 	{
-		if(i == 0 && pair12)
-		{
-			continue;
-		}
-		if(i == 2 && pair34)
-		{
-			continue;
-		}
 
 		u8 audc = pChannels[i].audc;
 		u8 vol = (u8)(audc & 0x0f);
@@ -1203,12 +1211,12 @@ void Pokey_DebugFrame(_6502_Context_t *pContext)
 		SDL_LockAudio();
 	}
 	audioStatus = SDL_GetAudioStatus();
-	fprintf(pPokey->pDebugFile, "%llu,%s,%u,%u,%u,%llu,%llu,%llu,%llu,%d\n",
+	fprintf(pPokey->pDebugFile, "%llu,%s,%lu,%lu,%lu,%llu,%llu,%llu,%llu,%d\n",
 			pPokey->debugFrame++,
 			pStandard,
-			pPokey->cpu_hz,
-			pPokey->sample_rate_hz,
-			pPokey->ring_count,
+			(unsigned long)pPokey->cpu_hz,
+			(unsigned long)pPokey->sample_rate_hz,
+			(unsigned long)pPokey->ring_count,
 			pPokey->debugSamplesGenerated,
 			pPokey->debugSamplesConsumed,
 			pPokey->debugUnderruns,
@@ -1999,6 +2007,7 @@ void Pokey_ApplyTimerReset(_6502_Context_t *pContext)
 		{
 			u32 p12 = (((u32)pPokey->aChannels[1].audf) << 8) | (u32)pPokey->aChannels[0].audf;
 			pPokey->aChannels[1].counter = (pPokey->audctl & 0x40) ? (p12 + 7u) : (p12 + 1u);
+			pPokey->aChannels[0].counter = (pPokey->audctl & 0x40) ? ((u32)pPokey->aChannels[0].audf + 4u) : ((u32)pPokey->aChannels[0].audf + 1u);
 		}
 		else
 		{
@@ -2009,6 +2018,7 @@ void Pokey_ApplyTimerReset(_6502_Context_t *pContext)
 		{
 			u32 p34 = (((u32)pPokey->aChannels[3].audf) << 8) | (u32)pPokey->aChannels[2].audf;
 			pPokey->aChannels[3].counter = (pPokey->audctl & 0x20) ? (p34 + 7u) : (p34 + 1u);
+			pPokey->aChannels[2].counter = (pPokey->audctl & 0x20) ? ((u32)pPokey->aChannels[2].audf + 4u) : ((u32)pPokey->aChannels[2].audf + 1u);
 		}
 		else
 		{

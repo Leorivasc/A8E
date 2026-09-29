@@ -134,30 +134,53 @@ static void ProbeMachine_TriggerBeamEvent(ProbeMachine_t *pMachine, u64 llBeamCy
 	pIoData->bInDrawLine = 0;
 }
 
+static int ReadNmiContractRow(unsigned uRow, unsigned *pClock, unsigned *pNmist, unsigned *pNmi)
+{
+	FILE *pFile = fopen("implementation/traces/antic_nmi_contract.jsonl", "r");
+	char aLine[160], aStep[64];
+	unsigned i;
+	if(!pFile) return 0;
+	for(i = 0; i <= uRow; i++) if(!fgets(aLine, sizeof(aLine), pFile)) { fclose(pFile); return 0; }
+	fclose(pFile);
+	return sscanf(aLine, "{\"step\":\"%63[^\"]\",\"clock\":%u,\"nmist\":%u,\"nmi\":%u}", aStep, pClock, pNmist, pNmi) == 4;
+}
+
 static int TestDliTriggersAtCycle8(void)
 {
 	ProbeMachine_t tMachine = ProbeMachine_Open();
 	_6502_Context_t *pContext = tMachine.pContext;
 	IoData_t *pIoData = tMachine.pIoData;
+	FILE *pFixture;
+	char aLine[160], aStep[64];
+	unsigned uClock7, uNmist7, uNmi7, uClock8, uNmist8, uNmi8;
 
 	REQUIRE(pContext != NULL, "machine open failed");
+	pFixture = fopen("implementation/traces/antic_nmi_contract.jsonl", "r");
+	REQUIRE(pFixture != NULL, "cannot open ANTIC NMI fixture");
+	REQUIRE(fgets(aLine, sizeof(aLine), pFixture) != NULL &&
+		sscanf(aLine, "{\"step\":\"%63[^\"]\",\"clock\":%u,\"nmist\":%u,\"nmi\":%u}", aStep, &uClock7, &uNmist7, &uNmi7) == 4,
+		"invalid first ANTIC NMI fixture event");
+	REQUIRE(fgets(aLine, sizeof(aLine), pFixture) != NULL &&
+		sscanf(aLine, "{\"step\":\"%63[^\"]\",\"clock\":%u,\"nmist\":%u,\"nmi\":%u}", aStep, &uClock8, &uNmist8, &uNmi8) == 4,
+		"invalid second ANTIC NMI fixture event");
+	fclose(pFixture);
 
 	ProbeMachine_ResetTiming(&tMachine);
 
-	pIoData->llDliCycle = 7;
+	pIoData->llDliCycle = uClock7;
 	pContext->pShadowMemory[IO_NMIEN] = NMI_DLI;
 	pIoData->cNmienEnabledByCycle7 = NMI_DLI;
 	pIoData->cNmienEnabledByCycle8 = NMI_DLI;
 
-	ProbeMachine_TriggerBeamEvent(&tMachine, 7, 7);
-	REQUIRE(pContext->cNmiPendingFlag == 0, "DLI fired before cycle 8");
-	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_DLI) != 0,
+	ProbeMachine_TriggerBeamEvent(&tMachine, uClock7, uClock7);
+	REQUIRE(pContext->cNmiPendingFlag == uNmi7, "DLI cycle-7 NMI mismatch");
+	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_DLI) == uNmist7,
 			"NMIST DLI bit missing at cycle 7");
 
-	ProbeMachine_TriggerBeamEvent(&tMachine, 8, 8);
-	REQUIRE(pContext->cNmiPendingFlag == 1, "DLI did not trigger on cycle 8");
+	ProbeMachine_TriggerBeamEvent(&tMachine, uClock8, uClock8);
+	REQUIRE(pContext->cNmiPendingFlag == uNmi8, "DLI cycle-8 NMI mismatch");
 	REQUIRE(pIoData->llDliCycle == CYCLE_NEVER, "DLI cycle was not cleared after firing");
-	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_DLI) != 0,
+	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_DLI) == uNmist8,
 			"NMIST DLI bit missing after cycle-8 trigger");
 
 	ProbeMachine_Close(&tMachine);
@@ -269,8 +292,10 @@ static int TestVbiEnableOnCycle7DelaysByOneCycle(void)
 	_6502_Context_t *pContext = tMachine.pContext;
 	IoData_t *pIoData = tMachine.pIoData;
 	u8 cValue = NMI_VBI;
+	unsigned uClock, uNmist, uNmi;
 
 	REQUIRE(pContext != NULL, "machine open failed");
+	REQUIRE(ReadNmiContractRow(2, &uClock, &uNmist, &uNmi), "invalid delayed VBI fixture");
 
 	ProbeMachine_ResetTiming(&tMachine);
 
@@ -290,8 +315,8 @@ static int TestVbiEnableOnCycle7DelaysByOneCycle(void)
 	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_VBI) != 0,
 			"cycle-7 delayed VBI did not still latch NMIST");
 
-	ProbeMachine_TriggerBeamEvent(&tMachine, 9, 9);
-	REQUIRE(pContext->cNmiPendingFlag == 1,
+	ProbeMachine_TriggerBeamEvent(&tMachine, uClock, uClock);
+	REQUIRE(pContext->cNmiPendingFlag == uNmi,
 			"delayed VBI did not trigger on the following cycle");
 	REQUIRE(pIoData->llVbiCycle == CYCLE_NEVER,
 			"delayed VBI cycle was not cleared after firing");
@@ -306,8 +331,10 @@ static int TestVbiDisableOnCycle8SuppressesCurrentLine(void)
 	_6502_Context_t *pContext = tMachine.pContext;
 	IoData_t *pIoData = tMachine.pIoData;
 	u8 cValue = 0x00;
+	unsigned uClock, uNmist, uNmi;
 
 	REQUIRE(pContext != NULL, "machine open failed");
+	REQUIRE(ReadNmiContractRow(3, &uClock, &uNmist, &uNmi), "invalid suppressed VBI fixture");
 
 	ProbeMachine_ResetTiming(&tMachine);
 

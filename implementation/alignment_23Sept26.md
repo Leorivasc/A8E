@@ -500,7 +500,10 @@ Acceptance criteria:
   register values of the line.
 - PMG pixels and collision registers match the AHRM/Altirra reference cases.
 
-Status: **implemented and probe-validated on 2026-09-25; real-content validation pending**.
+Status: **diagnostic scope certified on 2026-09-27**. The synthetic probes,
+the two-phase visual diagnostic, Altirra comparison, and visual hardware
+comparison are complete. Broader title-level comparison remains regression
+work, not an unclosed AHRM-07 acceptance criterion.
 
 Implemented in both A8E and jsA8E:
 
@@ -585,9 +588,9 @@ Viability: **high** for timers/SIO and **medium** for audio/paddles.
 
 Current gap:
 
-- Timer and SIO behavior is substantially aligned. The shared eight-mode
-  SIO clock/timer-period contract now provides the first broader cross-core
-  differential fixture; exact STIMER phase still needs an external trace.
+- Timer and SIO behavior is certified at the Stage 2 guest and shared-contract
+  scope. jsA8E's P1 STIMER-to-SEROUT phase remains an explicitly accepted,
+  contained CPU/POKEY arbitration deviation.
 - The audio mixer, DAC curve, DC blocker, clipping, and paddle model are
   approximations rather than a complete analog POKEY model.
 
@@ -640,6 +643,10 @@ Status: **in progress; digital timer/SIO, live POT reads, and continuous ALLPOT 
   roughly 100 CPU cycles. Fast scan retains charge because it disables the
   dump transistors. Native and JS probes cover the documented 64-count
   truncated-scan case.
+- Linked POKEY timers now retain the low channel's audio clocking path in both
+  cores: it emits its initial low-divisor pulse and subsequent 256-tick pulses
+  before the high channel resets the pair. This also restores the channel-3
+  high-pass source for linked channels 3+4.
 - Added `implementation/traces/pokey_timer_contract.jsonl`, consumed by both
   native and JS probes, for the shared AUDF=0 normal/fast/linked timer
   contract. This is a digital period contract, not a claim of cycle-perfect
@@ -647,20 +654,21 @@ Status: **in progress; digital timer/SIO, live POT reads, and continuous ALLPOT 
 - Added `implementation/AHRM08_POKEY_TEST.XEX`, a portable guest-level
   diagnostic that records timer IRQ, SEROUT, and POT/ALLPOT observations for
   external comparison on jsA8E, native A8E, Altirra, and hardware.
-- STIMER pipeline/SIO event differential fixtures beyond clock selection and
-  audio calibration are still pending. Exact analog capacitor-voltage curves
+- The Stage 2 guest-level timer/SIO contract and its shared digital fixtures
+  are certified. The only recorded timing difference is jsA8E's accepted P1
+  serial-divider phase; do not change production timing without a focused CPU
+  event-arbitration investigation. Exact analog capacitor-voltage curves
   remain an approximation pending a hardware reference capture.
 
 Completion boundary requiring external reference:
 
-- The current timer deadline is an IRQ/event scheduling abstraction. AHRM
-  distinguishes the first STIMER reload, subsequent counter reloads, audio
-  pulses, IRQ assertion, linked-timer delay, and two-tone resync. These cannot
-  be collapsed into one deadline safely without a cycle trace for regression.
-- To finish the digital timing portion, provide either an Altirra trace or a
-  hardware-observed result for a small timer/SIO diagnostic covering STIMER at
-  cycle zero, AUDF=0 and AUDF=5, linked timers, IRQST timing, and SERIN/SEROUT
-  response phases. The same diagnostic can then become the next JSONL contract.
+- Digital timer/SIO behavior is certified at the Stage 2 guest and shared
+  contract scope. The P1 serial-divider phase is an accepted, contained
+  deviation; reopening it requires a CPU timed-event/initialization
+  arbitration trace, not a padding-specific delay or timer-period adjustment.
+- Linked low-channel audio pulses are implemented in both cores. They do not
+  yet have a cross-core waveform fixture because audio sample generation and
+  host output are deliberately outside the AHRM-09 digital harness.
 - To finish audio calibration, provide a fixed reference capture for the same
   PAL or NTSC target. A 48 kHz mono PCM/WAV capture of the four-voice Self
   Test and the Prince of Persia `launcher.obx` intro, recorded at a stated
@@ -714,10 +722,20 @@ Completion boundary requiring external reference:
   `AUDF`-derived timer period. Native CTest and jsA8E automation consume the
   same fixture, extending the AHRM-09 differential harness without changing
   runtime timing behavior.
+- `implementation/traces/pokey_pot_contract.jsonl` is consumed by both POT
+  scan probes for the AHRM 5.9 truncated-scan sequence, extending the shared
+  harness beyond PIA and digital timer/SIO contracts.
+- `implementation/traces/pokey_keyboard_irq_contract.jsonl` is consumed by
+  native and JS keyboard IRQ probes for the AHRM 5.7/5.8 masked and enabled
+  key outcomes. CPU pending is intentionally asserted in runner-specific
+  tests at each core's instruction boundary.
+- `implementation/traces/antic_nmi_contract.jsonl` is consumed by both
+  ANTIC timing probes for the AHRM 4.8 DLI cycle-7 `NMIST` and cycle-8 NMI
+  boundary. Late `NMIEN` variations remain covered in the same probes.
 
 ### AHRM-09: Build a cross-core AHRM differential harness
 
-Status: **foundation implemented; expand incrementally with each AHRM item**
+Status: **complete for the current digital alignment scope; extend when a new AHRM feature gains a deterministic observable contract**
 
 Priority: **P3**, but useful before completing P1/P2 work.
 
@@ -760,10 +778,24 @@ Acceptance criteria:
 
 - A change to one core cannot silently alter the other core's documented
   behavior.
-- The implemented PIA/PORTB contract has a reproducible regression trace;
-  each subsequent AHRM item must add its own fixture before being marked
-  complete.
+- The implemented PIA/PORTB, POKEY, ANTIC/NMI, and PMG/DMACTL contracts have
+  reproducible regression traces; each subsequent AHRM item must add its own
+  fixture before being marked complete.
 - Normal emulation has no measurable trace overhead when diagnostics are off.
+
+Current shared fixtures:
+
+- `pia_portb_contract.jsonl`: PIA DDRB/ORB and pull-ups.
+- `pokey_timer_contract.jsonl` and `pokey_sio_contract.jsonl`: timer periods
+  and all SIO clock modes.
+- `pokey_pot_contract.jsonl` and `pokey_keyboard_irq_contract.jsonl`:
+  truncated paddle scans and keyboard IRQ gating.
+- `antic_nmi_contract.jsonl`: DLI `NMIST`/NMI boundaries and late `NMIEN`.
+- `pmg_dmactl_contract.jsonl`: AHRM 4.13 delayed P/M DMA enables and latches.
+
+Audio calibration and title-level visual comparison are deliberately outside
+this digital harness; they remain external-reference work under AHRM-08 and
+AHRM-07.
 
 ## Recommended execution order
 
@@ -803,10 +835,11 @@ diagnostic tracing disabled.
 - 33 JavaScript test files were discovered and executed individually.
 - 32 passed, including the new `pia_ddrb_orb_contract.test.js` and
   `ahrm_machine_matrix.test.js` fixtures.
-- One pre-existing test remains red: `playfield_dynamic_geometry.test.js`.
-  Its mock renderer does not provide the newer `rendererApi.drawModeLine`
-  method and fails before exercising the geometry assertions. It is tracked
-  separately from the AHRM-01 work.
+- At the time of this baseline,
+  `playfield_dynamic_geometry.test.js` was red because its mock renderer did
+  not provide the newer `rendererApi.drawModeLine` method and failed before
+  exercising the geometry assertions. It was tracked separately from the
+  AHRM-01 work and repaired on 2026-09-25; it passes in the current suite.
 - The two previously stale baseline tests were repaired as test-infrastructure
   fixes: the headless test now finds ROMs in `A8E/build`, and the standby test
   no longer requires text removed from the current standby program.

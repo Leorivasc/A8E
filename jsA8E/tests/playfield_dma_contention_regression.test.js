@@ -206,21 +206,24 @@ function testPhantomMissileDmaUsesTheCycleOneDisplayListFetch() {
 }
 
 function testPmgDmaCtlTakesEffectAfterTwoCycles() {
+  const contract = fs.readFileSync(
+    path.join(__dirname, "..", "..", "implementation", "traces", "pmg_dmactl_contract.jsonl"), "utf8",
+  ).trim().split(/\r?\n/).map(JSON.parse);
   const api = loadRendererBaseApi();
   const ctx = makeCtx(0, false);
   const io = ctx.ioData;
 
   io.video.currentDisplayLine = 8;
-  ctx.sram[IO_DMACTL] = 0x32;
+  ctx.sram[IO_DMACTL] = contract[0].dmactl;
   io.pmgDmaCtlTimingInitialized = true;
-  io.pmgDmaCtlOneCycleAgo = 0x32;
-  io.pmgDmaCtlTwoCyclesAgo = 0x3e;
+  io.pmgDmaCtlOneCycleAgo = contract[0].one_ago;
+  io.pmgDmaCtlTwoCyclesAgo = contract[0].two_ago;
 
   api.stepClockActions(ctx, 3);
 
   assert.deepEqual(api.pmgDmaCalls, [
-    { cycle: 0, line: 8, dmactl: 0x3e },
-    { cycle: 2, line: 8, dmactl: 0x32 },
+    { cycle: contract[0].cycle, line: 8, dmactl: contract[0].two_ago },
+    { cycle: contract[1].cycle, line: 8, dmactl: contract[1].dmactl },
   ]);
   assert.equal(io.pmgDmaCtlTwoCyclesAgo, 0x32);
   assert.equal(io.pmgDmaCtlOneCycleAgo, 0x32);

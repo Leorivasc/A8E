@@ -442,9 +442,16 @@
 
     function pokeyAudioPairTick(st, chLow, chHigh, audctl) {
       const period = (((chHigh.audf & 0xff) << 8) | (chLow.audf & 0xff)) >>> 0;
+      let pulses = 0;
+      if (chLow.counter > 0) chLow.counter = (chLow.counter - 1) | 0;
+      if (chLow.counter === 0) {
+        chLow.counter = 256;
+        pokeyAudioChannelClockOut(st, chLow, audctl);
+        pulses |= 1;
+      }
 
       if (chHigh.counter > 0) chHigh.counter = (chHigh.counter - 1) | 0;
-      if (chHigh.counter !== 0) return 0;
+      if (chHigh.counter !== 0) return pulses;
 
       let reload = (period + 1) >>> 0;
       if (chLow === st.channels[0] && audctl & 0x40)
@@ -455,7 +462,7 @@
       chHigh.counter = reload | 0;
 
       pokeyAudioChannelClockOut(st, chHigh, audctl);
-      return 1;
+      return pulses | 2;
     }
 
     function pokeyAudioStepCpuCycle(st) {
@@ -496,26 +503,28 @@
       }
 
       if (pair34) {
-        // In 16-bit pair mode ch3 is a prescaler; only ch4 (chHigh) independently
-        // underflows.  pulse2 (ch3 clock used for HP filter on ch1) stays 0.
         if (st.channels[2].clkDivCycles === 1) {
-          pulse3 = pokeyAudioPairTick(
+          const pulses = pokeyAudioPairTick(
             st,
             st.channels[2],
             st.channels[3],
             audctl,
           );
+          pulse2 = pulses & 1;
+          pulse3 = (pulses >>> 1) & 1;
         } else {
           st.channels[2].clkAccCycles = (st.channels[2].clkAccCycles + 1) | 0;
           if (st.channels[2].clkAccCycles >= st.channels[2].clkDivCycles) {
             st.channels[2].clkAccCycles =
               (st.channels[2].clkAccCycles - st.channels[2].clkDivCycles) | 0;
-            pulse3 = pokeyAudioPairTick(
+            const pulses = pokeyAudioPairTick(
               st,
               st.channels[2],
               st.channels[3],
               audctl,
             );
+            pulse2 = pulses & 1;
+            pulse3 = (pulses >>> 1) & 1;
           }
         }
       } else {
@@ -552,15 +561,10 @@
 
     function pokeyAudioMixCycleSample(st) {
       const audctl = st.audctl & 0xff;
-      const pair12 = (audctl & 0x10) !== 0;
-      const pair34 = (audctl & 0x08) !== 0;
       const twoTone = (st.skctl & 0x08) !== 0;
       let sum = 0.0;
 
       for (let i = 0; i < 4; i++) {
-        if (i === 0 && pair12) continue;
-        if (i === 2 && pair34) continue;
-
         const ch = st.channels[i];
         const audc = ch.audc & 0xff;
         const vol = audc & 0x0f;
@@ -749,6 +753,9 @@
             (st.channels[0].audf & 0xff)) >>>
           0;
         st.channels[1].counter = st.audctl & 0x40 ? p12 + 7 : p12 + 1;
+        st.channels[0].counter = st.audctl & 0x40
+          ? (st.channels[0].audf & 0xff) + 4
+          : (st.channels[0].audf & 0xff) + 1;
       } else {
         st.channels[0].counter =
           st.audctl & 0x40
@@ -763,6 +770,9 @@
             (st.channels[2].audf & 0xff)) >>>
           0;
         st.channels[3].counter = st.audctl & 0x20 ? p34 + 7 : p34 + 1;
+        st.channels[2].counter = st.audctl & 0x20
+          ? (st.channels[2].audf & 0xff) + 4
+          : (st.channels[2].audf & 0xff) + 1;
       } else {
         st.channels[2].counter =
           st.audctl & 0x20

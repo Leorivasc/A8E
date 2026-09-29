@@ -254,22 +254,25 @@ function testDliNmistAtCycle7NmiAtCycle8() {
   // AHRM 4.8: NMIST is set on cycle 7; NMI is asserted on cycle 8.
   const { api, cpuLog } = loadAnticApi();
   const ctx = makeContext();
+  const contract = fs.readFileSync(
+    path.join(__dirname, "..", "..", "implementation", "traces", "antic_nmi_contract.jsonl"), "utf8",
+  ).trim().split(/\r?\n/).map(JSON.parse);
 
   ctx.ioData.displayListFetchCycle = CYCLE_NEVER;
-  ctx.ioData.clock = 7;
+  ctx.ioData.clock = contract[0].clock;
   ctx.ioData.dliCycle = 7;
   ctx.sram[IO_NMIEN] = NMI_DLI;
   ctx.ioData.nmiTiming.enabledByCycle7 = NMI_DLI;
   ctx.ioData.nmiTiming.enabledByCycle8 = NMI_DLI;
 
   api.ioCycleTimedEvent(ctx);
-  assert.equal(cpuLog.nmiCalls, 0, "NMI should not fire on cycle 7 (NMIST set, but NMI waits for cycle 8)");
-  assert.notEqual(ctx.ram[IO_NMIRES_NMIST] & NMI_DLI, 0, "NMIST DLI bit should be set at cycle 7");
+  assert.equal(cpuLog.nmiCalls, contract[0].nmi, contract[0].step);
+  assert.equal(ctx.ram[IO_NMIRES_NMIST] & NMI_DLI, contract[0].nmist, contract[0].step);
   assert.equal(ctx.ioData.dliCycle, 7, "dliCycle should remain 7 until NMI fires at cycle 8");
 
-  ctx.ioData.clock = 8;
+  ctx.ioData.clock = contract[1].clock;
   api.ioCycleTimedEvent(ctx);
-  assert.equal(cpuLog.nmiCalls, 1, "NMI should fire on cycle 8");
+  assert.equal(cpuLog.nmiCalls, contract[1].nmi, contract[1].step);
   assert.equal(ctx.ioData.dliCycle, CYCLE_NEVER);
   assert.notEqual(ctx.ram[IO_NMIRES_NMIST] & NMI_DLI, 0);
 }
@@ -332,6 +335,9 @@ function testVbiCycle7EnableDelaysByOneCycle() {
   // cycle, mirroring the DLI behavior.
   const { api, cpuLog } = loadAnticApi();
   const ctx = makeContext();
+  const delayed = JSON.parse(fs.readFileSync(
+    path.join(__dirname, "..", "..", "implementation", "traces", "antic_nmi_contract.jsonl"), "utf8",
+  ).trim().split(/\r?\n/)[2]);
 
   ctx.ioData.displayListFetchCycle = CYCLE_NEVER;
   ctx.ioData.clock = 7;
@@ -349,9 +355,9 @@ function testVbiCycle7EnableDelaysByOneCycle() {
   assert.equal(cpuLog.nmiCalls, 0, "cycle-7 enable should delay VBI NMI to cycle 9");
   assert.equal(ctx.ioData.vbiCycle, 8, "VBI rescheduled so NMI fires at cycle 9");
 
-  ctx.ioData.clock = 9;
+  ctx.ioData.clock = delayed.clock;
   api.ioCycleTimedEvent(ctx);
-  assert.equal(cpuLog.nmiCalls, 1, "delayed VBI NMI should fire on cycle 9");
+  assert.equal(cpuLog.nmiCalls, delayed.nmi, delayed.step);
   assert.equal(ctx.ioData.vbiCycle, CYCLE_NEVER);
 }
 
@@ -360,6 +366,9 @@ function testVbiCycle8DisableSuppressesCurrentLine() {
   // NMIST already latched at cycle 7.
   const { api, cpuLog } = loadAnticApi();
   const ctx = makeContext();
+  const suppressed = JSON.parse(fs.readFileSync(
+    path.join(__dirname, "..", "..", "implementation", "traces", "antic_nmi_contract.jsonl"), "utf8",
+  ).trim().split(/\r?\n/)[3]);
 
   ctx.ioData.displayListFetchCycle = CYCLE_NEVER;
   ctx.ioData.clock = 7;
@@ -372,9 +381,9 @@ function testVbiCycle8DisableSuppressesCurrentLine() {
   assert.equal(cpuLog.nmiCalls, 0, "no NMI at cycle 7");
   assert.notEqual(ctx.ram[IO_NMIRES_NMIST] & NMI_VBI, 0, "NMIST VBI set at cycle 7");
 
-  ctx.ioData.clock = 8;
+  ctx.ioData.clock = suppressed.clock;
   api.ioCycleTimedEvent(ctx);
-  assert.equal(cpuLog.nmiCalls, 0, "cycle-8 disable should suppress the VBI NMI");
+  assert.equal(cpuLog.nmiCalls, suppressed.nmi, suppressed.step);
   assert.equal(ctx.ioData.vbiCycle, CYCLE_NEVER);
   assert.notEqual(ctx.ram[IO_NMIRES_NMIST] & NMI_VBI, 0, "NMIST VBI status stays latched");
 }

@@ -4,6 +4,47 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-29: alignment audit corrected the documentation boundary: AHRM-07
+  is certified for its synthetic and visual diagnostic scope, while broader
+  title-level comparisons remain regression work; AHRM-08 remains open only
+  for analog calibration and the explicitly accepted P1 CPU/POKEY phase
+  follow-up. `implementation/A8E/POKEY.md` now records implemented POT
+  residual charge and live `ALLPOT` reassertion instead of the obsolete
+  missing-feature statement. Linked audio pulses are explicitly outside the
+  shared AHRM-09 waveform scope. `Pokey_DebugFrame` now prints `u32` fields
+  with the correct `unsigned long` format, removing compiler format warnings.
+  The full jsA8E automation suite and all 11 native CTest probes pass.
+
+- 2026-09-29: completed the current AHRM-09 digital differential-harness
+  scope. Shared JSONL fixtures now cover PIA/PORTB, POKEY timer/SIO/paddle/
+  keyboard IRQ behavior, ANTIC/NMI timing, and AHRM 4.13 PMG `DMACTL`
+  gating. Native and JS probes consume the same fixture for each new family;
+  analog audio calibration and title-level visual comparison remain external
+  reference work rather than synthetic digital contracts.
+
+- 2026-09-29: `implementation/traces/antic_nmi_contract.jsonl` extends
+  AHRM-09 with the AHRM 4.8 DLI boundary: both cores latch `NMIST` at cycle 7
+  and deliver NMI at cycle 8. The existing native and JS late-NMIEN probes
+  remain the expansion path for delayed and suppressed delivery cases.
+
+- 2026-09-29: `implementation/traces/pokey_keyboard_irq_contract.jsonl`
+  extends AHRM-09 with the AHRM 5.7/5.8 keyboard IRQ gate. Native and JS
+  probes use the same masked/enabled `IRQEN` and `IRQST` outcomes. CPU IRQ
+  pending remains runner-specific because the probes observe it at different
+  CPU instruction boundaries.
+
+- 2026-09-28: `implementation/traces/pokey_pot_contract.jsonl` extends the
+  AHRM-09 differential harness to the AHRM 5.9 truncated paddle scan. Native
+  and JS POT probes consume the same restart-after-64-counts contract and
+  fail on a different final `POT0` or `ALLPOT` value.
+
+- 2026-09-28: `A8E/Pokey.c` and `jsA8E/js/core/pokey.js` now preserve the
+  AHRM 5.3 linked-timer low-channel audio path. The low channel emits its
+  initial AUDF-derived pulse and subsequent 256-tick pulses while linked, is
+  mixed normally, and channel 3 can still clock channel 1's high-pass latch.
+  Linked modes remain cycle-stepped in JS so these intermediate transitions
+  cannot be skipped by the independent-channel fast path.
+
 - 2026-09-28: `A8E/{AtariIo.h,Pokey.c}` and
   `jsA8E/js/core/{state,pokey}.js` now retain per-channel POT residual charge
   across an early `POTGO`, per AHRM 5.9. A restarted scan subtracts the

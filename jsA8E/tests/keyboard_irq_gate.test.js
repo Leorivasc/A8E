@@ -2,6 +2,7 @@
  * keyboard IRQ pending for a later IRQEN write. */
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const fs = require("node:fs");
 const { createHeadlessAutomation } = require("../headless");
 
 async function getContext(runtime) {
@@ -32,19 +33,22 @@ async function main() {
     const IRQEN = 0xd20e;
     const KBCODE = 0xd209;
     const KEYBOARD_IRQ = 0x40;
+    const contract = fs.readFileSync(
+      path.join(repoRoot, "implementation", "traces", "pokey_keyboard_irq_contract.jsonl"), "utf8",
+    ).trim().split(/\r?\n/).map(JSON.parse);
 
     ctx.ram[IRQEN] = 0xff;
-    ctx.sram[IRQEN] = 0x00;
+    ctx.sram[IRQEN] = contract[0].irqen;
     ctx.irqPending = 0;
     await api.input.keyDown({ key: "a", code: "KeyA", sourceToken: "masked-a" });
     await api.input.keyUp({ key: "a", code: "KeyA", sourceToken: "masked-a" });
 
     assert.notEqual(ctx.ram[KBCODE], 0x00, "masked key did not update KBCODE");
-    assert.notEqual(ctx.ram[IRQEN] & KEYBOARD_IRQ, 0, "masked key latched keyboard IRQST");
-    assert.equal(ctx.irqPending, 0, "masked key left a CPU IRQ pending");
+    assert.equal(ctx.ram[IRQEN] & KEYBOARD_IRQ, contract[0].irqst, contract[0].step);
+    assert.equal(ctx.irqPending, contract[0].cpuirq, contract[0].step);
 
     ctx.ram[IRQEN] = 0xff;
-    ctx.sram[IRQEN] = KEYBOARD_IRQ;
+    ctx.sram[IRQEN] = contract[1].irqen;
     ctx.ioData.timer1Cycle = ctx.cycleCounter;
     await api.system.start();
     await api.system.waitForCycles({ count: 20, timeoutMs: 2000 });
@@ -57,8 +61,8 @@ async function main() {
     await api.input.keyDown({ key: "b", code: "KeyB", sourceToken: "enabled-b" });
     await api.input.keyUp({ key: "b", code: "KeyB", sourceToken: "enabled-b" });
 
-    assert.equal(ctx.ram[IRQEN] & KEYBOARD_IRQ, 0, "enabled key did not latch keyboard IRQST");
-    assert.equal(ctx.irqPending, 1, "enabled key did not assert the CPU IRQ");
+    assert.equal(ctx.ram[IRQEN] & KEYBOARD_IRQ, contract[1].irqst, contract[1].step);
+    assert.equal(ctx.irqPending, contract[1].cpuirq, contract[1].step);
     console.log("keyboard_irq_gate.test.js passed");
   } finally {
     await runtime.dispose();
