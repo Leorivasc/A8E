@@ -1,40 +1,44 @@
 # Layout Schemes
 
-## Proposal
+## Current behavior
 
-Add selectable presentation layouts to the `jsA8E` browser interface. The
-layouts should organize the existing emulator, disk, filesystem, debugger,
-keyboard, and joystick panels without changing the emulated machine state.
+`jsA8E` has three selectable presentation layouts. They organize the existing
+emulator, disk, filesystem, assembler/debugger, keyboard, and joystick panels
+without changing the emulated machine state.
 
-The presentation mode is a UI preference. Switching modes must not reset,
-pause, reload, or otherwise interrupt the emulator.
+The presentation mode is a UI preference. Switching modes does not reset,
+pause, reload, or otherwise interrupt the emulator. It does reset the
+presentation state of the virtual keyboard, joystick, and preset panels: those
+panels are hidden when a layout is applied and can then be enabled individually
+from the toolbar.
 
-The three layouts described here are the initial presets, not a closed list.
-The layout model must allow additional arrangements to be added later without
-changing the panel implementations or rewriting the layout-selection flow.
+The three layouts are registered presets, not a closed list. The layout model
+allows additional arrangements to be added later without changing the panel
+implementations or rewriting the layout-selection flow.
 
 ## Layout Selection
 
-The layout modes are selected with individual toolbar buttons placed beside
-the existing lifecycle controls:
+The layout modes are selected with individual compact icon-only buttons in the
+primary toolbar, immediately before the secondary-controls expand button:
 
 ```text
-[Start/Pause] [Reset] [Audio] | [Emulation] [Work] [Development]
+[Start/Pause] [Reset] [Audio] ... | [Emulation] [Work] [Development] [More]
 ```
 
-Each layout button must:
+Each layout button:
 
-- show a clear active state;
-- allow changing modes with one click;
-- expose an accessible label and tooltip;
-- remain usable while the emulator is running;
-- preserve the selected mode in `localStorage`;
-- restore the saved mode on the next page load;
-- avoid changing the current panel contents or emulated machine state.
+- shows a clear active state;
+- allows changing modes with one click;
+- exposes an accessible label and tooltip;
+- remains usable while the emulator is running;
+- preserves the selected mode in `localStorage`;
+- restores the saved mode on the next page load;
+- preserve the current panel contents and emulated machine state; panel
+  visibility is controlled by the selected preset and toolbar toggles.
 
-The buttons may use compact icon-only presentation at narrow widths, but
-their accessible names must remain available to keyboard and assistive
-technology users.
+The buttons may use compact icon-only presentation at narrow widths, but their
+accessible names must remain available through tooltips, ARIA labels, and
+`aria-pressed` state.
 
 ## Layout Modes
 
@@ -52,13 +56,13 @@ Purpose: normal operation and gameplay.
 └─────────────────────────────────────────────┘
 ```
 
-Requirements:
+Current behavior:
 
 - The emulator screen occupies the complete first row.
-- The virtual keyboard and joystick occupy the second row.
+- The virtual keyboard and joystick occupy the second row when enabled.
 - The keyboard and joystick remain independently hideable when needed.
-- Development panels remain hidden unless explicitly opened through another
-  existing UI action.
+- Development panels are hidden by the preset. They can be opened manually
+  through their existing toolbar actions.
 
 ### Work
 
@@ -73,14 +77,15 @@ Purpose: working with disks and files while using the emulator.
 └─────────────────────────────────────────────┘
 ```
 
-Requirements:
+Current behavior:
 
 - The first row has two columns.
 - The first column stacks `Disk Library` and `HostFS`.
 - The second column contains the emulator screen.
-- The second row contains the virtual keyboard and joystick.
-- Disk Library and HostFS must remain independently scrollable if their
-  contents exceed the available height.
+- The second row contains the virtual keyboard and joystick when those panels
+  are enabled.
+- Disk Library and HostFS remain independently scrollable when their contents
+  exceed the available height.
 
 ### Development
 
@@ -96,16 +101,16 @@ Purpose: debugging and developing Atari software.
 └─────────────────────────────────────────────┘
 ```
 
-Requirements:
+Current behavior:
 
 - The first row has two columns.
 - The first column stacks `Debugger`, `HostFS`, and `Disk Library`.
 - The second column contains the emulator screen.
-- The second row contains the virtual keyboard.
-- The joystick is hidden by default in this mode, but must remain available
-  through its existing control if a development workflow requires it.
-- Debugger, HostFS, and Disk Library must be independently scrollable or
-  collapsible so that one panel cannot hide the others indefinitely.
+- The second row contains the virtual keyboard when it is enabled.
+- The joystick is hidden by the preset, but remains available through its
+  existing toolbar control.
+- The assembler/debugger, HostFS, and Disk Library panels have their own
+  scrolling areas; the panels themselves remain stacked in the tools column.
 
 ## Disk Activity Indicator
 
@@ -129,26 +134,26 @@ Existing activity semantics are preserved:
 
 The layouts must remain usable on desktop and mobile widths.
 
-Desktop behavior:
+Desktop behavior (`>980px`):
 
 - preserve the two-column arrangements described above;
 - give the screen priority when horizontal space is limited;
 - keep tool panels from forcing the screen below a usable size.
 
-Mobile behavior:
+Responsive behavior (`<=980px`):
 
 - collapse two-column layouts into a single vertical flow;
 - keep the screen before the lower-priority panels where possible;
 - allow panel sections to scroll independently;
-- keep the layout buttons visible in the primary toolbar, using compact
-  controls when necessary.
+- keep the compact layout buttons in the primary toolbar; at widths up to
+  `600px`, the toolbar's primary file control may occupy a full row.
 
 The layout change must not alter the existing PAL/NTSC selection, memory
 profile, worker selection, ROMs, disks, HostFS files, or emulator lifecycle.
 
 ## Persistence
 
-Store the selected layout using a dedicated key, for example:
+The selected layout is stored using the dedicated key:
 
 ```text
 a8e_layout_scheme
@@ -162,11 +167,12 @@ work
 development
 ```
 
-Unknown or missing values must fall back to `emulation`.
+Unknown or missing values fall back to `work`, which is the current default
+when no saved preference exists.
 
 Additional arrangements may define their own stable identifier and may be
 added to the same persisted preference set. If a saved arrangement is no
-longer available, the UI must fall back to `emulation`.
+longer available, the UI falls back to `work`.
 
 ## Implementation Direction
 
@@ -179,8 +185,8 @@ Likely files:
 - `jsA8E/style.css`: grid, responsive, active-button, and panel sizing rules;
 - `jsA8E/js/app/ui.js`: layout selection, persistence, and panel visibility;
 - `jsA8E/js/app/disk_activity_ui.js`: verify screen-relative overlay behavior;
-- `implementation/jsA8E/UI.md`: update the implemented UI behavior after the
-  feature is delivered.
+- `implementation/jsA8E/UI.md`: keep the implemented UI behavior synchronized
+  after layout changes.
 
 The layout controller should use semantic state such as
 `data-layout-scheme="emulation"` on the main layout container. CSS grid areas
@@ -194,21 +200,22 @@ joystick, or screen components.
 
 ## Acceptance Criteria
 
-- The toolbar shows individual `Emulation`, `Work`, and `Development` buttons
-  beside Start/Pause, Reset, and Audio.
+- The toolbar shows compact individual `Emulation`, `Work`, and `Development`
+  buttons alongside the primary controls and before the secondary-tools
+  expand button.
 - Exactly one layout button is active at a time.
 - Switching layouts does not reset, pause, reload, or alter the emulator.
-- `Emulation` shows the screen above keyboard and joystick.
-- `Work` shows Disk Library and HostFS beside the screen, with keyboard and
-  joystick below.
-- `Development` shows Debugger, HostFS, and Disk Library beside the screen,
-  with keyboard below.
+- `Emulation` shows the screen above the optional keyboard and joystick.
+- `Work` shows Disk Library and HostFS beside the screen on desktop, with the
+  optional keyboard and joystick below.
+- `Development` shows the assembler/debugger, HostFS, and Disk Library beside
+  the screen on desktop, with the optional keyboard below.
 - Disk activity remains visible and screen-relative in all three layouts.
 - The selected layout survives a page reload.
 - A future arrangement can be added by registering a new layout definition and
   selector without changing existing panel ownership or emulator behavior.
-- Mobile layouts collapse without clipping the screen or making the toolbar
-  unusable.
+- Responsive layouts collapse without clipping the screen or making the
+  toolbar unusable.
 - Existing panel actions, automation attachment, worker behavior, and disk
   activity timing remain unchanged.
 
