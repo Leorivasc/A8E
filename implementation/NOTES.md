@@ -4,6 +4,10 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-29: normalized one stray CRLF blank line in
+  `jsA8E/js/core/io.js`, so the alignment merge passes whitespace validation
+  without changing PIA or console I/O behavior.
+
 - 2026-09-29: alignment audit corrected the documentation boundary: AHRM-07
   is certified for its synthetic and visual diagnostic scope, while broader
   title-level comparisons remain regression work; AHRM-08 remains open only
