@@ -1077,9 +1077,17 @@
 
       for (let p = 0; p < 8; p++) {
         const rawTarget = io.pokeyPotValues[p] & 0xff;
-        const target = rawTarget > terminal ? terminal : rawTarget;
-        const saturates = rawTarget >= terminal;
+        let target = rawTarget > (io.pokeyPotCharge ? io.pokeyPotCharge[p] : 0)
+          ? rawTarget - (io.pokeyPotCharge ? io.pokeyPotCharge[p] : 0) : 0;
+        target = target > terminal ? terminal : target;
+        const saturates = target >= terminal;
 
+        // AHRM 5.9: ALLPOT follows the input level continuously, not only
+        // the first threshold crossing. If an input falls below threshold
+        // while the scan is still counting, resume its live POT value.
+        if (io.pokeyPotLatched[p] && count < target) {
+          io.pokeyPotLatched[p] = 0;
+        }
         if (!io.pokeyPotLatched[p] && !saturates && count >= target) {
           io.pokeyPotLatched[p] = 1;
         }
@@ -1108,6 +1116,7 @@
 
       io.pokeyPotScanActive = false;
       io.pokeyPotScanTerminalCycle = CYCLE_NEVER;
+      io.pokeyPotChargeLastCycle = ctx.cycleCounter;
       ctx.ram[IO_AUDCTL_ALLPOT] = 0x00;
     }
 
@@ -1121,6 +1130,16 @@
     function pokeyPotStartScan(ctx) {
       const io = ctx.ioData;
       if (!io) return;
+      if (!io.pokeyPotCharge) io.pokeyPotCharge = new Uint8Array(8);
+      if (io.pokeyPotScanActive) {
+        for (let i = 0; i < 8; i++)
+          io.pokeyPotCharge[i] = Math.min(255, io.pokeyPotCharge[i] + (io.pokeyPotCounter & 0xff));
+      } else if (!pokeyPotFastScanEnabled(ctx)) {
+        if (ctx.cycleCounter < (io.pokeyPotChargeLastCycle || 0))
+          io.pokeyPotChargeLastCycle = ctx.cycleCounter;
+        const shifts = Math.floor((ctx.cycleCounter - (io.pokeyPotChargeLastCycle || 0)) / 16);
+        for (let i = 0; i < 8; i++) io.pokeyPotCharge[i] = shifts >= 8 ? 0 : io.pokeyPotCharge[i] >> shifts;
+      }
       io.pokeyPotScanActive = true;
       io.pokeyPotScanLastCycle = ctx.cycleCounter;
       io.pokeyPotScanTerminalCycle = CYCLE_NEVER;

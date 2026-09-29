@@ -607,8 +607,8 @@ Steps:
 1. Build shared timer/SIO fixtures for STIMER, AUDCTL-linked timers, IRQEN,
    SERIN/SEROUT, high-speed index, and response-phase timing.
 2. Run each fixture in native and JS and compare register/event traces.
-3. Add the remaining AHRM paddle behaviors: live-counter read instability,
-   capacitor discharge bias, threshold changes, and reasserted ALLPOT bits.
+3. Validate the remaining AHRM paddle analog approximation against hardware
+   captures when a title is known to depend on exact capacitor discharge.
 4. Keep the digital mixer path deterministic and document the chosen sample
    rate, DAC approximation, AC coupling, and clipping model.
 5. Calibrate native and browser output against the same reference capture or
@@ -621,7 +621,7 @@ Acceptance criteria:
 - Audio differences are characterized as intentional analog approximations,
   not unexplained core divergence.
 
-Status: **in progress; timer minimum divisor and live POT reads corrected and covered on 2026-09-25**.
+Status: **in progress; digital timer/SIO, live POT reads, and continuous ALLPOT threshold behavior are covered**.
 
 - Native A8E and jsA8E now treat `AUDF=0` as the valid minimum divisor rather
   than as a disabled timer. This includes linked 16-bit fast-clock periods.
@@ -630,6 +630,16 @@ Status: **in progress; timer minimum divisor and live POT reads corrected and co
   active scans, while stored latched values remain stable and the terminal
   scan result remains unchanged. Native and JS paddle probes cover the fast
   scan sequence through the terminal hold cycle.
+- During an active scan, a channel that has already crossed its threshold now
+  reasserts its `ALLPOT` bit and resumes reporting the live counter when its
+  input falls below that threshold, as required by AHRM 5.9. Matching native
+  and JS probes cover the reassertion and subsequent relatch.
+- A premature `POTGO` preserves each channel's residual charge, reducing the
+  following count by the elapsed prior scan count; an inactive slow scan
+  discharges that residual with a deterministic decay that is negligible after
+  roughly 100 CPU cycles. Fast scan retains charge because it disables the
+  dump transistors. Native and JS probes cover the documented 64-count
+  truncated-scan case.
 - Added `implementation/traces/pokey_timer_contract.jsonl`, consumed by both
   native and JS probes, for the shared AUDF=0 normal/fast/linked timer
   contract. This is a digital period contract, not a claim of cycle-perfect
@@ -637,9 +647,9 @@ Status: **in progress; timer minimum divisor and live POT reads corrected and co
 - Added `implementation/AHRM08_POKEY_TEST.XEX`, a portable guest-level
   diagnostic that records timer IRQ, SEROUT, and POT/ALLPOT observations for
   external comparison on jsA8E, native A8E, Altirra, and hardware.
-- STIMER pipeline/SIO event differential fixtures beyond clock selection,
-  capacitor discharge/threshold behavior, and audio calibration are still
-  pending.
+- STIMER pipeline/SIO event differential fixtures beyond clock selection and
+  audio calibration are still pending. Exact analog capacitor-voltage curves
+  remain an approximation pending a hardware reference capture.
 
 Completion boundary requiring external reference:
 

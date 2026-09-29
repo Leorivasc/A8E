@@ -1527,12 +1527,22 @@ static void Pokey_PotRefreshReadRegisters(_6502_Context_t *pContext)
 		u8 cTarget = cRawTarget;
 		u8 cSaturates;
 
+		/* AHRM 5.9: a restarted scan begins with any undumped charge. */
+		cTarget = (cTarget > pIoData->aPotCharge[i])
+			? (u8)(cTarget - pIoData->aPotCharge[i]) : 0;
 		if(cTarget > cTerminal)
 		{
 			cTarget = cTerminal;
 		}
 
-		cSaturates = (cRawTarget >= cTerminal) ? 1 : 0;
+		cSaturates = (cTarget >= cTerminal) ? 1 : 0;
+		/* AHRM 5.9: ALLPOT follows the input level continuously, not only
+		 * the first threshold crossing. If an input falls below threshold
+		 * while the scan is still counting, resume its live POT value. */
+		if(pIoData->aPotLatched[i] && cCount < cTarget)
+		{
+			pIoData->aPotLatched[i] = 0;
+		}
 		if(!pIoData->aPotLatched[i] && !cSaturates && cCount >= cTarget)
 		{
 			pIoData->aPotLatched[i] = 1;
@@ -1574,6 +1584,7 @@ static void Pokey_PotFinishScan(_6502_Context_t *pContext)
 
 	pIoData->cPotScanActive = 0;
 	pIoData->llPotScanTerminalCycle = CYCLE_NEVER;
+	pIoData->llPotChargeLastCycle = pContext->llCycleCounter;
 	RAM[IO_AUDCTL_ALLPOT] = 0x00;
 }
 
@@ -1601,6 +1612,25 @@ void Pokey_PotStartScan(_6502_Context_t *pContext)
 	if(!pIoData)
 	{
 		return;
+	}
+	if(pIoData->cPotScanActive)
+	{
+		for(i = 0; i < 8; i++)
+		{
+			u32 lCharge = (u32)pIoData->aPotCharge[i] + pIoData->cPotScanCounter;
+			pIoData->aPotCharge[i] = (lCharge > 255) ? 255 : (u8)lCharge;
+		}
+	}
+	else if(!Pokey_PotScanFastEnabled(pContext))
+	{
+		u64 llElapsed;
+		u32 lShifts;
+		if(pContext->llCycleCounter < pIoData->llPotChargeLastCycle)
+			pIoData->llPotChargeLastCycle = pContext->llCycleCounter;
+		llElapsed = pContext->llCycleCounter - pIoData->llPotChargeLastCycle;
+		lShifts = (u32)(llElapsed / 16); /* AHRM: effectively discharged by ~100 cycles. */
+		for(i = 0; i < 8; i++)
+			pIoData->aPotCharge[i] = (lShifts >= 8) ? 0 : (pIoData->aPotCharge[i] >> lShifts);
 	}
 
 	pIoData->cPotScanActive = 1;

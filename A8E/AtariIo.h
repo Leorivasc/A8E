@@ -250,6 +250,8 @@ typedef struct
 	u8 cPotScanCounter;
 	u8 aPotValues[8]; /* target values per pot (set by input layer) */
 	u8 aPotLatched[8]; /* 1 = latched at target */
+	u8 aPotCharge[8]; /* residual charge, in POT-count equivalents */
+	u64 llPotChargeLastCycle;
 
 	u8 *pDisk1;
 	u32 lDiskSize;

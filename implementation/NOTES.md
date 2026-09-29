@@ -4,6 +4,23 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-28: `A8E/{AtariIo.h,Pokey.c}` and
+  `jsA8E/js/core/{state,pokey}.js` now retain per-channel POT residual charge
+  across an early `POTGO`, per AHRM 5.9. A restarted scan subtracts the
+  accumulated prior count from its threshold; slow-mode idle time applies a
+  deterministic exponential-style discharge, while fast scan retains charge
+  because its dump transistors are disabled. Native and JS POT probes verify
+  the documented restart-after-64-counts result. The discharge curve is an
+  approximation, not a hardware-voltage calibration.
+
+- 2026-09-28: `A8E/Pokey.c`, `jsA8E/js/core/pokey.js`, and their matching
+  POT scan probes now implement AHRM 5.9 continuous input behavior. A POT
+  channel that had crossed its threshold reasserts its active-low `ALLPOT`
+  bit and returns to the live counter if its input drops below threshold
+  during the same scan; it relatches at the new threshold. The native C probe
+  and JS test both cover crossing, reassertion, and relatching. Capacitor
+  discharge after an early `POTGO` restart remains separate analog work.
+
 - 2026-09-28: added an opt-in `ioData.pmgDmaTrace` seam in
   `jsA8E/js/core/gtia.js`. It records P/M DMA line, slot, source address,
   source byte, and resulting graphics latch only when a diagnostic installs a

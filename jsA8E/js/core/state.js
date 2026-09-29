@@ -67,6 +67,8 @@
         // POKEY pot scan (POT0..POT7 / ALLPOT).
         pokeyPotValues: potValues,
         pokeyPotLatched: new Uint8Array(8),
+        pokeyPotCharge: new Uint8Array(8),
+        pokeyPotChargeLastCycle: 0,
         pokeyPotScanLastCycle: 0,
         pokeyPotScanTerminalCycle: CYCLE_NEVER,
         pokeyPotCounter: 0,

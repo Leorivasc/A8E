@@ -237,6 +237,66 @@ static int TestFastScanLiveReadsUseAdjacentCounterAnd(void)
 	return 1;
 }
 
+static int TestInputBelowThresholdReassertsAllpot(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	u32 i;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetPotState(&tMachine);
+	pContext->pShadowMemory[IO_SKCTL_SKSTAT] = 0x07;
+	for(i = 0; i < 8; i++) pIoData->aPotValues[i] = 2;
+	Pokey_PotStartScan(pContext);
+	pContext->llCycleCounter = 2;
+	Pokey_PotUpdate(pContext);
+	REQUIRE(pContext->pMemory[IO_AUDCTL_ALLPOT] == 0x00 &&
+		pContext->pMemory[IO_AUDF1_POT0] == 2,
+		"POT0 did not latch at its initial threshold");
+
+	/* Raising the target models the input falling below threshold at count 2. */
+	pIoData->aPotValues[0] = 10;
+	pContext->llCycleCounter = 3;
+	Pokey_PotUpdate(pContext);
+	REQUIRE(pContext->pMemory[IO_AUDCTL_ALLPOT] == 0x01 &&
+		pContext->pMemory[IO_AUDF1_POT0] == 3,
+		"POT0 did not resume after the input fell below threshold");
+
+	pContext->llCycleCounter = 10;
+	Pokey_PotUpdate(pContext);
+	REQUIRE(pContext->pMemory[IO_AUDCTL_ALLPOT] == 0x00 &&
+		pContext->pMemory[IO_AUDF1_POT0] == 10,
+		"POT0 did not relatch at the new threshold");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestEarlyPotgoRetainsResidualCharge(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	u32 i;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+	ProbeMachine_ResetPotState(&tMachine);
+	for(i = 0; i < 8; i++) pIoData->aPotValues[i] = 100;
+	Pokey_PotStartScan(pContext);
+	pContext->llCycleCounter = 64 * CYCLES_PER_LINE;
+	Pokey_PotUpdate(pContext);
+	Pokey_PotStartScan(pContext);
+	pContext->llCycleCounter += 36 * CYCLES_PER_LINE;
+	Pokey_PotUpdate(pContext);
+	REQUIRE(pContext->pMemory[IO_AUDF1_POT0] == 36 &&
+		pContext->pMemory[IO_AUDCTL_ALLPOT] == 0x00,
+		"early POTGO did not retain the prior 64 counts of charge");
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
 int main(int argc, char *argv[])
 {
 	if(!TestSlowScanUsesScanlineRateAndRunsToCompletion())
@@ -255,6 +315,15 @@ int main(int argc, char *argv[])
 	}
 
 	if(!TestFastScanLiveReadsUseAdjacentCounterAnd())
+	{
+		return 1;
+	}
+
+	if(!TestInputBelowThresholdReassertsAllpot())
+	{
+		return 1;
+	}
+	if(!TestEarlyPotgoRetainsResidualCharge())
 	{
 		return 1;
 	}
