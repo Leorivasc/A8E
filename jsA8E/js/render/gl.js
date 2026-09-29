@@ -218,6 +218,7 @@
     let crtScanlineSizeLoc = null;
     let crtOutputSizeLoc = null;
     let disposed = false;
+    let crtEnabled = opts.crtEnabled !== false;
 
     function dispose() {
       if (disposed) return;
@@ -276,9 +277,13 @@
           srcPixels,
         );}
 
-      // Pass 1: index + palette -> scene texture (at internal sceneScaleX/sceneScaleY resolution).
-      gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFbo);
-      gl.viewport(0, 0, sceneW, sceneH);
+      // Decode to the CRT scene texture, or directly to the display when disabled.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, crtEnabled ? sceneFbo : null);
+      gl.viewport(
+        0, 0,
+        crtEnabled ? sceneW : canvas.width,
+        crtEnabled ? sceneH : canvas.height,
+      );
       gl.useProgram(decodeProgram);
       setupQuad(gl, decodeBuf, decodePosLoc, decodeUvLoc);
       gl.activeTexture(gl.TEXTURE0);
@@ -287,6 +292,8 @@
       gl.bindTexture(gl.TEXTURE_2D, paletteTex);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      if (!crtEnabled) return;
 
       // Pass 2: CRT post-process to display.
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -471,6 +478,7 @@
 
       return {
         paint: paint,
+        setCrtEnabled: function (value) { crtEnabled = !!value; },
         dispose: dispose,
         backend: gl2 ? "webgl2" : "webgl",
       };

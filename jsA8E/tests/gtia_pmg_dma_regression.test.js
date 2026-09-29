@@ -97,14 +97,30 @@ function makeCtx() {
   };
 }
 
+function enablePmgHistory(ctx) {
+  const drawLine = ctx.ioData.drawLine;
+  drawLine.pmgEventCount = 0;
+  drawLine.pmgEventOverflow = false;
+  drawLine.pmgInitialRegisters = new Uint8Array(18);
+  drawLine.pmgReplayRegisters = new Uint8Array(18);
+  drawLine.pmgEventRegisters = new Uint8Array(64);
+  drawLine.pmgEventValues = new Uint8Array(64);
+  drawLine.pmgEventCycles = new Uint8Array(64);
+  ctx.ioData.inDrawLine = true;
+  return drawLine;
+}
+
 function testVdelayMasksFetchesOnEvenScanlines() {
   const api = loadGtiaApi();
   const ctx = makeCtx();
+  const drawLine = enablePmgHistory(ctx);
 
   ctx.sram[0xd400] = 0x08;
-  ctx.sram[0xd01d] = 0x02;
-  ctx.sram[0xd01c] = 0x10;
+  ctx.sram[0xd01d] = 0x03;
+  ctx.sram[0xd01c] = 0x1f;
   ctx.sram[0xd407] = 0x20;
+  ctx.sram[0xd011] = 0x12;
+  ctx.ram[0x2184] = 0x56;
   ctx.ram[0x2203] = 0x33;
   ctx.ram[0x2204] = 0x44;
 
@@ -112,13 +128,25 @@ function testVdelayMasksFetchesOnEvenScanlines() {
   assert.equal(firstFetch, 1);
   assert.equal(ctx.sram[0xd00d], 0x33);
 
+  const maskedMissileFetch = api.fetchPmgDmaCycle(ctx, 0, 8);
+  assert.equal(maskedMissileFetch, 1);
+  assert.equal(ctx.sram[0xd011], 0x12);
+
   const maskedFetch = api.fetchPmgDmaCycle(ctx, 2, 8);
-  assert.equal(maskedFetch, 0);
+  assert.equal(maskedFetch, 1);
   assert.equal(ctx.sram[0xd00d], 0x33);
+  assert.equal(drawLine.pmgEventCount, 1);
 
   const secondFetch = api.fetchPmgDmaCycle(ctx, 2, 9);
   assert.equal(secondFetch, 1);
   assert.equal(ctx.sram[0xd00d], 0x44);
+
+  ctx.sram[0xd01c] = 0x01;
+  ctx.sram[0xd011] = 0x03;
+  ctx.ram[0x2184] = 0xe4;
+  const partiallyMaskedMissileFetch = api.fetchPmgDmaCycle(ctx, 0, 8);
+  assert.equal(partiallyMaskedMissileFetch, 1);
+  assert.equal(ctx.sram[0xd011], 0xe7);
 }
 
 function testPlayerDmaKeepsMissileSlotAlive() {
@@ -133,6 +161,64 @@ function testPlayerDmaKeepsMissileSlotAlive() {
   const fetch = api.fetchPmgDmaCycle(ctx, 0, 8);
   assert.equal(fetch, 1);
   assert.equal(ctx.sram[0xd011], 0x7a);
+}
+
+function testDelayedDmaCtlControlsPmgFetch() {
+  const api = loadGtiaApi();
+  const ctx = makeCtx();
+
+  ctx.sram[0xd400] = 0x32;
+  ctx.sram[0xd01d] = 0x03;
+  ctx.sram[0xd407] = 0x20;
+  ctx.sram[0xd011] = 0x00;
+  ctx.sram[0xd00d] = 0x4c;
+  ctx.ram[0x2308] = 0xa5;
+  ctx.ram[0x2408] = 0x5a;
+
+  // AHRM 4.13: a disable on cycle 113 still permits missile DMA at cycle 0.
+  assert.equal(api.fetchPmgDmaCycle(ctx, 0, 8, 0x3e), 1);
+  assert.equal(ctx.sram[0xd011], 0xa5);
+
+  // The same delayed value has reached the disabled state by player cycle 2.
+  assert.equal(api.fetchPmgDmaCycle(ctx, 2, 8, 0x32), 0);
+  assert.equal(ctx.sram[0xd00d], 0x4c);
+}
+
+function testPhantomMissileDmaUsesDisplayListByte() {
+  const api = loadGtiaApi();
+  const ctx = makeCtx();
+  const drawLine = enablePmgHistory(ctx);
+
+  ctx.sram[0xd01d] = 0x01;
+  ctx.sram[0xd011] = 0x00;
+  assert.equal(api.fetchPhantomMissileDmaCycle(ctx, 1, 8, 0xe4), 1);
+  assert.equal(ctx.sram[0xd011], 0xe4);
+  assert.equal(drawLine.pmgEventCount, 1);
+  assert.equal(drawLine.pmgEventCycles[0], 1);
+}
+
+function testPmbaseChangeKeepsMixedLineDmaHistory() {
+  const api = loadGtiaApi();
+  const ctx = makeCtx();
+  const drawLine = enablePmgHistory(ctx);
+
+  ctx.sram[0xd400] = 0x08;
+  ctx.sram[0xd01d] = 0x02;
+  ctx.sram[0xd407] = 0x20;
+  ctx.ram[0x2203] = 0x11;
+  ctx.ram[0x2683] = 0x22;
+
+  assert.equal(api.fetchPmgDmaCycle(ctx, 2, 7), 1);
+  ctx.sram[0xd407] = 0x24;
+  assert.equal(api.fetchPmgDmaCycle(ctx, 3, 7), 1);
+
+  assert.equal(ctx.sram[0xd00d], 0x11);
+  assert.equal(ctx.sram[0xd00e], 0x22);
+  assert.equal(drawLine.pmgEventCount, 2);
+  assert.deepEqual(
+    Array.from(drawLine.pmgEventCycles.slice(0, 2)),
+    [2, 3],
+  );
 }
 
 function testHposZeroStillRenders() {
@@ -208,6 +294,46 @@ function testOverlappingRightwardHposRetriggerMergesShiftRegister() {
   assert.equal(ctx.ioData.drawLine.playerPmgShift[0], 0x00);
 }
 
+function testMidLinePriorWriteAffectsOnlyLaterPixels() {
+  const api = loadGtiaApi();
+  const ctx = makeCtx();
+
+  ctx.sram[0xd01b] = 0x04;
+  ctx.sram[0xd00d] = 0xff;
+  ctx.sram[0xd000] = 0x30;
+  ctx.sram[0xd008] = 0x03;
+  ctx.sram[0xd012] = 0x66;
+  ctx.ioData.videoOut.priority[96] = 0x01;
+  ctx.ioData.videoOut.priority[97] = 0x01;
+
+  api.drawPlayerMissilesClock(ctx, 96);
+  ctx.sram[0xd01b] = 0x00;
+  api.drawPlayerMissilesClock(ctx, 100);
+
+  assert.equal(ctx.ioData.videoOut.pixels[96], 0x00);
+  assert.equal(ctx.ioData.videoOut.pixels[100], 0x66);
+}
+
+function testPlayerCollisionSetsBothPlayerLatches() {
+  const api = loadGtiaApi();
+  const ctx = makeCtx();
+
+  ctx.sram[0xd01b] = 0x00;
+  ctx.sram[0xd00d] = 0xff;
+  ctx.sram[0xd00e] = 0xff;
+  ctx.sram[0xd000] = 0x30;
+  ctx.sram[0xd001] = 0x30;
+  ctx.sram[0xd008] = 0x00;
+  ctx.sram[0xd009] = 0x00;
+  ctx.sram[0xd012] = 0x66;
+  ctx.sram[0xd013] = 0x77;
+
+  api.drawPlayerMissilesClock(ctx, 96);
+
+  assert.equal(ctx.ram[0xd00c] & 0x02, 0x02);
+  assert.equal(ctx.ram[0xd00d] & 0x01, 0x01);
+}
+
 function testHpos30MapsToNormalPlayfieldLeftEdge() {
   const api = loadGtiaApi();
   const ctx = makeCtx();
@@ -225,10 +351,87 @@ function testHpos30MapsToNormalPlayfieldLeftEdge() {
   assert.equal(ctx.ioData.videoOut.pixels[97], 0x77);
 }
 
+function testHiddenSpanReplaysMidLineHposHistory() {
+  const api = loadGtiaApi();
+  const ctx = makeCtx();
+  const drawLine = enablePmgHistory(ctx);
+  drawLine.pmgInitialRegisters[0] = 60;
+  drawLine.pmgInitialRegisters[8] = 0x03;
+  drawLine.pmgInitialRegisters[13] = 0xff;
+
+  ctx.sram[0xd01b] = 0x00;
+  ctx.sram[0xd000] = 24;
+  ctx.sram[0xd008] = 0x03;
+  ctx.sram[0xd00d] = 0xff;
+  ctx.sram[0xd012] = 0x66;
+  ctx.ioData.clock = 10;
+  ctx.currentInstructionCycles = 1;
+  api.recordPmgRegisterWrite(ctx, 0xd000, 24);
+
+  api.drawPlayerMissilesClock(ctx, 96);
+
+  // The write occurs after the old HPOS position (x=120) has passed. It must
+  // not retroactively start a sprite at x=48 in the hidden span.
+  assert.equal(ctx.ioData.videoOut.pixels[96], 0x00);
+  assert.equal(drawLine.pmgEventCount, 1);
+}
+
+// AHRM 6.7/6.8: mode 0 mixes the matching PF/player groups. In
+// high resolution, PF1 marks foreground luminance but priority still sees PF2.
+function testModeZeroPlayerPlayfieldMix() {
+  const api = loadGtiaApi();
+  for (const special of [false, true]) {
+    for (const multi of [0, 0x20]) {
+      const ctx = makeCtx();
+      ctx.ioData.currentDisplayListCommand = special ? 2 : 4;
+      ctx.sram[0xd01b] = multi;
+      ctx.sram[0xd002] = ctx.sram[0xd003] = 0x30;
+      ctx.sram[0xd00f] = ctx.sram[0xd010] = 0x80;
+      ctx.sram[0xd014] = 0x48;
+      ctx.sram[0xd015] = 0x22;
+      ctx.ioData.videoOut.priority[96] = 4;
+      ctx.ioData.videoOut.priority[97] = special ? 2 : 4;
+      ctx.ioData.videoOut.pixels[96] = 0x94;
+      ctx.ioData.videoOut.pixels[97] = special ? 0x96 : 0x94;
+      api.drawPlayerMissilesClock(ctx, 96);
+      assert.equal(ctx.ioData.videoOut.pixels[96], multi ? 0xfe : 0xdc);
+      assert.equal(ctx.ioData.videoOut.pixels[97], special ? (multi ? 0xf6 : 0xd6) : (multi ? 0xfe : 0xdc));
+      assert.equal(ctx.ram[0xd006] & 4, 4);
+    }
+  }
+}
+function testModeZeroMixGroupsAndBackground() {
+  const api = loadGtiaApi();
+  for (const [player, prior, pf, expected] of [
+    [0, 0, 1, 0xdc], [1, 0, 2, 0xdc],
+    [2, 0, 4, 0xdc], [3, 0, 8, 0xdc],
+    [0, 0, 0, 0x48], [2, 0, 0, 0x48],
+    [0, 1, 1, 0x48], [2, 1, 4, 0x48],
+  ]) {
+    const ctx = makeCtx();
+    ctx.sram[0xd01b] = prior;
+    ctx.sram[0xd000 + player] = 0x30;
+    ctx.sram[0xd00d + player] = 0x80;
+    ctx.sram[0xd012 + player] = 0x48;
+    ctx.ioData.videoOut.priority[96] = pf;
+    ctx.ioData.videoOut.pixels[96] = 0x94;
+    api.drawPlayerMissilesClock(ctx, 96);
+    assert.equal(ctx.ioData.videoOut.pixels[96], expected);
+  }
+}
+testModeZeroMixGroupsAndBackground();
+testModeZeroPlayerPlayfieldMix();
+
 testVdelayMasksFetchesOnEvenScanlines();
 testPlayerDmaKeepsMissileSlotAlive();
+testDelayedDmaCtlControlsPmgFetch();
+testPhantomMissileDmaUsesDisplayListByte();
+testPmbaseChangeKeepsMixedLineDmaHistory();
 testHposZeroStillRenders();
 testMidImageHposWriteKeepsOriginalStart();
 testOverlappingRightwardHposRetriggerMergesShiftRegister();
+testMidLinePriorWriteAffectsOnlyLaterPixels();
+testPlayerCollisionSetsBothPlayerLatches();
 testHpos30MapsToNormalPlayfieldLeftEdge();
+testHiddenSpanReplaysMidLineHposHistory();
 console.log("gtia_pmg_dma_regression tests passed");

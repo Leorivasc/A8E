@@ -65,6 +65,7 @@ static void ProbeMachine_ResetTiming(ProbeMachine_t *pMachine)
 	pContext->cNmiPendingFlag = 0;
 	pContext->cNmiActiveFlag = 0;
 	pContext->cIrqPendingFlag = 0;
+	pContext->cIrqNmiLossWindow = 0;
 
 	pIoData->llCycle = 0;
 	pIoData->llDisplayListFetchCycle = CYCLE_NEVER;
@@ -77,6 +78,8 @@ static void ProbeMachine_ResetTiming(ProbeMachine_t *pMachine)
 	pIoData->llTimer2Cycle = CYCLE_NEVER;
 	pIoData->llTimer4Cycle = CYCLE_NEVER;
 	pIoData->bInDrawLine = 0;
+	pIoData->bVscrolTimingInitialized = 0;
+	pIoData->llVscrolPendingCycle = CYCLE_NEVER;
 	pIoData->cNmienEnabledByCycle7 = 0;
 	pIoData->cNmienEnabledByCycle8 = 0;
 	pIoData->cNmienEnabledOnCycle7Mask = 0;
@@ -131,7 +134,60 @@ static void ProbeMachine_TriggerBeamEvent(ProbeMachine_t *pMachine, u64 llBeamCy
 	pIoData->bInDrawLine = 0;
 }
 
+static int ReadNmiContractRow(unsigned uRow, unsigned *pClock, unsigned *pNmist, unsigned *pNmi)
+{
+	FILE *pFile = fopen("implementation/traces/antic_nmi_contract.jsonl", "r");
+	char aLine[160], aStep[64];
+	unsigned i;
+	if(!pFile) return 0;
+	for(i = 0; i <= uRow; i++) if(!fgets(aLine, sizeof(aLine), pFile)) { fclose(pFile); return 0; }
+	fclose(pFile);
+	return sscanf(aLine, "{\"step\":\"%63[^\"]\",\"clock\":%u,\"nmist\":%u,\"nmi\":%u}", aStep, pClock, pNmist, pNmi) == 4;
+}
+
 static int TestDliTriggersAtCycle8(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	FILE *pFixture;
+	char aLine[160], aStep[64];
+	unsigned uClock7, uNmist7, uNmi7, uClock8, uNmist8, uNmi8;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+	pFixture = fopen("implementation/traces/antic_nmi_contract.jsonl", "r");
+	REQUIRE(pFixture != NULL, "cannot open ANTIC NMI fixture");
+	REQUIRE(fgets(aLine, sizeof(aLine), pFixture) != NULL &&
+		sscanf(aLine, "{\"step\":\"%63[^\"]\",\"clock\":%u,\"nmist\":%u,\"nmi\":%u}", aStep, &uClock7, &uNmist7, &uNmi7) == 4,
+		"invalid first ANTIC NMI fixture event");
+	REQUIRE(fgets(aLine, sizeof(aLine), pFixture) != NULL &&
+		sscanf(aLine, "{\"step\":\"%63[^\"]\",\"clock\":%u,\"nmist\":%u,\"nmi\":%u}", aStep, &uClock8, &uNmist8, &uNmi8) == 4,
+		"invalid second ANTIC NMI fixture event");
+	fclose(pFixture);
+
+	ProbeMachine_ResetTiming(&tMachine);
+
+	pIoData->llDliCycle = uClock7;
+	pContext->pShadowMemory[IO_NMIEN] = NMI_DLI;
+	pIoData->cNmienEnabledByCycle7 = NMI_DLI;
+	pIoData->cNmienEnabledByCycle8 = NMI_DLI;
+
+	ProbeMachine_TriggerBeamEvent(&tMachine, uClock7, uClock7);
+	REQUIRE(pContext->cNmiPendingFlag == uNmi7, "DLI cycle-7 NMI mismatch");
+	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_DLI) == uNmist7,
+			"NMIST DLI bit missing at cycle 7");
+
+	ProbeMachine_TriggerBeamEvent(&tMachine, uClock8, uClock8);
+	REQUIRE(pContext->cNmiPendingFlag == uNmi8, "DLI cycle-8 NMI mismatch");
+	REQUIRE(pIoData->llDliCycle == CYCLE_NEVER, "DLI cycle was not cleared after firing");
+	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_DLI) == uNmist8,
+			"NMIST DLI bit missing after cycle-8 trigger");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestCycle4IrqLosesAnticNmi(void)
 {
 	ProbeMachine_t tMachine = ProbeMachine_Open();
 	_6502_Context_t *pContext = tMachine.pContext;
@@ -141,21 +197,32 @@ static int TestDliTriggersAtCycle8(void)
 
 	ProbeMachine_ResetTiming(&tMachine);
 
+	pContext->pMemory[0xfffe] = 0x78;
+	pContext->pMemory[0xffff] = 0x56;
+	pContext->pMemory[0xfffa] = 0x34;
+	pContext->pMemory[0xfffb] = 0x12;
+	pContext->pMemory[0x2000] = 0xea;
+	pContext->tCpu.pc = 0x2000;
+	pContext->tCpu.ps.i = 0;
+	pContext->cIrqPendingFlag = 1;
+	pContext->llCycleCounter = 4;
 	pIoData->llDliCycle = 7;
-	pContext->pShadowMemory[IO_NMIEN] = NMI_DLI;
 	pIoData->cNmienEnabledByCycle7 = NMI_DLI;
 	pIoData->cNmienEnabledByCycle8 = NMI_DLI;
+	AtariIoCycleTimedEventUpdate(pContext);
 
-	ProbeMachine_TriggerBeamEvent(&tMachine, 7, 7);
-	REQUIRE(pContext->cNmiPendingFlag == 0, "DLI fired before cycle 8");
-	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_DLI) != 0,
-			"NMIST DLI bit missing at cycle 7");
+	_6502_Execute(pContext);
+	REQUIRE(pContext->tCpu.pc == 0x5678,
+			"IRQ did not start at the critical cycle");
+	REQUIRE(pContext->llCycleCounter == 11,
+			"IRQ acknowledge did not consume 7 cycles");
 
-	ProbeMachine_TriggerBeamEvent(&tMachine, 8, 8);
-	REQUIRE(pContext->cNmiPendingFlag == 1, "DLI did not trigger on cycle 8");
-	REQUIRE(pIoData->llDliCycle == CYCLE_NEVER, "DLI cycle was not cleared after firing");
+	ProbeMachine_TriggerBeamEvent(&tMachine, 7, 11);
+	ProbeMachine_TriggerBeamEvent(&tMachine, 8, 11);
+	REQUIRE(pContext->cNmiPendingFlag == 0,
+			"cycle-4 IRQ incorrectly preserved the cycle-8 NMI edge");
 	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_DLI) != 0,
-			"NMIST DLI bit missing after cycle-8 trigger");
+			"lost NMI did not leave NMIST latched");
 
 	ProbeMachine_Close(&tMachine);
 	return 1;
@@ -225,8 +292,10 @@ static int TestVbiEnableOnCycle7DelaysByOneCycle(void)
 	_6502_Context_t *pContext = tMachine.pContext;
 	IoData_t *pIoData = tMachine.pIoData;
 	u8 cValue = NMI_VBI;
+	unsigned uClock, uNmist, uNmi;
 
 	REQUIRE(pContext != NULL, "machine open failed");
+	REQUIRE(ReadNmiContractRow(2, &uClock, &uNmist, &uNmi), "invalid delayed VBI fixture");
 
 	ProbeMachine_ResetTiming(&tMachine);
 
@@ -246,8 +315,8 @@ static int TestVbiEnableOnCycle7DelaysByOneCycle(void)
 	REQUIRE((pContext->pMemory[IO_NMIRES_NMIST] & NMI_VBI) != 0,
 			"cycle-7 delayed VBI did not still latch NMIST");
 
-	ProbeMachine_TriggerBeamEvent(&tMachine, 9, 9);
-	REQUIRE(pContext->cNmiPendingFlag == 1,
+	ProbeMachine_TriggerBeamEvent(&tMachine, uClock, uClock);
+	REQUIRE(pContext->cNmiPendingFlag == uNmi,
 			"delayed VBI did not trigger on the following cycle");
 	REQUIRE(pIoData->llVbiCycle == CYCLE_NEVER,
 			"delayed VBI cycle was not cleared after firing");
@@ -262,8 +331,10 @@ static int TestVbiDisableOnCycle8SuppressesCurrentLine(void)
 	_6502_Context_t *pContext = tMachine.pContext;
 	IoData_t *pIoData = tMachine.pIoData;
 	u8 cValue = 0x00;
+	unsigned uClock, uNmist, uNmi;
 
 	REQUIRE(pContext != NULL, "machine open failed");
+	REQUIRE(ReadNmiContractRow(3, &uClock, &uNmist, &uNmi), "invalid suppressed VBI fixture");
 
 	ProbeMachine_ResetTiming(&tMachine);
 
@@ -678,6 +749,57 @@ static int TestDliDisableOnCycle8SuppressesCurrentLine(void)
 	return 1;
 }
 
+static int TestVscrolDeadlineUsesAtomicWriteCycle(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetTiming(&tMachine);
+	pIoData->bInDrawLine = 1;
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->bModeLineScrollExit = 1;
+	pIoData->cModeLineRowCounter = 3;
+	SRAM[IO_VSCROL] = 3;
+	pIoData->bVscrolTimingInitialized = 1;
+	pIoData->cVscrolRawValue = 3;
+	pIoData->cVscrolPendingValue = 3;
+	pIoData->cVscrolActiveValue = 0;
+
+	/* A bus write completing on cycle 108 counts for the cycle-109 sample. */
+	pIoData->llVscrolPendingCycle = 108;
+	while(pIoData->llCycle < 110)
+	{
+		AtariIoTimingProbeStepClock(pContext);
+	}
+	REQUIRE(pIoData->bModeLineEndsThisLine == 1,
+			"VSCROL write on cycle 108 was not visible to cycle-109 sampling");
+
+	/* A bus write completing on cycle 109 is too late for that sample. */
+	ProbeMachine_ResetTiming(&tMachine);
+	pIoData->bInDrawLine = 1;
+	pIoData->llDisplayListFetchCycle = 0;
+	pIoData->bModeLineScrollExit = 1;
+	pIoData->cModeLineRowCounter = 3;
+	SRAM[IO_VSCROL] = 3;
+	pIoData->bVscrolTimingInitialized = 1;
+	pIoData->cVscrolRawValue = 3;
+	pIoData->cVscrolPendingValue = 3;
+	pIoData->cVscrolActiveValue = 0;
+	pIoData->llVscrolPendingCycle = 109;
+	while(pIoData->llCycle < 110)
+	{
+		AtariIoTimingProbeStepClock(pContext);
+	}
+	REQUIRE(pIoData->bModeLineEndsThisLine == 0,
+			"VSCROL write on cycle 109 incorrectly affected cycle-109 sampling");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
 int main(int argc, char *argv[])
 {
 	int lPassed = 1;
@@ -687,6 +809,7 @@ int main(int argc, char *argv[])
 	_6502_Init();
 
 	lPassed &= TestDliTriggersAtCycle8();
+	lPassed &= TestCycle4IrqLosesAnticNmi();
 	lPassed &= TestVbiTriggersAtLine248();
 	lPassed &= TestVbiEnableOnCycle7DelaysByOneCycle();
 	lPassed &= TestVbiDisableOnCycle8SuppressesCurrentLine();
@@ -698,6 +821,7 @@ int main(int argc, char *argv[])
 	lPassed &= TestDliEnableOnCycle7DelaysByOneCycle();
 	lPassed &= TestDliEnableOnCycle8IsTooLate();
 	lPassed &= TestDliDisableOnCycle8SuppressesCurrentLine();
+	lPassed &= TestVscrolDeadlineUsesAtomicWriteCycle();
 
 	SDL_Quit();
 

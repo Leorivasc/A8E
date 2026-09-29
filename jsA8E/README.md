@@ -33,6 +33,7 @@ The Memory selector and automation API support the AHRM profiles below:
 | 64K | `none` |
 | 128K (130XE) | `130xe-128k` |
 | 192K (RAMBO) | `rambo-192k` |
+| 256K (RAMBO) | `rambo-256k` |
 | 320K (RAMBO) | `rambo-320k` |
 | 320K (COMPY) | `compy-320k` |
 | 576K (RAMBO) | `rambo-576k` |
@@ -112,9 +113,16 @@ Behavior:
 - The emulator only becomes start-ready after both ROMs are loaded.
 - Load ROMs via the top bar file inputs, or
 - Serve from repo root and let auto-load try `../ATARIXL.ROM` and `../ATARIBAS.ROM`.
-- Disk image/program load (`Load Disk`) accepts `.atr`, `.xex`, and `.zip`.
+- Disk image/program load (`Open Disk`) accepts `.atr`, `.xex`, and `.zip`.
   - `.zip` archives are scanned for the first `.atr` (preferred) or `.xex` entry and loaded directly.
   - `.xex` files are converted in-memory to an ATR-compatible boot stream using the same XEX boot loader logic as the native path.
+- When D1 is empty at startup, the browser mounts and starts the built-in
+  `standby.xex`, which displays disk-loading instructions through its own
+  ANTIC display list. Loading a disk through **Open Disk** restarts into it.
+  The Disk Library status confirms each mount action without prompting for a
+  reset. Drive changes take effect without restarting, so the running program
+  can request another side; use **Full Reset** when you want to boot from the
+  current D1 image. Standby auto-start waits until the Atari OS ROM is loaded.
 
 ## Controls
 
@@ -130,6 +138,8 @@ Additional browser-only triggers:
 
 ## UI Toggles / Features
 
+- **CRT** toggles the display filter without restarting emulation. Turn it off for sharp palette pixels without curvature, scanlines, or color bleeding. The preference is saved between sessions; CRT is on by default.
+
 - Start/Pause, Reset, Fullscreen
 - PAL/NTSC selector for video standard selection at boot
 - CPU Turbo (`~4x` speed multiplier)
@@ -138,7 +148,7 @@ Additional browser-only triggers:
 - On-screen joystick panel toggle
 - On-screen Atari keyboard toggle
 - Keyboard map toggle (translated symbol mapping for local keyboard layouts vs. original Atari layout)
-- Option-on-Start toggle (hold OPTION during boot, BASIC-off style boot behavior)
+- Option-on-Start toggle (off by default; hold OPTION during boot for BASIC-off style boot behavior)
 
 On smaller/mobile layouts, the virtual keyboard starts hidden by default.
 

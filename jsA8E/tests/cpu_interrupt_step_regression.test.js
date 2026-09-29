@@ -107,6 +107,46 @@ function testNmiCanNestWhilePreviousHandlerIsActive() {
   assert.equal(ctx.nmiActive, 1, "nested NMI should keep the active state set");
 }
 
+function testCycle4IrqCanLoseAnticNmi() {
+  const { cpuApi, ctx } = makeContext();
+
+  ctx.ram[0xfffe] = 0x78;
+  ctx.ram[0xffff] = 0x56;
+  ctx.ram[0xfffa] = 0x34;
+  ctx.ram[0xfffb] = 0x12;
+  ctx.ram[0x5678] = 0xea;
+  ctx.ioBeamTimedEventCycle = 7;
+  ctx.cycleCounter = 4;
+  ctx.irqPending = 1;
+
+  cpuApi.executeOne(ctx);
+  assert.equal(ctx.cpu.pc, 0x5678, "IRQ should start at the critical cycle");
+  assert.equal(ctx.cycleCounter, 11, "IRQ acknowledge should consume 7 cycles");
+
+  cpuApi.nmi(ctx);
+  assert.equal(ctx.nmiPending, 0, "cycle-8 NMI edge should be lost");
+  cpuApi.executeOne(ctx);
+  assert.equal(ctx.cpu.pc, 0x5679, "lost NMI must not vector to the NMI handler");
+}
+
+function testIrqOutsideCycle4KeepsAnticNmi() {
+  const { cpuApi, ctx } = makeContext();
+
+  ctx.ram[0xfffe] = 0x78;
+  ctx.ram[0xffff] = 0x56;
+  ctx.ram[0xfffa] = 0x34;
+  ctx.ram[0xfffb] = 0x12;
+  ctx.ram[0x5678] = 0xea;
+  ctx.ioBeamTimedEventCycle = 7;
+  ctx.cycleCounter = 5;
+  ctx.irqPending = 1;
+
+  cpuApi.executeOne(ctx);
+  cpuApi.nmi(ctx);
+  cpuApi.executeOne(ctx);
+  assert.equal(ctx.cpu.pc, 0x1234, "non-critical IRQ must preserve the NMI edge");
+}
+
 function testPokeyIrqReconciliationTracksActiveSource() {
   const { cpuApi, ctx } = makeContext();
 
@@ -124,4 +164,6 @@ function testPokeyIrqReconciliationTracksActiveSource() {
 testPendingNmiConsumesOnlyInterruptEntryStep();
 testPendingIrqConsumesOnlyInterruptEntryStep();
 testNmiCanNestWhilePreviousHandlerIsActive();
+testCycle4IrqCanLoseAnticNmi();
+testIrqOutsideCycle4KeepsAnticNmi();
 testPokeyIrqReconciliationTracksActiveSource();

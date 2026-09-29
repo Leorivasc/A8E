@@ -127,6 +127,7 @@
     if (text === "" || text === "none" || text === "64k" || text === "64kb" || text === "no-expansion") return "none";
     if (text === "130xe" || text === "128k" || text === "128kb" || text === "130xe-128k") return "130xe-128k";
     if (text === "192k" || text === "192kb" || text === "rambo-192k") return "rambo-192k";
+    if (text === "256k" || text === "256kb" || text === "rambo-256k") return "rambo-256k";
     if (text === "320k" || text === "320kb" || text === "rambo-320k") return "rambo-320k";
     if (text === "compy-320k" || text === "320k-compy") return "compy-320k";
     if (text === "576k" || text === "576kb" || text === "rambo-576k") return "rambo-576k";
@@ -865,7 +866,9 @@
       });
     }
 
-    function snapshotFromWire(items, isReady) {
+    let mountsRestored = false;
+
+    function snapshotFromWire(items, isReady, isRestored) {
       files.clear();
       if (Array.isArray(items)) {
         for (let i = 0; i < items.length; i++) {
@@ -875,6 +878,7 @@
         }
       }
       if (typeof isReady === "boolean") ready = isReady;
+      if (typeof isRestored === "boolean") mountsRestored = isRestored;
       emitChange();
     }
 
@@ -902,6 +906,10 @@
 
     function isReady() {
       return ready;
+    }
+
+    function isRestored() {
+      return mountsRestored;
     }
 
     function addFile(name, data) {
@@ -967,6 +975,7 @@
         listFiles: listFiles,
         getFileInfo: getFileInfo,
         isReady: isReady,
+        isRestored: isRestored,
         addFile: addFile,
         replaceFile: replaceFile,
         mountFile: mountFile,
@@ -1308,7 +1317,11 @@
       }
 
       if (data.type === "diskLibrarySnapshot") {
-        diskLibraryProxy.snapshotFromWire(data.files || [], !!data.ready);
+        diskLibraryProxy.snapshotFromWire(
+          data.files || [],
+          !!data.ready,
+          typeof data.restored === "boolean" ? data.restored : !!data.ready,
+        );
         return;
       }
 
@@ -1365,12 +1378,14 @@
         width: canvas.width | 0,
         height: canvas.height | 0,
         audioSampleRate: audioBridge.getSampleRateHint(),
+        crtEnabled: opts.crtEnabled !== false,
         audioEnabled: !!opts.audioEnabled,
         turbo: !!opts.turbo,
         sioTurbo: opts.sioTurbo === true,
         optionOnStart: !!opts.optionOnStart,
         videoStandard: videoStandard,
         memoryExpansion: state.memoryExpansion,
+        pokeyTrace: opts.pokeyTrace === true,
         keyboardMappingMode: keyboardMappingMode,
       },
       [offscreen, audioChannel.port2],
@@ -1421,6 +1436,9 @@
       },
       getSioTurbo: function () {
         return state.sioTurbo;
+      },
+      setCrtEnabled: function (value) {
+        sendCommand("setCrtEnabled", { value: !!value });
       },
       setAudioEnabled: function (v) {
         state.audioEnabled = !!v;

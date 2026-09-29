@@ -71,6 +71,7 @@
       nmiPending: 0,
       nmiActive: 0,
       irqPending: 0,
+      irqNmiLossWindow: 0,
       breakRun: false,
       instructionCounter: 0,
       currentInstructionPc: 0,
@@ -220,6 +221,12 @@
   }
 
   function nmi(ctx) {
+    // AHRM 4.8: an IRQ acknowledged at cycle 4 can lose ANTIC's cycle-8
+    // NMI edge, while NMIST remains visible to the guest.
+    if (ctx.irqNmiLossWindow) {
+      ctx.irqNmiLossWindow = 0;
+      return;
+    }
     // NMI is edge-driven; keep one pending request instead of re-entering
     // immediately from nested timed events.
     ctx.nmiPending = 1;
@@ -255,6 +262,7 @@
     ctx.irqPending = 0;
     ctx.nmiPending = 0;
     ctx.nmiActive = 0;
+    ctx.irqNmiLossWindow = 0;
     cpu.pc = ctx.ram[0xfffc] | (ctx.ram[0xfffd] << 8);
     ctx.cycleCounter += 7;
   }
@@ -266,6 +274,10 @@
       // remains asserted; do not queue stale events after the source clears.
       ctx.irqPending = 1;
     } else {
+      // ioBeamTimedEventCycle points to NMIST at cycle 7, three cycles after
+      // the cycle-4 IRQ acknowledge that can lose the following NMI.
+      ctx.irqNmiLossWindow =
+        ctx.ioBeamTimedEventCycle === ctx.cycleCounter + 3 ? 1 : 0;
       if (ctx.irqPending) ctx.irqPending = (ctx.irqPending - 1) & 0xff;
       serviceInterrupt(ctx, 0xfffe, 0, cpu.pc);
       ctx.cycleCounter += 7;
@@ -407,7 +419,17 @@
     // both directions so re-enabling an asserted source cannot lose its IRQ.
     const irqst = ctx.ram[0xd20e] & 0xff;
     const irqen = ctx.sram[0xd20e] & 0xff;
-    ctx.irqPending = ((~irqst) & irqen & 0x7f) !== 0 ? 1 : 0;
+    const io = ctx.ioData || {};
+    const pactl = ctx.sram[0xd302] & 0xff;
+    const pbctl = ctx.sram[0xd303] & 0xff;
+    const modeA = (pactl >>> 3) & 0x07;
+    const modeB = (pbctl >>> 3) & 0x07;
+    const piaIrq =
+      ((io.piaStatusA & 0x80) && (pactl & 0x01)) ||
+      ((io.piaStatusA & 0x40) && modeA < 4 && (modeA & 0x01)) ||
+      ((io.piaStatusB & 0x80) && (pbctl & 0x01)) ||
+      ((io.piaStatusB & 0x40) && modeB < 4 && (modeB & 0x01));
+    ctx.irqPending = ((~irqst) & irqen & 0x7f) !== 0 || piaIrq ? 1 : 0;
   }
   function writeAccess(ctx, value) {
     const addr = ctx.accessAddress & 0xffff;
@@ -1079,6 +1101,12 @@
     if (ctx.cycleCounter < ctx.stallCycleCounter) {
       ctx.cycleCounter++;
       return;
+    }
+
+    // The loss window expires at the next CPU boundary if no ANTIC edge
+    // arrived first.
+    if (ctx.irqNmiLossWindow && !ctx.nmiPending) {
+      ctx.irqNmiLossWindow = 0;
     }
 
     const cpu = ctx.cpu;

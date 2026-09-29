@@ -25,12 +25,28 @@
         timer1Cycle: CYCLE_NEVER,
         timer2Cycle: CYCLE_NEVER,
         timer4Cycle: CYCLE_NEVER,
+        pokeyTimerResetCycle: CYCLE_NEVER,
+        pokeySlowClockOriginCycle: 0,
+        serialOutputClockHigh: false,
         // PIA data-direction registers and port B output latch. PIA reset
         // leaves both DDRs at zero; external pull-ups determine PORTB's
         // effective MMU value until the OS enables its outputs.
         valuePortA: 0,
         valuePortB: 0,
         outputPortB: 0,
+        // PIA control-line levels and edge-latched interrupt state. The
+        // unconnected XL/XE control inputs are pulled high at reset.
+        piaCa1Level: 1,
+        piaCa2Level: 1,
+        piaCb1Level: 1,
+        piaCb2Level: 1,
+        piaStatusA: 0,
+        piaStatusB: 0,
+        piaCb2WasRaisedOutput: false,
+        piaCa2PulseUntilCycle: -1,
+        piaCb2PulseUntilCycle: -1,
+        piaSetControlLine: null,
+        piaCycleTimedEvent: null,
         // SIO state (ported from Pokey.c)
         // 850 handler downloads can be 1496 bytes (AHRM 9.10).
         sioBuffer: new Uint8Array(4096),
@@ -51,6 +67,8 @@
         // POKEY pot scan (POT0..POT7 / ALLPOT).
         pokeyPotValues: potValues,
         pokeyPotLatched: new Uint8Array(8),
+        pokeyPotCharge: new Uint8Array(8),
+        pokeyPotChargeLastCycle: 0,
         pokeyPotScanLastCycle: 0,
         pokeyPotScanTerminalCycle: CYCLE_NEVER,
         pokeyPotCounter: 0,
@@ -72,12 +90,24 @@
         modeLineScrollExit: false,
         modeLineExitDli: false,
         modeLineEndsThisLine: false,
+        pmgPhantomMissileDmaPending: false,
+        // AHRM 4.13: P/M DMA enable bits take effect two ANTIC cycles later.
+        pmgDmaCtlTimingInitialized: false,
+        pmgDmaCtlOneCycleAgo: 0,
+        pmgDmaCtlTwoCyclesAgo: 0,
         nmiTiming: {
           enabledByCycle7: 0,
           enabledByCycle8: 0,
           enabledOnCycle7Mask: 0,
         },
         chbaseTiming: {
+          rawValue: 0,
+          activeValue: 0,
+          pendingValue: 0,
+          pendingClock: -1,
+          initialized: false,
+        },
+        vscrolTiming: {
           rawValue: 0,
           activeValue: 0,
           pendingValue: 0,
@@ -95,6 +125,13 @@
           playerMissileClockActive: false,
           playerMissileInterleaved: false,
           pmgFirstVisibleSpan: true,
+          pmgEventCount: 0,
+          pmgEventOverflow: false,
+          pmgInitialRegisters: new Uint8Array(18),
+          pmgReplayRegisters: new Uint8Array(18),
+          pmgEventRegisters: new Uint8Array(64),
+          pmgEventValues: new Uint8Array(64),
+          pmgEventCycles: new Uint8Array(64),
           playerPmgShift: new Uint8Array(4),
           playerPmgState: new Uint8Array(4),
           missilePmgShift: new Uint8Array(4),
@@ -167,6 +204,9 @@
       if (io.timer1Cycle < masterNext) masterNext = io.timer1Cycle;
       if (io.timer2Cycle < masterNext) masterNext = io.timer2Cycle;
       if (io.timer4Cycle < masterNext) masterNext = io.timer4Cycle;
+      if (io.pokeyTimerResetCycle < masterNext) {
+        masterNext = io.pokeyTimerResetCycle;
+      }
 
       ctx.ioBeamTimedEventCycle = beamNext;
       ctx.ioMasterTimedEventCycle = masterNext;

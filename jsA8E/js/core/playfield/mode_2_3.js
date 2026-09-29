@@ -51,22 +51,11 @@
       return 7 - glyphRow;
     }
 
-    function resolveCharacterRow10(ch, row, chactl) {
-      const glyphRow = row & 0xff;
-      if (ch < 0x60) return resolveCharacterRow8(glyphRow, chactl);
-      if (glyphRow < 2) return -1;
-      if (glyphRow < 8) return resolveCharacterRow8(glyphRow, chactl);
-      if (glyphRow < 10) return resolveCharacterRow8(glyphRow - 8, chactl);
-      return -1;
-    }
-
-    function resolveCharacterRowMode2(ch, row, chactl) {
-      const glyphRow = row & 0xff;
-      if (glyphRow < 8) return resolveCharacterRow8(glyphRow, chactl);
-      // AHRM 4.7: mode 2 rows 8-9 blank non-descender characters and show
-      // descender rows 0-1, the same way as mode 3.
-      if (ch < 0x60) return -1;
-      return resolveCharacterRow8(glyphRow - 8, chactl);
+    function isBlankExtendedRow(ch, row, isMode3) {
+      if (isMode3) {
+        return (ch < 0x60 && row >= 8) || (ch >= 0x60 && row < 2);
+      }
+      return ch < 0x60 && row >= 8;
     }
 
     function writeBackgroundQuad(dst, prio, dstIndex, color) {
@@ -112,22 +101,23 @@
           inverse = (decoded & 0x100) !== 0;
           const blank = (decoded & 0x200) !== 0;
           dispAddr = Util.fixedAdd(dispAddr, 0x0fff, 1);
-          const glyphRow = isMode3
-            ? resolveCharacterRow10(ch, vScrollOffset, chactl)
-            : resolveCharacterRowMode2(ch, vScrollOffset, chactl);
-          if (glyphRow >= 0 && useDeferredCharacterFetch) {
+          // AHRM 4.14: character data DMA is still issued on blank extended
+          // rows. The byte is fetched from the physical row selected by the
+          // 4-bit counter and then discarded for display.
+          const fetchRow = resolveCharacterRow8(vScrollOffset & 0x07, chactl);
+          if (fetchRow >= 0 && useDeferredCharacterFetch) {
             data = fetchUnbufferedDisplayByte(
               ctx,
-              (chBase + ch * 8 + glyphRow) & 0xffff,
+              (chBase + ch * 8 + fetchRow) & 0xffff,
               3,
             );
-          } else if (glyphRow >= 0) {
+          } else if (fetchRow >= 0) {
             stealDma(ctx, 1);
-            data = ram[(chBase + ch * 8 + glyphRow) & 0xffff] & 0xff;
+            data = ram[(chBase + ch * 8 + fetchRow) & 0xffff] & 0xff;
           } else {
             data = 0;
           }
-          if (blank) data = 0;
+          if (blank || isBlankExtendedRow(ch, vScrollOffset, isMode3)) data = 0;
           mask = 0x80;
         }
 

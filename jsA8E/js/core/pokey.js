@@ -17,6 +17,74 @@
     const IO_AUDCTL_ALLPOT = cfg.IO_AUDCTL_ALLPOT;
     const IO_STIMER_KBCODE = cfg.IO_STIMER_KBCODE;
     const IO_SKCTL_SKSTAT = cfg.IO_SKCTL_SKSTAT;
+    const IO_IRQEN_IRQST = cfg.IO_IRQEN_IRQST;
+
+    let pokeyTraceEnabled =
+      cfg.pokeyTrace === true ||
+      (window.A8E_BOOT_OPTIONS && window.A8E_BOOT_OPTIONS.pokeyTrace === true);
+    let pokeyTraceEdgesEnabled =
+      cfg.pokeyTraceEdges === true ||
+      (window.A8E_BOOT_OPTIONS &&
+        window.A8E_BOOT_OPTIONS.pokeyTraceEdges === true);
+    if (window.location && window.location.search) {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const traceValue = params.get("a8e_pokey_trace");
+        if (!pokeyTraceEnabled) {
+          pokeyTraceEnabled =
+            traceValue === "1" || traceValue === "true";
+        }
+        if (!pokeyTraceEdgesEnabled) {
+          pokeyTraceEdgesEnabled =
+            params.get("a8e_pokey_trace_edges") === "1" ||
+            params.get("a8e_pokey_trace_edges") === "true";
+        }
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+    const POKEY_TRACE_PAD_INDEX = 0x89;
+
+    function pokeyTraceEvent(ctx, event, fields) {
+      if (!pokeyTraceEnabled || typeof console === "undefined") return;
+      if (event === "TIMER_CLOCK_EDGE" && !pokeyTraceEdgesEnabled) return;
+      const io = ctx.ioData || {};
+      const timer = pokeySerialOutputClockTimer(ctx);
+      const record = {
+        event: event,
+        cycle: ctx.cycleCounter,
+        pc: Number.isFinite(ctx.currentInstructionPc)
+          ? ctx.currentInstructionPc & 0xffff
+          : null,
+        opcode: Number.isFinite(ctx.currentOpcode)
+          ? ctx.currentOpcode & 0xff
+          : null,
+        pad: ctx.ram ? ctx.ram[POKEY_TRACE_PAD_INDEX] & 0xff : null,
+        audctl: ctx.sram ? ctx.sram[IO_AUDCTL_ALLPOT] & 0xff : null,
+        audf4: ctx.sram ? ctx.sram[IO_AUDF4_POT6] & 0xff : null,
+        skctl: ctx.sram ? ctx.sram[IO_SKCTL_SKSTAT] & 0xff : null,
+        timer: timer,
+        timerPeriod: timer ? pokeyTimerPeriodCpuCycles(ctx, timer) : 0,
+        timer2Cycle: Number.isFinite(io.timer2Cycle) ? io.timer2Cycle : null,
+        timer4Cycle: Number.isFinite(io.timer4Cycle) ? io.timer4Cycle : null,
+        serialClockHigh: io.serialOutputClockHigh ? 1 : 0,
+        needDataCycle: Number.isFinite(io.serialOutputNeedDataCycle)
+          ? io.serialOutputNeedDataCycle
+          : null,
+        transmissionDoneCycle: Number.isFinite(
+          io.serialOutputTransmissionDoneCycle,
+        )
+          ? io.serialOutputTransmissionDoneCycle
+          : null,
+        irqst: ctx.ram ? ctx.ram[IO_IRQEN_IRQST] & 0xff : null,
+      };
+      if (fields && typeof fields === "object") Object.assign(record, fields);
+      try {
+        console.log("[A8E-POKEY]", JSON.stringify(record));
+      } catch {
+        // Diagnostics must never affect emulation.
+      }
+    }
 
     const CYCLE_NEVER = cfg.CYCLE_NEVER;
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
@@ -31,6 +99,18 @@
             SERIAL_INPUT_FIRST_DATA_READY_CYCLES:
               cfg.SERIAL_INPUT_FIRST_DATA_READY_CYCLES,
             SERIAL_INPUT_DATA_READY_CYCLES: cfg.SERIAL_INPUT_DATA_READY_CYCLES,
+            IO_IRQEN_IRQST: IO_IRQEN_IRQST,
+            CYCLE_NEVER: CYCLE_NEVER,
+            serialOutputClockAvailable: pokeySerialOutputClockAvailable,
+            serialOutputClockPeriod: function (ctx) {
+              const timer = pokeySerialOutputClockTimer(ctx);
+              const period = timer ? pokeyTimerPeriodCpuCycles(ctx, timer) : 0;
+              return period;
+            },
+            serialOutputClockNextCycle: function (ctx, now) {
+              return pokeySerialOutputClockNextCycle(ctx, now);
+            },
+            traceSerialEvent: pokeyTraceEvent,
             cycleTimedEventUpdate: cycleTimedEventUpdate,
           })
         : null;
@@ -43,6 +123,7 @@
     const POKEY_AUDIO_RING_SIZE = 4096; // power-of-two
     const POKEY_AUDIO_TARGET_BUFFER_SAMPLES = 1024;
     const POKEY_AUDIO_ENABLE_ADAPTIVE_SYNC = true;
+    const POKEY_AUDIO_USE_FAST_FORWARD = true;
     const POKEY_AUDIO_MAX_ADJUST_DIVISOR = 200; // +/-0.5%
     const POKEY_AUDIO_FILL_DEADBAND_DIVISOR = 8; // +/-12.5% fill deadband
     const POKEY_AUDIO_CPS_SLEW_DIVISOR = 1000; // max cps delta per sync (~0.1%)
@@ -361,9 +442,16 @@
 
     function pokeyAudioPairTick(st, chLow, chHigh, audctl) {
       const period = (((chHigh.audf & 0xff) << 8) | (chLow.audf & 0xff)) >>> 0;
+      let pulses = 0;
+      if (chLow.counter > 0) chLow.counter = (chLow.counter - 1) | 0;
+      if (chLow.counter === 0) {
+        chLow.counter = 256;
+        pokeyAudioChannelClockOut(st, chLow, audctl);
+        pulses |= 1;
+      }
 
       if (chHigh.counter > 0) chHigh.counter = (chHigh.counter - 1) | 0;
-      if (chHigh.counter !== 0) return 0;
+      if (chHigh.counter !== 0) return pulses;
 
       let reload = (period + 1) >>> 0;
       if (chLow === st.channels[0] && audctl & 0x40)
@@ -372,9 +460,14 @@
         {reload = (period + 7) >>> 0;}
       if (!reload) reload = 1;
       chHigh.counter = reload | 0;
+      // AHRM 5.3: the high underflow reloads both counters. Reloading the
+      // low counter does not clock its audio output again.
+      const fast = (chLow === st.channels[0] && (audctl & 0x40)) ||
+        (chLow === st.channels[2] && (audctl & 0x20));
+      chLow.counter = (chLow.audf & 0xff) + (fast ? 4 : 1);
 
       pokeyAudioChannelClockOut(st, chHigh, audctl);
-      return 1;
+      return pulses | 2;
     }
 
     function pokeyAudioStepCpuCycle(st) {
@@ -415,26 +508,28 @@
       }
 
       if (pair34) {
-        // In 16-bit pair mode ch3 is a prescaler; only ch4 (chHigh) independently
-        // underflows.  pulse2 (ch3 clock used for HP filter on ch1) stays 0.
         if (st.channels[2].clkDivCycles === 1) {
-          pulse3 = pokeyAudioPairTick(
+          const pulses = pokeyAudioPairTick(
             st,
             st.channels[2],
             st.channels[3],
             audctl,
           );
+          pulse2 = pulses & 1;
+          pulse3 = (pulses >>> 1) & 1;
         } else {
           st.channels[2].clkAccCycles = (st.channels[2].clkAccCycles + 1) | 0;
           if (st.channels[2].clkAccCycles >= st.channels[2].clkDivCycles) {
             st.channels[2].clkAccCycles =
               (st.channels[2].clkAccCycles - st.channels[2].clkDivCycles) | 0;
-            pulse3 = pokeyAudioPairTick(
+            const pulses = pokeyAudioPairTick(
               st,
               st.channels[2],
               st.channels[3],
               audctl,
             );
+            pulse2 = pulses & 1;
+            pulse3 = (pulses >>> 1) & 1;
           }
         }
       } else {
@@ -460,25 +555,21 @@
       if (pulse3 && audctl & 0x02) st.hp2Latch = st.channels[1].output & 1;
     }
 
-    // Per-channel non-linear volume (~3 dB/step). Index 15 => 1.0 (normalized).
+    // Approximate the POKEY's 4-bit DAC: mostly binary-weighted with the
+    // documented wider transitions at 3->4, 7->8, and 11->12.
     const POKEY_CHAN_VOL_TABLE = [
-      0.000, 0.008, 0.011, 0.016, 0.022, 0.031, 0.044, 0.063,
-      0.088, 0.125, 0.177, 0.250, 0.354, 0.500, 0.707, 1.000,
+      0.000, 0.061, 0.121, 0.182, 0.273, 0.333, 0.394, 0.455,
+      0.545, 0.606, 0.667, 0.727, 0.818, 0.879, 0.939, 1.000,
     ];
     // Soft-clip compressed maximum: 1.0 + 3.0 * 0.75 (all 4 ch at vol=15).
     const POKEY_MIX_COMPRESSED_MAX = 3.25;
 
     function pokeyAudioMixCycleSample(st) {
       const audctl = st.audctl & 0xff;
-      const pair12 = (audctl & 0x10) !== 0;
-      const pair34 = (audctl & 0x08) !== 0;
       const twoTone = (st.skctl & 0x08) !== 0;
       let sum = 0.0;
 
       for (let i = 0; i < 4; i++) {
-        if (i === 0 && pair12) continue;
-        if (i === 2 && pair34) continue;
-
         const ch = st.channels[i];
         const audc = ch.audc & 0xff;
         const vol = audc & 0x0f;
@@ -667,6 +758,9 @@
             (st.channels[0].audf & 0xff)) >>>
           0;
         st.channels[1].counter = st.audctl & 0x40 ? p12 + 7 : p12 + 1;
+        st.channels[0].counter = st.audctl & 0x40
+          ? (st.channels[0].audf & 0xff) + 4
+          : (st.channels[0].audf & 0xff) + 1;
       } else {
         st.channels[0].counter =
           st.audctl & 0x40
@@ -681,6 +775,9 @@
             (st.channels[2].audf & 0xff)) >>>
           0;
         st.channels[3].counter = st.audctl & 0x20 ? p34 + 7 : p34 + 1;
+        st.channels[2].counter = st.audctl & 0x20
+          ? (st.channels[2].audf & 0xff) + 4
+          : (st.channels[2].audf & 0xff) + 1;
       } else {
         st.channels[2].counter =
           st.audctl & 0x20
@@ -797,11 +894,53 @@
       if (cps < 1) cps = 1;
       st.cyclesPerSampleFp = cps;
       let samplePhase = st.samplePhaseFp;
+      // Linked timers can expose intermediate divider transitions to audio.
+      // Keep those modes cycle-accurate; the event fast-forward path remains
+      // safe for independent channels.
+      const useFastForward =
+        POKEY_AUDIO_USE_FAST_FORWARD && (st.audctl & 0x18) === 0;
       if (target - cur > POKEY_AUDIO_MAX_CATCHUP_CYCLES) {
         cur = target - POKEY_AUDIO_MAX_CATCHUP_CYCLES;
       }
 
       while (cur < target) {
+        if (!useFastForward) {
+          const level = pokeyAudioMixCycleSample(st);
+          const cyclesNeededFp = cps - samplePhase;
+          const batchFp = POKEY_FP_ONE;
+
+          if (batchFp < cyclesNeededFp) {
+            st.sampleAccum += level * batchFp;
+            samplePhase += batchFp;
+          } else {
+            st.sampleAccum += level * cyclesNeededFp;
+            tmp[tmpCount++] = pokeyAudioFinalizeSample(
+              st,
+              st.sampleAccum / cps,
+            );
+            if (tmpCount === tmp.length) {
+              pokeyAudioRingWrite(st, tmp, tmpCount);
+              tmpCount = 0;
+            }
+
+            let remainingFp = batchFp - cyclesNeededFp;
+            while (remainingFp >= cps) {
+              tmp[tmpCount++] = pokeyAudioFinalizeSample(st, level);
+              if (tmpCount === tmp.length) {
+                pokeyAudioRingWrite(st, tmp, tmpCount);
+                tmpCount = 0;
+              }
+              remainingFp -= cps;
+            }
+            st.sampleAccum = level * remainingFp;
+            samplePhase = remainingFp;
+          }
+
+          if ((st.skctl & 0x03) !== 0) pokeyAudioStepCpuCycle(st);
+          cur++;
+          continue;
+        }
+
         const remaining = target - cur;
         let runCycles = remaining;
         let nextEvent = 0;
@@ -953,9 +1092,17 @@
 
       for (let p = 0; p < 8; p++) {
         const rawTarget = io.pokeyPotValues[p] & 0xff;
-        const target = rawTarget > terminal ? terminal : rawTarget;
-        const saturates = rawTarget >= terminal;
+        let target = rawTarget > (io.pokeyPotCharge ? io.pokeyPotCharge[p] : 0)
+          ? rawTarget - (io.pokeyPotCharge ? io.pokeyPotCharge[p] : 0) : 0;
+        target = target > terminal ? terminal : target;
+        const saturates = target >= terminal;
 
+        // AHRM 5.9: ALLPOT follows the input level continuously, not only
+        // the first threshold crossing. If an input falls below threshold
+        // while the scan is still counting, resume its live POT value.
+        if (io.pokeyPotLatched[p] && count < target) {
+          io.pokeyPotLatched[p] = 0;
+        }
         if (!io.pokeyPotLatched[p] && !saturates && count >= target) {
           io.pokeyPotLatched[p] = 1;
         }
@@ -984,6 +1131,7 @@
 
       io.pokeyPotScanActive = false;
       io.pokeyPotScanTerminalCycle = CYCLE_NEVER;
+      io.pokeyPotChargeLastCycle = ctx.cycleCounter;
       ctx.ram[IO_AUDCTL_ALLPOT] = 0x00;
     }
 
@@ -997,6 +1145,16 @@
     function pokeyPotStartScan(ctx) {
       const io = ctx.ioData;
       if (!io) return;
+      if (!io.pokeyPotCharge) io.pokeyPotCharge = new Uint8Array(8);
+      if (io.pokeyPotScanActive) {
+        for (let i = 0; i < 8; i++)
+          io.pokeyPotCharge[i] = Math.min(255, io.pokeyPotCharge[i] + (io.pokeyPotCounter & 0xff));
+      } else if (!pokeyPotFastScanEnabled(ctx)) {
+        if (ctx.cycleCounter < (io.pokeyPotChargeLastCycle || 0))
+          io.pokeyPotChargeLastCycle = ctx.cycleCounter;
+        const shifts = Math.floor((ctx.cycleCounter - (io.pokeyPotChargeLastCycle || 0)) / 16);
+        for (let i = 0; i < 8; i++) io.pokeyPotCharge[i] = shifts >= 8 ? 0 : io.pokeyPotCharge[i] >> shifts;
+      }
       io.pokeyPotScanActive = true;
       io.pokeyPotScanLastCycle = ctx.cycleCounter;
       io.pokeyPotScanTerminalCycle = CYCLE_NEVER;
@@ -1044,6 +1202,33 @@
       }
     }
 
+    // AHRM 5.9: a live POT read can sample the counter while it increments.
+    // Return the deterministic adjacent-counter AND without changing the
+    // stored value used after the input latches.
+    function pokeyPotReadValue(ctx, potIndex) {
+      const io = ctx.ioData;
+      if (
+        !io ||
+        potIndex < 0 ||
+        potIndex >= 8 ||
+        !io.pokeyPotScanActive ||
+        io.pokeyPotLatched[potIndex]
+      ) {
+        return ctx.ram[(IO_AUDF1_POT0 + potIndex) & 0xffff] & 0xff;
+      }
+
+      const count = io.pokeyPotCounter & 0xff;
+      if (count === 0) return 0;
+
+      if (
+        pokeyPotFastScanEnabled(ctx) ||
+        io.pokeyPotScanLastCycle === ctx.cycleCounter
+      ) {
+        return ((count - 1) & count) & 0xff;
+      }
+      return count;
+    }
+
     function pokeyTimerPeriodCpuCycles(ctx, timer) {
       const sram = ctx.sram;
       // Hold timers when POKEY clocks are in reset (SKCTL bits0..1 = 0).
@@ -1056,14 +1241,12 @@
       if (timer === 1) {
         // In 16-bit mode (ch1+ch2), timer1 has no independent divider output.
         if (audctl & 0x10) return 0;
-        if ((sram[IO_AUDF1_POT0] & 0xff) === 0) return 0;
         div = audctl & 0x40 ? 1 : base;
         reload = (sram[IO_AUDF1_POT0] & 0xff) + (audctl & 0x40 ? 4 : 1);
         return (reload * div) >>> 0;
       }
 
       if (timer === 2) {
-        if ((sram[IO_AUDF2_POT2] & 0xff) === 0) return 0;
         if (audctl & 0x10) {
           const period12 =
             ((sram[IO_AUDF2_POT2] & 0xff) << 8) | (sram[IO_AUDF1_POT0] & 0xff);
@@ -1077,7 +1260,6 @@
       }
 
       if (timer === 4) {
-        if ((sram[IO_AUDF4_POT6] & 0xff) === 0) return 0;
         if (audctl & 0x08) {
           const period34 =
             ((sram[IO_AUDF4_POT6] & 0xff) << 8) | (sram[IO_AUDF3_POT4] & 0xff);
@@ -1093,20 +1275,127 @@
       return 0;
     }
 
-    function pokeyRestartTimers(ctx) {
+    function pokeySerialOutputClockTimer(ctx) {
+      const mode = ((ctx.sram[IO_SKCTL_SKSTAT] & 0xff) >> 4) & 0x07;
+      // AHRM 5.6: modes 010 and 100 use timer 4 synchronously; mode 110
+      // uses timer 2; mode 111 uses timer 2 while async input holds only
+      // timers 3+4. Modes 001/011/101/000 have no usable output clock here.
+      if (mode === 2 || mode === 4) return 4;
+      if (mode === 6 || mode === 7) return 2;
+      return 0;
+    }
+
+    function pokeyTimerFirstCycle(ctx, timer, now) {
+      const sram = ctx.sram;
+      const audctl = sram[IO_AUDCTL_ALLPOT] & 0xff;
+      const period = pokeyTimerPeriodCpuCycles(ctx, timer);
+      if (!period) return CYCLE_NEVER;
+
+      // Linked and 1.79 MHz timers use their explicit reload timing.
+      if (
+        (timer === 1 && (audctl & 0x40)) ||
+        (timer === 2 && (audctl & 0x10)) ||
+        (timer === 4 && (audctl & 0x08))
+      ) {
+        return now + period;
+      }
+
+      const base = audctl & 0x01 ? CYCLES_PER_LINE : 28;
+      const reloadRegister =
+        timer === 1 ? IO_AUDF1_POT0 : timer === 2 ? IO_AUDF2_POT2 : IO_AUDF4_POT6;
+      const reload = (sram[reloadRegister] & 0xff) + 1;
+      let origin = Number.isFinite(ctx.ioData.pokeySlowClockOriginCycle)
+        ? ctx.ioData.pokeySlowClockOriginCycle
+        : now;
+      if (now < origin) origin = now;
+      const nextClock =
+        origin + (Math.floor((now - origin) / base) + 1) * base;
+      return nextClock + (reload - 1) * base;
+    }
+
+    function pokeySerialOutputClockAvailable(ctx) {
+      const timer = pokeySerialOutputClockTimer(ctx);
+      return timer !== 0 && pokeyTimerPeriodCpuCycles(ctx, timer) > 0;
+    }
+
+    function pokeySerialOutputClockNextCycle(ctx, now) {
+      const timer = pokeySerialOutputClockTimer(ctx);
+      const period = timer ? pokeyTimerPeriodCpuCycles(ctx, timer) : 0;
+      if (!timer || !period) return now + period;
+
       const io = ctx.ioData;
-      const now = ctx.cycleCounter;
+      let next = timer === 2 ? io.timer2Cycle : io.timer4Cycle;
+      if (!Number.isFinite(next)) return now + period;
+
+      let level = io.serialOutputClockHigh ? 1 : 0;
+      while (next <= now) {
+        level ^= 1;
+        next += period;
+      }
+      if (level) next += period;
+      return next;
+    }
+
+    function pokeySerialOutputClockTimerExpired(ctx, timer) {
+      if (pokeySerialOutputClockTimer(ctx) === timer)
+        ctx.ioData.serialOutputClockHigh = !ctx.ioData.serialOutputClockHigh;
+      pokeyTraceEvent(ctx, "TIMER_CLOCK_EDGE", {
+        timer: timer,
+        timerCycle:
+          timer === 2 ? ctx.ioData.timer2Cycle : ctx.ioData.timer4Cycle,
+      });
+    }
+
+    function pokeyRestartTimersAt(ctx, now) {
+      const io = ctx.ioData;
 
       const p1 = pokeyTimerPeriodCpuCycles(ctx, 1);
-      io.timer1Cycle = p1 ? now + p1 : CYCLE_NEVER;
+      io.timer1Cycle = p1 ? pokeyTimerFirstCycle(ctx, 1, now) : CYCLE_NEVER;
 
       const p2 = pokeyTimerPeriodCpuCycles(ctx, 2);
-      io.timer2Cycle = p2 ? now + p2 : CYCLE_NEVER;
+      io.timer2Cycle = p2 ? pokeyTimerFirstCycle(ctx, 2, now) : CYCLE_NEVER;
 
       const p4 = pokeyTimerPeriodCpuCycles(ctx, 4);
-      io.timer4Cycle = p4 ? now + p4 : CYCLE_NEVER;
+      io.timer4Cycle = p4 ? pokeyTimerFirstCycle(ctx, 4, now) : CYCLE_NEVER;
 
       cycleTimedEventUpdate(ctx);
+    }
+
+    function pokeyRestartTimers(ctx) {
+      pokeyRestartTimersAt(ctx, ctx.cycleCounter);
+    }
+
+    // POKEY initialization stops the old timer schedule. This prevents a
+    // timer edge from the previous serial transaction leaking into the next
+    // STIMER/SEROUT measurement.
+    function pokeyEnterInitialization(ctx) {
+      const io = ctx.ioData;
+      io.timer1Cycle = CYCLE_NEVER;
+      io.timer2Cycle = CYCLE_NEVER;
+      io.timer4Cycle = CYCLE_NEVER;
+      io.pokeyTimerResetCycle = CYCLE_NEVER;
+      io.serialOutputClockHigh = false;
+      cycleTimedEventUpdate(ctx);
+    }
+
+    // STIMER takes effect on a later POKEY master-clock boundary. Keep the
+    // application step separate so the event loop can observe that boundary.
+    function pokeyApplyTimerReset(ctx) {
+      const io = ctx.ioData;
+      const resetCycle = io.pokeyTimerResetCycle;
+      io.pokeyTimerResetCycle = CYCLE_NEVER;
+      ctx.ram[IO_IRQEN_IRQST] |= 0x07;
+      if (io.serialOutputTransmissionDoneCycle === CYCLE_NEVER)
+        ctx.ram[IO_IRQEN_IRQST] &= ~0x08;
+      pokeyTraceEvent(ctx, "TIMER_RESET_APPLY", {
+        scheduledCycle: Number.isFinite(resetCycle) ? resetCycle : null,
+        actualCycle: ctx.cycleCounter,
+      });
+      // The reset is observed at a CPU instruction boundary. Rebuild the
+      // countdown from that observed cycle, as the hardware-visible timer
+      // phase follows the actual reset boundary rather than the request's
+      // queued deadline.
+      pokeyRestartTimersAt(ctx, ctx.cycleCounter);
     }
 
     // Programs may configure AUDF after the initial STIMER write. In that
@@ -1119,19 +1408,19 @@
 
       const p1 = pokeyTimerPeriodCpuCycles(ctx, 1);
       if (io.timer1Cycle === CYCLE_NEVER && p1) {
-        io.timer1Cycle = now + p1;
+        io.timer1Cycle = pokeyTimerFirstCycle(ctx, 1, now);
         changed = true;
       }
 
       const p2 = pokeyTimerPeriodCpuCycles(ctx, 2);
       if (io.timer2Cycle === CYCLE_NEVER && p2) {
-        io.timer2Cycle = now + p2;
+        io.timer2Cycle = pokeyTimerFirstCycle(ctx, 2, now);
         changed = true;
       }
 
       const p4 = pokeyTimerPeriodCpuCycles(ctx, 4);
       if (io.timer4Cycle === CYCLE_NEVER && p4) {
-        io.timer4Cycle = now + p4;
+        io.timer4Cycle = pokeyTimerFirstCycle(ctx, 4, now);
         changed = true;
       }
 
@@ -1153,8 +1442,15 @@
       potPrepareSkctlWrite: pokeyPotPrepareSkctlWrite,
       potStartScan: pokeyPotStartScan,
       potUpdate: pokeyPotUpdate,
+      potReadValue: pokeyPotReadValue,
+      potStepCycles: pokeyPotStepCycles,
       timerPeriodCpuCycles: pokeyTimerPeriodCpuCycles,
+      serialOutputClockTimer: pokeySerialOutputClockTimer,
+      serialOutputClockTimerExpired: pokeySerialOutputClockTimerExpired,
+      traceEvent: pokeyTraceEvent,
       restartTimers: pokeyRestartTimers,
+      enterInitialization: pokeyEnterInitialization,
+      applyTimerReset: pokeyApplyTimerReset,
       armInactiveTimers: pokeyArmInactiveTimers,
       seroutWrite: pokeySioApi.seroutWrite,
       serinRead: pokeySioApi.serinRead,

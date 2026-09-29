@@ -4,6 +4,9 @@
   function createApi(cfg) {
     const CPU = cfg.CPU;
     const CYCLES_PER_LINE = cfg.CYCLES_PER_LINE;
+    const CYCLE_NEVER =
+      cfg.CYCLE_NEVER !== undefined ? cfg.CYCLE_NEVER : Infinity;
+    const recordPmgRegisterWrite = cfg.recordPmgRegisterWrite;
     const NMI_DLI = cfg.NMI_DLI;
     const NMI_VBI = cfg.NMI_VBI;
     const NMI_RESET = cfg.NMI_RESET;
@@ -48,6 +51,11 @@
     const IO_HPOSP3_M3PF = cfg.IO_HPOSP3_M3PF;
     const IO_HSCROL = cfg.IO_HSCROL;
     const IO_IRQEN_IRQST = cfg.IO_IRQEN_IRQST;
+    const IRQ_TIMER_1 = cfg.IRQ_TIMER_1;
+    const IRQ_TIMER_2 = cfg.IRQ_TIMER_2;
+    const IRQ_TIMER_4 = cfg.IRQ_TIMER_4;
+    const IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE =
+      cfg.IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
     const IO_NMIEN = cfg.IO_NMIEN;
     const IO_NMIRES_NMIST = cfg.IO_NMIRES_NMIST;
     const IO_PACTL = cfg.IO_PACTL;
@@ -72,16 +80,20 @@
     const IO_VDELAY = cfg.IO_VDELAY;
     const IO_VSCROL = cfg.IO_VSCROL;
     const IO_WSYNC = cfg.IO_WSYNC;
+    const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
     const pokeyAudioSync = cfg.pokeyAudioSync;
     const pokeyAudioOnRegisterWrite = cfg.pokeyAudioOnRegisterWrite;
     const pokeyPotPrepareSkctlWrite = cfg.pokeyPotPrepareSkctlWrite;
     const pokeyPotStartScan = cfg.pokeyPotStartScan;
+    const pokeyTraceEvent = cfg.pokeyTraceEvent;
     const pokeyRestartTimers = cfg.pokeyRestartTimers;
+    const pokeyEnterInitialization = cfg.pokeyEnterInitialization;
     const pokeyArmInactiveTimers = cfg.pokeyArmInactiveTimers;
     const pokeySyncLfsr17 = cfg.pokeySyncLfsr17;
     const pokeySeroutWrite = cfg.pokeySeroutWrite;
     const pokeySerinRead = cfg.pokeySerinRead;
     const pokeyPotUpdate = cfg.pokeyPotUpdate;
+    const pokeyPotReadValue = cfg.pokeyPotReadValue;
     const TRIG_REGS = [
       IO_GRAFP3_TRIG0,
       IO_GRAFM_TRIG1,
@@ -272,6 +284,128 @@
       sram[IO_PORTB] = v;
     }
 
+    const PIA_IRQ1_STATUS = 0x80;
+    const PIA_IRQ2_STATUS = 0x40;
+
+    function piaControlMode(value) {
+      return ((value >>> 3) & 0x07) | 0;
+    }
+
+    function piaIrqAsserted(ctx) {
+      const io = ctx.ioData;
+      const sram = ctx.sram;
+      const modeA = piaControlMode(sram[IO_PACTL]);
+      const modeB = piaControlMode(sram[IO_PBCTL]);
+      const irqA =
+        ((io.piaStatusA & PIA_IRQ1_STATUS) && (sram[IO_PACTL] & 0x01)) ||
+        ((io.piaStatusA & PIA_IRQ2_STATUS) && modeA < 4 && (modeA & 0x01));
+      const irqB =
+        ((io.piaStatusB & PIA_IRQ1_STATUS) && (sram[IO_PBCTL] & 0x01)) ||
+        ((io.piaStatusB & PIA_IRQ2_STATUS) && modeB < 4 && (modeB & 0x01));
+      return !!(irqA || irqB);
+    }
+
+    function piaUpdateControlReadback(ctx, address) {
+      const io = ctx.ioData;
+      const value = address === IO_PACTL ? io.piaStatusA : io.piaStatusB;
+      ctx.ram[address] = ((ctx.sram[address] & 0x3f) | (value & 0xc0)) & 0xff;
+    }
+
+    function piaReconcileIrq(ctx) {
+      if (CPU && typeof CPU.reconcileIrq === "function") CPU.reconcileIrq(ctx);
+    }
+
+    function piaLatchLineTransition(ctx, line, level) {
+      const io = ctx.ioData;
+      const isA = line === "ca1" || line === "ca2";
+      const isLine2 = line === "ca2" || line === "cb2";
+      const controlAddress = isA ? IO_PACTL : IO_PBCTL;
+      const mode = piaControlMode(ctx.sram[controlAddress]);
+      const levelKey =
+        line === "ca1" ? "piaCa1Level" :
+        line === "ca2" ? "piaCa2Level" :
+        line === "cb1" ? "piaCb1Level" : "piaCb2Level";
+      const statusKey = isA ? "piaStatusA" : "piaStatusB";
+      const oldLevel = io[levelKey] ? 1 : 0;
+      const newLevel = level ? 1 : 0;
+      io[levelKey] = newLevel;
+      if (oldLevel === newLevel) return;
+
+      const positive = newLevel > oldLevel;
+      const positiveEdge = isLine2 ? mode >= 2 : !!(ctx.sram[controlAddress] & 0x02);
+      if (isLine2) {
+        if (mode < 4 && positive === positiveEdge)
+          io[statusKey] |= PIA_IRQ2_STATUS;
+      } else if (positive === positiveEdge) {
+        io[statusKey] |= PIA_IRQ1_STATUS;
+      }
+
+      piaUpdateControlReadback(ctx, controlAddress);
+      const enabled = isLine2
+        ? mode < 4 && !!(mode & 0x01)
+        : !!(ctx.sram[controlAddress] & 0x01);
+      if (enabled && ((io[statusKey] & (isLine2 ? PIA_IRQ2_STATUS : PIA_IRQ1_STATUS)) !== 0))
+        CPU.irq(ctx);
+    }
+
+    function piaWriteControl(ctx, address, value) {
+      const io = ctx.ioData;
+      const isA = address === IO_PACTL;
+      const statusKey = isA ? "piaStatusA" : "piaStatusB";
+      const levelKey = isA ? "piaCa2Level" : "piaCb2Level";
+      const oldMode = piaControlMode(ctx.sram[address]);
+      const newValue = value & 0x3f;
+      const newMode = piaControlMode(newValue);
+      ctx.sram[address] = newValue;
+      if (newMode >= 4) io[statusKey] &= ~PIA_IRQ2_STATUS;
+
+      if (isA && oldMode === 6 && newMode >= 2 && newMode <= 3 && !io[levelKey])
+        io[statusKey] |= PIA_IRQ2_STATUS;
+      if (!isA && oldMode === 7 && newMode < 4 && io.piaCb2WasRaisedOutput)
+        io[statusKey] |= PIA_IRQ2_STATUS;
+
+      if (newMode >= 4) {
+        io[levelKey] = newMode === 7 ? 1 : 0;
+        if (!isA) io.piaCb2WasRaisedOutput = newMode === 7 && oldMode === 6;
+      }
+
+      piaUpdateControlReadback(ctx, address);
+      piaReconcileIrq(ctx);
+    }
+
+    function piaAcknowledgePortRead(ctx, portB) {
+      const io = ctx.ioData;
+      const address = portB ? IO_PBCTL : IO_PACTL;
+      const statusKey = portB ? "piaStatusB" : "piaStatusA";
+      const levelKey = portB ? "piaCb2Level" : "piaCa2Level";
+      const mode = piaControlMode(ctx.sram[address]);
+      io[statusKey] = 0;
+      if (mode === 4 || mode === 5) {
+        io[levelKey] = 0;
+        io[portB ? "piaCb2PulseUntilCycle" : "piaCa2PulseUntilCycle"] =
+          mode === 5 ? (ctx.cycleCounter | 0) + 1 : -1;
+      }
+      piaUpdateControlReadback(ctx, address);
+      piaReconcileIrq(ctx);
+    }
+
+    function piaSetControlLine(ctx, line, level) {
+      piaLatchLineTransition(ctx, line, level);
+    }
+
+    function piaCycleTimedEvent(ctx) {
+      const io = ctx.ioData;
+      const cycle = ctx.cycleCounter | 0;
+      if (io.piaCa2PulseUntilCycle >= 0 && cycle >= io.piaCa2PulseUntilCycle) {
+        io.piaCa2Level = 1;
+        io.piaCa2PulseUntilCycle = -1;
+      }
+      if (io.piaCb2PulseUntilCycle >= 0 && cycle >= io.piaCb2PulseUntilCycle) {
+        io.piaCb2Level = 1;
+        io.piaCb2PulseUntilCycle = -1;
+      }
+    }
+
     function syncTriggerReadback(ctx, initializeLatch) {
       const io = ctx.ioData;
       const ram = ctx.ram;
@@ -325,6 +459,7 @@
           case IO_PRIOR:
           case IO_VDELAY:
             sram[addr] = v;
+            if (recordPmgRegisterWrite) recordPmgRegisterWrite(ctx, addr, v);
             break;
 
           case IO_GRACTL: {
@@ -391,6 +526,13 @@
             sram[addr] = v;
             if (io.pokeyAudio)
               {pokeyAudioOnRegisterWrite(io.pokeyAudio, addr, v);}
+            if (typeof pokeyTraceEvent === "function" &&
+                (addr === IO_AUDCTL_ALLPOT || addr === IO_AUDF4_POT6)) {
+              pokeyTraceEvent(ctx, "CLOCK_CONFIG_WRITE", {
+                register: addr === IO_AUDCTL_ALLPOT ? "AUDCTL" : "AUDF4",
+                value: v,
+              });
+            }
             pokeyArmInactiveTimers(ctx);
             break;
 
@@ -405,7 +547,19 @@
             sram[addr] = v;
             if (io.pokeyAudio)
               {pokeyAudioOnRegisterWrite(io.pokeyAudio, addr, v);}
-            pokeyRestartTimers(ctx);
+            // The divider reload is applied by the timed-event loop after
+            // the write, rather than at the CPU bus write itself.
+            io.pokeyTimerResetCycle = ctx.cycleCounter + 4;
+            if (typeof pokeyTraceEvent === "function") {
+              pokeyTraceEvent(ctx, "STIMER_WRITE", {
+                value: v,
+                slowClockOriginCycle: io.pokeySlowClockOriginCycle,
+                timerResetCycle: io.pokeyTimerResetCycle,
+              });
+            }
+            // The reset is a new master-clock deadline. Publish it now so
+            // the CPU stops exactly at the requested POKEY boundary.
+            cycleTimedEventUpdate(ctx);
             break;
 
           case IO_SKREST_RANDOM:
@@ -415,10 +569,13 @@
 
           case IO_SEROUT_SERIN:
             sram[addr] = v;
-            // On real POKEY, writing SEROUT fills the output shift register:
-            // bit 3 (XMTDON) → 1: transmission now in progress
-            // bit 4 (output data needed) → 1: buffer now full
-            ram[IO_IRQEN_IRQST] |= 0x18;
+            // AHRM 5.6: SEROUT fills the holding register first. The shift
+            // register and DATA NEEDED state change only on the next clock
+            // edge; XMTDONE stays active until that load occurs.
+            if (typeof pokeyTraceEvent === "function") {
+              pokeyTraceEvent(ctx, "SEROUT_WRITE", { value: v });
+            }
+            ram[IO_IRQEN_IRQST] |= 0x10;
             pokeySeroutWrite(ctx, v);
             break;
 
@@ -426,6 +583,10 @@
             sram[addr] = v;
             // IRQST bits read as 1 for disabled sources.
             ram[addr] |= ~v & 0xff;
+            // XMTDONE is level-sensitive and remains active while the
+            // output shift register is idle, even when IRQEN bit 3 is off.
+            if (io.serialOutputTransmissionDoneCycle === CYCLE_NEVER)
+              ram[addr] &= ~0x08;
             // POKEY IRQ is level-sensitive. Reconcile both disabling and
             // re-enabling so an already asserted source remains visible.
             if (CPU && typeof CPU.reconcileIrq === "function")
@@ -433,6 +594,8 @@
             break;
 
           case IO_SKCTL_SKSTAT:
+            const previousSkctl = sram[addr] & 0xff;
+            const wasPokeyInitializing = (previousSkctl & 0x03) === 0;
             pokeySyncLfsr17(ctx);
             pokeyPotPrepareSkctlWrite(ctx);
             sram[addr] = v;
@@ -448,6 +611,31 @@
               io.sioInSize = 0;
               io.sioInIndex = 0;
               io.sioPendingReadSize = 0;
+            }
+            // AHRM 5.3: the slow clock phase is set when initialization ends.
+            if (wasPokeyInitializing && (v & 0x03) !== 0) {
+              io.pokeySlowClockOriginCycle = Math.max(0, ctx.cycleCounter - 6);
+            }
+            // AHRM 5.6: selecting external clock mode resets the serial
+            // output divide-by-two flip-flop to its low phase.
+            if ((v & 0x70) === 0) io.serialOutputClockHigh = false;
+            if (!wasPokeyInitializing && (v & 0x03) === 0) {
+              pokeyEnterInitialization(ctx);
+            }
+            if (typeof pokeyTraceEvent === "function") {
+              pokeyTraceEvent(ctx, "SKCTL_WRITE", {
+                previous: previousSkctl,
+                value: v,
+                initializingBefore: wasPokeyInitializing ? 1 : 0,
+                initializingAfter: (v & 0x03) === 0 ? 1 : 0,
+                initTransition:
+                  wasPokeyInitializing && (v & 0x03) !== 0
+                    ? "exit"
+                    : !wasPokeyInitializing && (v & 0x03) === 0
+                      ? "enter"
+                      : "none",
+                slowClockOriginCycle: io.pokeySlowClockOriginCycle,
+              });
             }
             pokeyArmInactiveTimers(ctx);
             break;
@@ -472,13 +660,11 @@
             break;
 
           case IO_PACTL:
-            sram[addr] = v;
-            ram[addr] = (v & 0x0d) | 0x30;
+            piaWriteControl(ctx, IO_PACTL, v);
             break;
 
           case IO_PBCTL:
-            sram[addr] = v;
-            ram[addr] = (v & 0x0d) | 0x30;
+            piaWriteControl(ctx, IO_PBCTL, v);
             break;
 
           // --- ANTIC ---
@@ -519,9 +705,21 @@
             break;
 
           case IO_HSCROL:
-          case IO_VSCROL:
             sram[addr] = v & 0x0f;
             break;
+
+          case IO_VSCROL: {
+            sram[addr] = v & 0x0f;
+            const vscrolTiming = io.vscrolTiming;
+            vscrolTiming.initialized = true;
+            vscrolTiming.rawValue = v & 0x0f;
+            vscrolTiming.pendingValue = v & 0x0f;
+            // The write is placed on the final 6502 cycle of the atomic
+            // instruction, which is the deadline-visible bus cycle.
+            vscrolTiming.pendingClock =
+              (io.clock | 0) + Math.max((ctx.currentInstructionCycles | 0) - 1, 0);
+            break;
+          }
 
           case IO_WSYNC: {
             // Stall until cycle 105 of the current scanline (0-indexed: cycle 104).
@@ -602,16 +800,17 @@
       switch (addr) {
         case IO_PORTA:
           if ((sram[IO_PACTL] & 0x04) === 0) return io.valuePortA & 0xff;
+          piaAcknowledgePortRead(ctx, false);
           return ram[addr] & 0xff;
 
         case IO_PORTB:
           if ((sram[IO_PBCTL] & 0x04) === 0) return io.valuePortB & 0xff;
+          piaAcknowledgePortRead(ctx, true);
           return ram[addr] & 0xff;
 
         case IO_CONSOL:
-          // Shim from the C/SDL version (CONSOL_HACK):
-          // OS ROM reads CONSOL at $C49A (PC will be $C49D during the read) to
-          // decide whether to disable BASIC. Optionally force OPTION held there.
+          // Explicit Option-on-Start compatibility behavior. Normal CONSOL
+          // reads depend only on the emulated input register.
           if (io.optionOnStart && (ctx.cpu.pc & 0xffff) === 0xc49d) return 0x03;
           return ram[addr] & 0xff;
 
@@ -625,9 +824,8 @@
           return ram[addr] & 0xff;
 
         case IO_SEROUT_SERIN:
-          // On real POKEY, reading SERIN acknowledges the data-ready condition:
-          // bit 5 (serial input data ready) → 1: byte consumed, not ready
-          ram[IO_IRQEN_IRQST] |= 0x20;
+          // AHRM 5.6: reading SERIN does not acknowledge the data-ready
+          // condition. IRQST is cleared through its normal IRQEN protocol.
           return pokeySerinRead(ctx);
 
         case IO_AUDF1_POT0:
@@ -638,8 +836,15 @@
         case IO_AUDC3_POT5:
         case IO_AUDF4_POT6:
         case IO_AUDC4_POT7:
-        case IO_AUDCTL_ALLPOT:
-          pokeyPotUpdate(ctx);
+          case IO_AUDCTL_ALLPOT:
+            pokeyPotUpdate(ctx);
+          if (addr === IO_AUDF1_POT0 || addr === IO_AUDF2_POT2 ||
+              addr === IO_AUDF3_POT4 || addr === IO_AUDF4_POT6) {
+            const potIndex = addr - IO_AUDF1_POT0;
+            return pokeyPotReadValue
+              ? pokeyPotReadValue(ctx, potIndex)
+              : ram[addr] & 0xff;
+          }
           return ram[addr] & 0xff;
 
         case IO_SKCTL_SKSTAT:
@@ -653,6 +858,9 @@
 
     return {
       ioAccess: ioAccess,
+      piaIrqAsserted: piaIrqAsserted,
+      piaSetControlLine: piaSetControlLine,
+      piaCycleTimedEvent: piaCycleTimedEvent,
     };
   }
 

@@ -14,7 +14,11 @@ function checksum(bytes) {
   return value & 0xff;
 }
 
-function loadApi() {
+function loadApi(
+  serialOutputClockPeriod,
+  serialOutputClockAvailable,
+  serialOutputClockNextCycle,
+) {
   const source = fs.readFileSync(
     path.join(__dirname, "..", "js", "core", "pokey_sio.js"),
     "utf8",
@@ -36,6 +40,11 @@ function loadApi() {
     SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES: 1,
     SERIAL_INPUT_FIRST_DATA_READY_CYCLES: 1,
     SERIAL_INPUT_DATA_READY_CYCLES: 1,
+    IO_IRQEN_IRQST: 0xd20e,
+    CYCLE_NEVER: Number.POSITIVE_INFINITY,
+    serialOutputClockAvailable: serialOutputClockAvailable,
+    serialOutputClockPeriod: serialOutputClockPeriod,
+    serialOutputClockNextCycle: serialOutputClockNextCycle,
     cycleTimedEventUpdate: function () {},
   });
 }
@@ -95,6 +104,60 @@ function main() {
   assert.equal(activities[0].operation, "write");
   assert.equal(ctx.ioData.sioBuffer[0], "A".charCodeAt(0));
   assert.equal(ctx.ioData.sioBuffer[1], "C".charCodeAt(0));
+
+  // AHRM 5.6: reading SERIN returns the byte but does not acknowledge the
+  // active-low serial input IRQ status bit.
+  ctx.ioData.sioBuffer[0] = 0x43;
+  ctx.ioData.sioInIndex = 0;
+  ctx.ioData.sioInSize = 1;
+  ctx.ram[0xd20e] = 0xdf;
+  assert.equal(api.serinRead(ctx), 0x43);
+  assert.equal(ctx.ram[0xd20e] & 0x20, 0x00);
+
+  // AHRM 5.6: standard SIO output deadlines follow the configured timer-4
+  // period. The multiplier covers the ten-bit serial frame at two timer
+  // phases per bit; an external-clock setup uses the legacy fallback.
+  const clockedApi = loadApi(function () { return 47; });
+  const clockedCtx = makeContext(function () {}, function () {});
+  clockedCtx.cycleCounter = 100;
+  clockedApi.seroutWrite(clockedCtx, 0x55);
+  assert.equal(clockedCtx.ioData.serialOutputNeedDataCycle, 147);
+  assert.equal(clockedCtx.ioData.serialOutputTransmissionDoneCycle, 1087);
+
+  // AHRM 5.6: DATA NEEDED follows the next rising serial-clock edge, not a
+  // fixed period measured from SEROUT. The high phase skips the next timer
+  // expiry because that expiry is the falling edge.
+  const phaseApi = loadApi(
+    function () { return 56; },
+    function () { return true; },
+    function (ctx) {
+      return ctx.ioData.timer4Cycle + (ctx.ioData.serialOutputClockHigh ? 56 : 0);
+    },
+  );
+  const phaseCtx = makeContext(function () {}, function () {});
+  phaseCtx.cycleCounter = 100;
+  phaseCtx.ioData.timer4Cycle = 140;
+  phaseApi.seroutWrite(phaseCtx, 0x55);
+  assert.equal(phaseCtx.ioData.serialOutputNeedDataCycle, 140);
+  assert.equal(phaseCtx.ioData.serialOutputTransmissionDoneCycle, 1260);
+
+  phaseCtx.ioData.serialOutputNeedDataCycle = 0;
+  phaseCtx.ioData.serialOutputTransmissionDoneCycle = 0;
+  phaseCtx.ioData.serialOutputClockHigh = true;
+  phaseApi.seroutWrite(phaseCtx, 0x55);
+  assert.equal(phaseCtx.ioData.serialOutputNeedDataCycle, 196);
+  assert.equal(phaseCtx.ioData.serialOutputTransmissionDoneCycle, 1316);
+
+  // AHRM 5.6: no synthetic output deadlines are created when the selected
+  // serial mode has no internal output clock. XMTDONE remains inactive while
+  // the output shift register has no clock source.
+  const unclockedApi = loadApi(function () { return 47; }, function () { return false; });
+  const unclockedCtx = makeContext(function () {}, function () {});
+  unclockedCtx.cycleCounter = 100;
+  unclockedApi.seroutWrite(unclockedCtx, 0x55);
+  assert.equal(unclockedCtx.ioData.serialOutputNeedDataCycle, Number.POSITIVE_INFINITY);
+  assert.equal(unclockedCtx.ioData.serialOutputTransmissionDoneCycle, Number.POSITIVE_INFINITY);
+  assert.equal(unclockedCtx.ram[0xd20e] & 0x08, 0);
   console.log("pokey_sio_disk_observer.test.js passed");
 }
 

@@ -11,30 +11,33 @@
     0x8D, 0xE2, 0x02, 0x8D, 0xE3, 0x02, 0x85, 0x48,
     0xA9, 0x04, 0x85, 0x49, 0xA9, 0x00, 0x85, 0x4A,
     /* parse_header */
-    0x20, 0x81, 0x07, 0xC9, 0xFF, 0xD0, 0x4F,
-    0x20, 0x81, 0x07, 0xC9, 0xFF, 0xD0, 0x48,
-    0x20, 0x81, 0x07, 0x85, 0x43,
-    0x20, 0x81, 0x07, 0x85, 0x44,
-    0x20, 0x81, 0x07, 0x85, 0x45,
-    0x20, 0x81, 0x07, 0x85, 0x46,
+    0x20, 0x9B, 0x07, 0xC9, 0xFF, 0xD0, 0x69,
+    0x20, 0x9B, 0x07, 0xC9, 0xFF, 0xD0, 0x62,
+    0x20, 0x9B, 0x07, 0x85, 0x43,
+    0x20, 0x9B, 0x07, 0x85, 0x44,
+    0x20, 0x9B, 0x07, 0x85, 0x45,
+    0x20, 0x9B, 0x07, 0x85, 0x46,
     /* copy_loop */
-    0x20, 0x81, 0x07, 0xA0, 0x00, 0x91, 0x43,
+    0x20, 0x9B, 0x07, 0xA0, 0x00, 0x91, 0x43,
     0xE6, 0x43, 0xD0, 0x02, 0xE6, 0x44,
     /* check_end */
     0xA5, 0x44, 0xC5, 0x46, 0x90, 0xED, 0xD0, 0x06,
     0xA5, 0x45, 0xC5, 0x43, 0xB0, 0xE5,
     /* check_init: call INITAD if set */
     0xAD, 0xE3, 0x02, 0xF0, 0xBE,
-    0xA9, 0x07, 0x48, 0xA9, 0x69, 0x48, 0x6C, 0xE2, 0x02,
+    0x8E, 0xF9, 0x07, 0xA2, 0x03, 0xB5, 0x47, 0x9D, 0xF5, 0x07,
+    0xCA, 0x10, 0xF8, 0xAE, 0xF9, 0x07,
+    0xA9, 0x07, 0x48, 0xA9, 0x79, 0x48, 0x6C, 0xE2, 0x02,
     /* return from INIT: clear INITAD, loop */
     0xA9, 0x00, 0x8D, 0xE2, 0x02, 0x8D, 0xE3, 0x02,
+    0xA2, 0x03, 0xBD, 0xF5, 0x07, 0x95, 0x47, 0xCA, 0x10, 0xF8,
     0x4C, 0x1F, 0x07,
     /* run_addr */
     0xAD, 0xE0, 0x02, 0x0D, 0xE1, 0x02, 0xF0, 0x03, 0x6C, 0xE0, 0x02,
     /* done */
     0x60,
     /* get_byte */
-    0xA5, 0x48, 0xD0, 0x03, 0x20, 0x92, 0x07,
+    0xA5, 0x48, 0xD0, 0x03, 0x20, 0xAC, 0x07,
     0xA6, 0x47, 0xBD, 0x00, 0x06, 0xE6, 0x47, 0xC6, 0x48, 0x60,
     /* read_sector */
     0xA9, 0x31, 0x8D, 0x00, 0x03,
@@ -55,10 +58,10 @@
     0x60
   ];
   const XEX_BOOT_LOADER_BASE = 0x0700;
-  const XEX_BOOT_PATCH_GETBYTE_BUF_LO = 0x078b - XEX_BOOT_LOADER_BASE;
-  const XEX_BOOT_PATCH_GETBYTE_BUF_HI = 0x078c - XEX_BOOT_LOADER_BASE;
-  const XEX_BOOT_PATCH_DBUF_LO = 0x07a7 - XEX_BOOT_LOADER_BASE;
-  const XEX_BOOT_PATCH_DBUF_HI = 0x07ac - XEX_BOOT_LOADER_BASE;
+  const XEX_BOOT_PATCH_GETBYTE_BUF_LO = 0x07a5 - XEX_BOOT_LOADER_BASE;
+  const XEX_BOOT_PATCH_GETBYTE_BUF_HI = 0x07a6 - XEX_BOOT_LOADER_BASE;
+  const XEX_BOOT_PATCH_DBUF_LO = 0x07c1 - XEX_BOOT_LOADER_BASE;
+  const XEX_BOOT_PATCH_DBUF_HI = 0x07c6 - XEX_BOOT_LOADER_BASE;
   const XEX_BOOT_LOADER_RESERVED_START = 0x0700;
   const XEX_BOOT_LOADER_RESERVED_END = 0x087f;
   const XEX_SEGMENT_MARKER = 0xff;
@@ -100,6 +103,19 @@
       cpuEnableBit: 4,
       anticEnableBit: 4,
       sharedWindow: true,
+      forceBasicOffWhenExpanded: false,
+      forceSelfTestOffWhenExpanded: false,
+    },
+    "rambo-256k": {
+      key: "rambo-256k",
+      label: "256K (RAMBO)",
+      enabled: true,
+      extendedBytes: 0x40000,
+      bankBits: [2, 3, 5, 6],
+      cpuEnableBit: 4,
+      anticEnableBit: 4,
+      sharedWindow: true,
+      mainMemoryAliasBanks: 4,
       forceBasicOffWhenExpanded: false,
       forceSelfTestOffWhenExpanded: false,
     },
@@ -202,6 +218,9 @@
     if (text === "192k" || text === "192kb" || text === "rambo-192k") {
       return "rambo-192k";
     }
+    if (text === "256k" || text === "256kb" || text === "rambo-256k") {
+      return "rambo-256k";
+    }
     if (text === "320k" || text === "320kb" || text === "rambo-320k") {
       return "rambo-320k";
     }
@@ -240,6 +259,7 @@
       cpuEnableBit: spec.cpuEnableBit | 0,
       anticEnableBit: spec.anticEnableBit | 0,
       sharedWindow: !!spec.sharedWindow,
+      mainMemoryAliasBanks: spec.mainMemoryAliasBanks | 0,
       forceBasicOffWhenExpanded: !!spec.forceBasicOffWhenExpanded,
       forceSelfTestOffWhenExpanded: !!spec.forceSelfTestOffWhenExpanded,
       ultimate1mb: !!spec.ultimate1mb,
@@ -272,6 +292,7 @@
       cpuEnableBit: source.cpuEnableBit | 0,
       anticEnableBit: source.anticEnableBit | 0,
       sharedWindow: !!source.sharedWindow,
+      mainMemoryAliasBanks: source.mainMemoryAliasBanks | 0,
       forceBasicOffWhenExpanded: !!source.forceBasicOffWhenExpanded,
       forceSelfTestOffWhenExpanded: !!source.forceSelfTestOffWhenExpanded,
       ultimate1mb: !!source.ultimate1mb,
@@ -575,8 +596,7 @@
   function chooseXexBootBuffer(normalizedXex) {
     let candidate;
 
-    if (!xexSegmentOverlapsRange(normalizedXex, 0x0600, 0x067f)) return 0x0600;
-
+    // Keep the sector buffer out of the OS/game workspace at $0600-$067F.
     for (candidate = 0x0880; candidate <= 0x4f80; candidate += 0x80) {
       if (!xexSegmentOverlapsRange(normalizedXex, candidate, candidate + 0x7f))
         {return candidate;}
@@ -1019,6 +1039,8 @@
       const initHardwareDefaults = opts.initHardwareDefaults;
       const installIoHandlers = opts.installIoHandlers;
       const ioAccess = opts.ioAccess;
+      const piaSetControlLine = opts.piaSetControlLine;
+      const piaCycleTimedEvent = opts.piaCycleTimedEvent;
       const getOptionOnStart = opts.getOptionOnStart;
       const getSioTurbo = opts.getSioTurbo;
       const getTurbo = opts.getTurbo;
@@ -1195,8 +1217,18 @@
         return bank << 14;
       }
 
+      function isMainMemoryAliasBank(bankIndex, state) {
+        const mem = state || getMemoryExpansionState();
+        return (mem.mainMemoryAliasBanks | 0) > 0 &&
+          (bankIndex | 0) < (mem.mainMemoryAliasBanks | 0);
+      }
+
       function copyWindowFromStorage(ctx, state, bankIndex) {
         const mem = state || getMemoryExpansionState();
+        if (isMainMemoryAliasBank(bankIndex, mem)) {
+          ctx.ram.set(mem.mainWindowShadow.subarray(0, 0x4000), 0x4000);
+          return true;
+        }
         const offset = getMemoryStorageOffset(bankIndex, mem);
         if (offset < 0) return false;
         ctx.ram.set(mem.bankStorage.subarray(offset, offset + 0x4000), 0x4000);
@@ -1205,6 +1237,10 @@
 
       function storeWindowToStorage(ctx, state, bankIndex) {
         const mem = state || getMemoryExpansionState();
+        if (isMainMemoryAliasBank(bankIndex, mem)) {
+          mem.mainWindowShadow.set(ctx.ram.subarray(0x4000, 0x8000), 0);
+          return true;
+        }
         const offset = getMemoryStorageOffset(bankIndex, mem);
         if (offset < 0) return false;
         mem.bankStorage.set(ctx.ram.subarray(0x4000, 0x8000), offset);
@@ -1613,6 +1649,8 @@
         machine.ctx.ioData = makeIoData(video);
         machine.ctx.ioData.optionOnStart = !!getOptionOnStart();
         machine.ctx.ioData.sioTurbo = !!getSioTurbo();
+        machine.ctx.ioData.piaSetControlLine = piaSetControlLine;
+        machine.ctx.ioData.piaCycleTimedEvent = piaCycleTimedEvent;
         copyMediaToIoData();
         machine.ctx.ioData.memoryExpansionRead = readExpansionMemoryByte;
         machine.ctx.ioData.memoryExpansionSync = syncMemoryExpansionWindow;
@@ -1849,6 +1887,7 @@
             label: mem.label,
             enabled: !!mem.enabled,
             bankCount: mem.bankCount | 0,
+            mainMemoryAliasBanks: mem.mainMemoryAliasBanks | 0,
             currentBank: mem.currentBank | 0,
             cpuWindowEnabled: !!mem.cpuWindowEnabled,
             anticWindowEnabled: !!mem.anticWindowEnabled,
@@ -1885,6 +1924,9 @@
           timer1Cycle: io.timer1Cycle,
           timer2Cycle: io.timer2Cycle,
           timer4Cycle: io.timer4Cycle,
+          pokeyTimerResetCycle: io.pokeyTimerResetCycle,
+          pokeySlowClockOriginCycle: io.pokeySlowClockOriginCycle,
+          serialOutputClockHigh: !!io.serialOutputClockHigh,
           valuePortA: io.valuePortA | 0,
           valuePortB: io.valuePortB | 0,
           outputPortB: io.outputPortB | 0,
@@ -1920,6 +1962,10 @@
           modeLineScrollExit: !!io.modeLineScrollExit,
           modeLineExitDli: !!io.modeLineExitDli,
           modeLineEndsThisLine: !!io.modeLineEndsThisLine,
+          pmgPhantomMissileDmaPending: !!io.pmgPhantomMissileDmaPending,
+          pmgDmaCtlTimingInitialized: !!io.pmgDmaCtlTimingInitialized,
+          pmgDmaCtlOneCycleAgo: io.pmgDmaCtlOneCycleAgo | 0,
+          pmgDmaCtlTwoCyclesAgo: io.pmgDmaCtlTwoCyclesAgo | 0,
           nmiTiming: io.nmiTiming
             ? {
                 enabledByCycle7: io.nmiTiming.enabledByCycle7 | 0,
@@ -1936,6 +1982,15 @@
                 initialized: !!io.chbaseTiming.initialized,
               }
             : null,
+          vscrolTiming: io.vscrolTiming
+            ? {
+                rawValue: io.vscrolTiming.rawValue | 0,
+                activeValue: io.vscrolTiming.activeValue | 0,
+                pendingValue: io.vscrolTiming.pendingValue | 0,
+                pendingClock: io.vscrolTiming.pendingClock | 0,
+                initialized: !!io.vscrolTiming.initialized,
+              }
+            : null,
           drawLine: io.drawLine
             ? {
                 displayMemoryAddress: io.drawLine.displayMemoryAddress | 0,
@@ -1950,6 +2005,13 @@
                 playerMissileClockActive: !!io.drawLine.playerMissileClockActive,
                 playerMissileInterleaved: !!io.drawLine.playerMissileInterleaved,
                 pmgFirstVisibleSpan: !!io.drawLine.pmgFirstVisibleSpan,
+                pmgEventCount: io.drawLine.pmgEventCount | 0,
+                pmgEventOverflow: !!io.drawLine.pmgEventOverflow,
+                pmgInitialRegisters: new Uint8Array(io.drawLine.pmgInitialRegisters || 0),
+                pmgReplayRegisters: new Uint8Array(io.drawLine.pmgReplayRegisters || 0),
+                pmgEventRegisters: new Uint8Array(io.drawLine.pmgEventRegisters || 0),
+                pmgEventValues: new Uint8Array(io.drawLine.pmgEventValues || 0),
+                pmgEventCycles: new Uint8Array(io.drawLine.pmgEventCycles || 0),
                 playerPmgShift: new Uint8Array(io.drawLine.playerPmgShift || 0),
                 playerPmgState: new Uint8Array(io.drawLine.playerPmgState || 0),
                 missilePmgShift: new Uint8Array(io.drawLine.missilePmgShift || 0),
@@ -1983,6 +2045,12 @@
         io.timer1Cycle = state.timer1Cycle;
         io.timer2Cycle = state.timer2Cycle;
         io.timer4Cycle = state.timer4Cycle;
+        if (state.pokeyTimerResetCycle !== undefined)
+          io.pokeyTimerResetCycle = state.pokeyTimerResetCycle;
+        if (state.pokeySlowClockOriginCycle !== undefined)
+          io.pokeySlowClockOriginCycle = state.pokeySlowClockOriginCycle;
+        if (state.serialOutputClockHigh !== undefined)
+          io.serialOutputClockHigh = !!state.serialOutputClockHigh;
         io.valuePortA = state.valuePortA | 0;
         io.valuePortB = state.valuePortB | 0;
         io.outputPortB =
@@ -2031,6 +2099,12 @@
           io.modeLineScrollExit = !!state.modeLineScrollExit;
           io.modeLineExitDli = !!state.modeLineExitDli;
           io.modeLineEndsThisLine = !!state.modeLineEndsThisLine;
+          io.pmgPhantomMissileDmaPending = !!state.pmgPhantomMissileDmaPending;
+        }
+        if (state.pmgDmaCtlTimingInitialized !== undefined) {
+          io.pmgDmaCtlTimingInitialized = !!state.pmgDmaCtlTimingInitialized;
+          io.pmgDmaCtlOneCycleAgo = state.pmgDmaCtlOneCycleAgo | 0;
+          io.pmgDmaCtlTwoCyclesAgo = state.pmgDmaCtlTwoCyclesAgo | 0;
         }
         if (state.nmiTiming && typeof state.nmiTiming === "object") {
           io.nmiTiming.enabledByCycle7 = state.nmiTiming.enabledByCycle7 | 0;
@@ -2044,6 +2118,13 @@
           io.chbaseTiming.pendingValue = state.chbaseTiming.pendingValue | 0;
           io.chbaseTiming.pendingClock = state.chbaseTiming.pendingClock | 0;
           io.chbaseTiming.initialized = !!state.chbaseTiming.initialized;
+        }
+        if (state.vscrolTiming && typeof state.vscrolTiming === "object") {
+          io.vscrolTiming.rawValue = state.vscrolTiming.rawValue | 0;
+          io.vscrolTiming.activeValue = state.vscrolTiming.activeValue | 0;
+          io.vscrolTiming.pendingValue = state.vscrolTiming.pendingValue | 0;
+          io.vscrolTiming.pendingClock = state.vscrolTiming.pendingClock | 0;
+          io.vscrolTiming.initialized = !!state.vscrolTiming.initialized;
         }
         if (state.drawLine && typeof state.drawLine === "object") {
           io.drawLine.displayMemoryAddress = state.drawLine.displayMemoryAddress | 0;
@@ -2060,6 +2141,13 @@
           io.drawLine.playerMissileClockActive = !!state.drawLine.playerMissileClockActive;
           io.drawLine.playerMissileInterleaved = !!state.drawLine.playerMissileInterleaved;
           io.drawLine.pmgFirstVisibleSpan = !!state.drawLine.pmgFirstVisibleSpan;
+          io.drawLine.pmgEventCount = state.drawLine.pmgEventCount | 0;
+          io.drawLine.pmgEventOverflow = !!state.drawLine.pmgEventOverflow;
+          copyBytesTo(io.drawLine.pmgInitialRegisters, state.drawLine.pmgInitialRegisters);
+          copyBytesTo(io.drawLine.pmgReplayRegisters, state.drawLine.pmgReplayRegisters);
+          copyBytesTo(io.drawLine.pmgEventRegisters, state.drawLine.pmgEventRegisters);
+          copyBytesTo(io.drawLine.pmgEventValues, state.drawLine.pmgEventValues);
+          copyBytesTo(io.drawLine.pmgEventCycles, state.drawLine.pmgEventCycles);
           if (state.drawLine.playerPmgShift) {
             io.drawLine.playerPmgShift = new Uint8Array(state.drawLine.playerPmgShift);
           }

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 
 project(A8E LANGUAGES C)
 
+include(CTest)
+
 # --- Configuration ---
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -140,7 +142,7 @@ if(BUILD_TESTING)
   a8e_configure_target(antic_timing_probe)
 
   add_test(NAME antic_timing_probe COMMAND antic_timing_probe)
-  set_tests_properties(antic_timing_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(antic_timing_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
 
   add_executable(antic_dma_probe
     tests/antic_dma_probe.c
@@ -151,7 +153,7 @@ if(BUILD_TESTING)
   a8e_configure_target(antic_dma_probe)
 
   add_test(NAME antic_dma_probe COMMAND antic_dma_probe)
-  set_tests_properties(antic_dma_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(antic_dma_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
 
   add_executable(antic_graphics_modes_probe
     tests/antic_graphics_modes_probe.c
@@ -162,7 +164,7 @@ if(BUILD_TESTING)
   a8e_configure_target(antic_graphics_modes_probe)
 
   add_test(NAME antic_graphics_modes_probe COMMAND antic_graphics_modes_probe)
-  set_tests_properties(antic_graphics_modes_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(antic_graphics_modes_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
 
   add_executable(pokey_pot_scan_probe
     tests/pokey_pot_scan_probe.c
@@ -173,7 +175,56 @@ if(BUILD_TESTING)
   a8e_configure_target(pokey_pot_scan_probe)
 
   add_test(NAME pokey_pot_scan_probe COMMAND pokey_pot_scan_probe)
-  set_tests_properties(pokey_pot_scan_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(pokey_pot_scan_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
+
+  add_executable(pokey_timer_period_probe
+    tests/pokey_timer_period_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(pokey_timer_period_probe PRIVATE
+    A8E_ENABLE_TEST_PROBES=1
+    A8E_TRACE_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../implementation/traces/pokey_timer_contract.jsonl"
+  )
+  a8e_configure_target(pokey_timer_period_probe)
+
+  add_test(NAME pokey_timer_period_probe COMMAND pokey_timer_period_probe)
+  set_tests_properties(pokey_timer_period_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
+
+  # This probe includes Pokey.c to observe private audio flip-flops.
+  set(A8E_LINKED_AUDIO_PROBE_SOURCES ${A8E_CORE_SOURCES})
+  list(REMOVE_ITEM A8E_LINKED_AUDIO_PROBE_SOURCES Pokey.c)
+  add_executable(pokey_linked_audio_probe
+    tests/pokey_linked_audio_probe.c
+    ${A8E_LINKED_AUDIO_PROBE_SOURCES}
+  )
+  a8e_configure_target(pokey_linked_audio_probe)
+  add_test(NAME pokey_linked_audio_probe COMMAND pokey_linked_audio_probe)
+
+  add_executable(pokey_sio_contract_probe
+    tests/pokey_sio_contract_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(pokey_sio_contract_probe PRIVATE
+    A8E_ENABLE_TEST_PROBES=1
+    A8E_TRACE_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../implementation/traces/pokey_sio_contract.jsonl"
+  )
+  a8e_configure_target(pokey_sio_contract_probe)
+
+  add_test(NAME pokey_sio_contract_probe COMMAND pokey_sio_contract_probe)
+  set_tests_properties(pokey_sio_contract_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
+
+  add_executable(keyboard_irq_gate_probe
+    tests/keyboard_irq_gate_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(keyboard_irq_gate_probe PRIVATE A8E_ENABLE_TEST_PROBES=1)
+  a8e_configure_target(keyboard_irq_gate_probe)
+
+  add_test(NAME keyboard_irq_gate_probe COMMAND keyboard_irq_gate_probe)
+  set_tests_properties(keyboard_irq_gate_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
 
   add_executable(memory_expansion_probe
     tests/memory_expansion_probe.c
@@ -184,5 +235,41 @@ if(BUILD_TESTING)
   a8e_configure_target(memory_expansion_probe)
 
   add_test(NAME memory_expansion_probe COMMAND memory_expansion_probe)
-  set_tests_properties(memory_expansion_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  set_tests_properties(memory_expansion_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
+
+  add_executable(gtia_consol_probe
+    tests/gtia_consol_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(gtia_consol_probe PRIVATE A8E_ENABLE_TEST_PROBES=1)
+  a8e_configure_target(gtia_consol_probe)
+
+  add_test(NAME gtia_consol_probe COMMAND gtia_consol_probe)
+  set_tests_properties(gtia_consol_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
+
+  add_executable(pia_control_probe
+    tests/pia_control_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(pia_control_probe PRIVATE A8E_ENABLE_TEST_PROBES=1)
+  a8e_configure_target(pia_control_probe)
+
+  add_test(NAME pia_control_probe COMMAND pia_control_probe)
+  set_tests_properties(pia_control_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
+
+  add_executable(differential_pia_trace_probe
+    tests/differential_pia_trace_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(differential_pia_trace_probe PRIVATE
+    A8E_ENABLE_TEST_PROBES=1
+    A8E_TRACE_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../implementation/traces/pia_portb_contract.jsonl"
+  )
+  a8e_configure_target(differential_pia_trace_probe)
+
+  add_test(NAME differential_pia_trace_probe COMMAND differential_pia_trace_probe)
+  set_tests_properties(differential_pia_trace_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
 endif()

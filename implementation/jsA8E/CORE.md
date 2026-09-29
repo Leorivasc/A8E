@@ -4,7 +4,7 @@
 
 - Files: `jsA8E/js/core/cpu.js`, `jsA8E/js/core/cpu_tables.js`, `jsA8E/js/core/antic.js`, `jsA8E/js/core/gtia.js`, `jsA8E/js/core/pokey.js`, `jsA8E/js/core/pokey_sio.js`, `jsA8E/js/core/memory.js`, `jsA8E/js/core/io.js`, `jsA8E/js/core/atari.js`, `jsA8E/js/core/hw.js`, `jsA8E/js/core/playfield/playfield.js`, `jsA8E/js/core/playfield/renderer_base.js`, `jsA8E/js/core/state.js`, `jsA8E/js/core/snapshot_codec.js`
 - Purpose: mirror Atari hardware behavior in JavaScript with timing-compatible execution.
-- Status: updated on 2026-09-14 (`partial`).
+- Status: updated on 2026-09-25 (`implemented`, AHRM-07 probe-validated).
 
 ## Architecture
 
@@ -49,17 +49,17 @@ Mapped bitmap modes consume bytes MSB-first per AHRM 4.5. Mode 8 repeats each tw
 
 ## Player-Missile Graphics
 
-PMG DMA fetches happen in `fetchPmgDmaCycle` (in `gtia.js`, called from `clockAction`): missile at lineCycle 0, players 0–3 at lineCycles 2–5. `VDELAY` masks per-sprite fetches on even scan lines (holds the previous latch); it does not shift PMG memory rows. Player DMA keeps the missile slot active regardless (AHRM 4.13).
+PMG DMA fetches happen in `fetchPmgDmaCycle` (in `gtia.js`, called from `clockAction`): missile at lineCycle 0, players 0–3 at lineCycles 2–5. `VDELAY` masks the corresponding GTIA latch load on even scan lines while ANTIC still takes the DMA slot; it does not shift PMG memory rows. Player DMA keeps the missile slot active regardless. The P/M enable bits of `DMACTL` are sampled two ANTIC cycles earlier, while the resolution/addressing bit stays live (AHRM 4.13).
 
 `PMBASE` is read live at each DMA cycle. This means a DLI write to PMBASE between cycles 5 and 0 of adjacent scanlines applies cleanly; a write during cycles 0–5 of an active scanline will cause a mixed-base fetch for that scanline (missiles use old base, late players use new base). This matches real hardware behavior.
 
-PM graphics are drawn interleaved with playfield pixels via `drawPlayerMissilesClock` called from `clockAction` during `drawLine`. Priority compositing uses a `Uint16Array` priority buffer; all player/missile draw functions mask with `& 0xffff`. Priority constants `PRIO_PF3` and `PRIO_M10_PM0-3` are wired through the full config chain (`atari.js → antic.js → A8EPlayfield → A8EPlayfieldRenderer → renderer_base → mode_*.js`). The interleaved GTIA path now models PM output with a per-line shift-register/state-machine pair per object: a trigger ORs in fresh latch data, resets the size state, and lets mid-image rightward retriggers build overlapping images without moving the already-started copy. PM horizontal origin uses the same AHRM 6.2 coordinate mapping as playfield rendering, so HPOS `$30` lands on the normal playfield left edge (`x=96` in the full 456-pixel line buffer). HSCROL-clipped lines preserve already-composited PMG pixels in both the aperture fill and the trailing border fill.
+PM graphics are drawn interleaved with playfield pixels via `drawPlayerMissilesClock` called from `clockAction` during `drawLine`. Priority compositing uses a `Uint16Array` priority buffer; all player/missile draw functions mask with `& 0xffff`. Priority constants `PRIO_PF3` and `PRIO_M10_PM0-3` are wired through the full config chain (`atari.js → antic.js → A8EPlayfield → A8EPlayfieldRenderer → renderer_base → mode_*.js`). The interleaved GTIA path now models PM output with a per-line shift-register/state-machine pair per object: a trigger ORs in fresh latch data, resets the size state, and lets mid-image rightward retriggers build overlapping images without moving the already-started copy. PM horizontal origin uses the same AHRM 6.2 coordinate mapping as playfield rendering, so HPOS `$30` lands on the normal playfield left edge (`x=96` in the full 456-pixel line buffer). HSCROL-clipped lines preserve already-composited PMG pixels in both the aperture fill and the trailing border fill. AHRM-07 adds a bounded per-line PMG event log for CPU writes and DMA latch updates; the hidden prefix is primed from the line-start register snapshot plus events up to each beam position. Snapshot save/restore preserves this in-progress raster state. Overflow uses the legacy current-register fallback rather than incomplete replay.
 
 ## POKEY / Pot Scan
 
 Pot scans track an accumulated counter rather than a fixed 28-cycle divider. Slow scans advance once per scanline; fast scans advance once per machine cycle and can expose the `229` terminal count (held for one extra cycle before forcing `ALLPOT` low). Scans run through the terminal hold cycle even after `ALLPOT` has cleared. `SKCTL` mode changes resync the active scan counter from the current cycle. JS snapshots preserve mid-scan state (`lastCycle`, `terminalCycle`, current count).
 
-POKEY IRQ state follows the AHRM 5.7 level-sensitive model. A write to `IRQEN/$D20E` recomputes the CPU IRQ level from the active-low `IRQST` bits and enabled sources in both directions. This preserves an asserted keyboard IRQ when the OS temporarily changes `IRQEN`, allowing consecutive key presses to reach the OS keyboard handler and `$02FC` just as on hardware.
+POKEY IRQ state follows the AHRM 5.7 level-sensitive model. A write to `IRQEN/$D20E` recomputes the CPU IRQ level from the active-low `IRQST` bits and enabled sources in both directions. Every latched source, including keyboard and timers, keeps `IRQST` high and discards an event while its `IRQEN` bit is clear; XMTDONE is the documented exception. This prevents disabled timer edges from starving the OS keyboard handler.
 
 ## CPU
 
@@ -76,10 +76,10 @@ XEX mount preflight simulates the file's writes in load order, so a segment that
 XL/XE `TRIG3` is RD5 cartridge sense, not a released third joystick. It reads low with no external cartridge and internal BASIC does not assert it. PORTB keeps separate DDRB and ORB state; its effective MMU value is `(ORB & DDRB) | ~DDRB`, so a DDRB change updates ROM and extended-memory selection immediately.
 
 ## Issues
-- Broader real-content raster verification (chained DLIs, PMG priority ladders, wide-playfield artifacts) is still incomplete.
-- The AHRM 4.8 missed-NMI case (an IRQ acknowledged at exactly cycle 4 swallowing the cycle-8 NMI) is not modeled.
-- Blanked extended text rows (modes 2/3 rows 8-9 for non-descender characters) skip the character-data bus fetch instead of fetching and discarding, so their DMA steal timing is approximated.
-- The interleaved PMG path still reconstructs the hidden part of a scanline from current register state at the first visible span, rather than replaying every earlier same-line write cycle by cycle.
+- Broader real-content raster verification (chained DLIs, PMG priority ladders, and wide-playfield artifacts) remains a post-AHRM-06 sweep.
+- The AHRM 4.8 missed-NMI case, blank extended-row character-data DMA, and
+  atomic VSCROL deadline sampling are covered by the current JS/native probes.
+- AHRM-07 synthetic coverage passes for HPOS hidden-prefix replay, PMBASE mixed-line DMA, PRIOR mid-line changes, and collision-register latches. Real-content raster verification against AHRM/Altirra/hardware remains pending.
 
 ## Todo
 - Finish the raster-content sweep, including the AHRM VSCROL corner-case examples (Atomix Plus!, GTIA 9++ content).

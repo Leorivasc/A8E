@@ -40,6 +40,7 @@
     if (text === "" || text === "none" || text === "64k" || text === "64kb" || text === "no-expansion") return "none";
     if (text === "130xe" || text === "128k" || text === "128kb" || text === "130xe-128k") return "130xe-128k";
     if (text === "192k" || text === "192kb" || text === "rambo-192k") return "rambo-192k";
+    if (text === "256k" || text === "256kb" || text === "rambo-256k") return "rambo-256k";
     if (text === "320k" || text === "320kb" || text === "rambo-320k") return "rambo-320k";
     if (text === "compy-320k" || text === "320k-compy") return "compy-320k";
     if (text === "576k" || text === "576kb" || text === "rambo-576k") return "rambo-576k";
@@ -246,6 +247,31 @@
     return null;
   }
 
+  function resolvePokeyTracePreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    if (boot) {
+      const trace = parseBooleanLike(boot.pokeyTrace);
+      if (trace !== null) return trace;
+    }
+    if (
+      window.location &&
+      typeof window.location.search === "string" &&
+      typeof window.URLSearchParams === "function"
+    ) {
+      try {
+        const params = new window.URLSearchParams(window.location.search);
+        const trace = parseBooleanLike(params.get("a8e_pokey_trace"));
+        if (trace !== null) return trace;
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+    return false;
+  }
+
   function withWorkerPreference(base, workerPreference) {
     if (workerPreference === null) return Object.assign({}, base);
     return Object.assign({}, base, {
@@ -261,6 +287,13 @@
     const nativeScreenW = canvas.width | 0;
     const nativeScreenH = canvas.height | 0;
     const workerPreference = resolveWorkerPreference();
+    const pokeyTracePreference = resolvePokeyTracePreference();
+    let crtEnabled = true;
+    try {
+      crtEnabled = window.localStorage.getItem("a8e_crt_enabled") !== "false";
+    } catch {
+      // Keep the default when storage is unavailable.
+    }
     const videoStandardPreference = persistVideoStandardPreference(
       resolveVideoStandardPreference(),
     );
@@ -278,6 +311,8 @@
     const keyboardPanel = document.getElementById("keyboardPanel");
     const joystickPanel = document.getElementById("joystickPanel");
     let app = null;
+    let primaryDriveQueue = Promise.resolve();
+    let standbyXexPromise = null;
     const useWorkerApp =
       window.A8EApp &&
       ((typeof window.A8EApp.shouldUseWorker === "function" &&
@@ -546,6 +581,16 @@
     const btnStart = document.getElementById("btnStart");
     const btnReset = document.getElementById("btnReset");
     const btnControlsCollapse = document.getElementById("btnControlsCollapse");
+    const btnCrt = document.getElementById("btnCrt");
+    function updateCrtButton() {
+      btnCrt.classList.toggle("active", crtEnabled);
+      btnCrt.setAttribute("aria-pressed", String(crtEnabled));
+      btnCrt.title = crtEnabled
+        ? "CRT on: click for a clean image."
+        : "CRT off: click to enable the CRT filter.";
+      canvas.classList.toggle("crtDisabled", !crtEnabled);
+    }
+    updateCrtButton();
     const btnFullscreen = document.getElementById("btnFullscreen");
     const btnAppFullscreen = document.getElementById("btnAppFullscreen");
     const btnTurbo = document.getElementById("btnTurbo");
@@ -641,7 +686,6 @@
     const disk1 = document.getElementById("disk1");
     const romOsStatus = document.getElementById("romOsStatus");
     const romBasicStatus = document.getElementById("romBasicStatus");
-    const diskStatus = document.getElementById("diskStatus");
     const atariKeyboard = document.getElementById("atariKeyboard");
     const joystickArea = document.getElementById("joystickArea");
     const joystickStick = document.getElementById("joystickStick");
@@ -895,6 +939,7 @@
         gl: null,
         ctx2d: null,
         debugEl: debugEl,
+        crtEnabled: crtEnabled,
         audioEnabled: btnAudio.classList.contains("active"),
         turbo: btnTurbo.classList.contains("active"),
         sioTurbo: btnSioTurbo.classList.contains("active"),
@@ -902,6 +947,7 @@
         keyboardMappingMode: getKeyboardMappingModeFromUi(),
         videoStandard: videoStandardPreference,
         memoryExpansion: memoryExpansionPreference,
+        pokeyTrace: pokeyTracePreference,
       }, workerPreference));
       resizeCrtCanvas();
     } else {
@@ -911,6 +957,7 @@
           gl: gl,
           ctx2d: ctx2d,
           debugEl: debugEl,
+          crtEnabled: crtEnabled,
           audioEnabled: btnAudio.classList.contains("active"),
           turbo: btnTurbo.classList.contains("active"),
           sioTurbo: btnSioTurbo.classList.contains("active"),
@@ -918,6 +965,7 @@
           keyboardMappingMode: getKeyboardMappingModeFromUi(),
           videoStandard: videoStandardPreference,
           memoryExpansion: memoryExpansionPreference,
+          pokeyTrace: pokeyTracePreference,
         }, workerPreference));
       } catch (e) {
         // If WebGL init succeeded but shader/program setup failed, fall back to 2D by replacing the canvas.
@@ -944,6 +992,7 @@
               gl: null,
               ctx2d: ctx2d,
               debugEl: debugEl,
+              crtEnabled: crtEnabled,
               audioEnabled: btnAudio.classList.contains("active"),
               turbo: btnTurbo.classList.contains("active"),
               sioTurbo: btnSioTurbo.classList.contains("active"),
@@ -951,6 +1000,7 @@
               keyboardMappingMode: getKeyboardMappingModeFromUi(),
               videoStandard: videoStandardPreference,
               memoryExpansion: memoryExpansionPreference,
+              pokeyTrace: pokeyTracePreference,
             }, workerPreference));
             resizeCrtCanvas();
           } else {
@@ -1723,16 +1773,6 @@
         romBasicStatus.classList.add("fa-circle-xmark");
       }
 
-      // Update disk status icon
-      const d1Mounted = app.hasMountedDiskForDeviceSlot(0);
-      if (d1Mounted) {
-        diskStatus.classList.remove("fa-circle-xmark");
-        diskStatus.classList.add("fa-circle-check");
-      } else {
-        diskStatus.classList.remove("fa-circle-check");
-        diskStatus.classList.add("fa-circle-xmark");
-      }
-
       // Reconcile config toggle buttons with the app's current state so that
       // snapshot restore (which writes config internally) keeps the UI in sync.
       if (btnTurbo && typeof app.getTurbo === "function") {
@@ -1859,6 +1899,16 @@
     });
     bindToggleButton(btnSioTurbo, function (active) {
       app.setSioTurbo(active);
+    });
+    bindToggleButton(btnCrt, function (active) {
+      crtEnabled = active;
+      updateCrtButton();
+      app.setCrtEnabled(active);
+      try {
+        window.localStorage.setItem("a8e_crt_enabled", String(active));
+      } catch {
+        // The filter still works when storage is unavailable.
+      }
     });
     bindToggleButton(btnAudio, function (active) {
       app.setAudioEnabled(active);
@@ -2132,6 +2182,7 @@
 
     attachFileInput(romOs, function (buf) {
       app.loadOsRom(buf);
+      return initializeStartupMedia(true);
     });
 
     attachFileInput(romBasic, function (buf) {
@@ -2141,7 +2192,7 @@
     attachFileInput(
       disk1,
       async function (buf, name) {
-        await mountDiskToDrive(buf, name);
+        await mountDiskAndAutoStart(buf, name);
       },
       resolveDiskInputFile,
     );
@@ -2152,16 +2203,86 @@
       return ext === ".atr" || ext === ".xex" || ext === ".zip";
     }
 
-    function autoStartAfterDiskLoad() {
-      if (app.isRunning()) {
-        return Promise.resolve(app.reset());
-      } else if (app.isReady()) {
-        return Promise.resolve(app.start()).then(function () {
-          setButtons(true);
-          focusCanvas(false);
+    function queuePrimaryDriveOperation(operation) {
+      const next = primaryDriveQueue.catch(function () {}).then(operation);
+      primaryDriveQueue = next.catch(function (err) {
+        console.error("Primary drive operation failed:", err);
+      });
+      return next;
+    }
+
+    function waitForDiskLibraryRestore() {
+      const library =
+        app && typeof app.getDiskLibrary === "function"
+          ? app.getDiskLibrary()
+          : null;
+      if (!library || typeof library.isRestored !== "function" || library.isRestored()) {
+        return Promise.resolve();
+      }
+      if (typeof library.onChange !== "function") return Promise.resolve();
+      return new Promise(function (resolve) {
+        let unsubscribe = function () {};
+        const check = function () {
+          if (!library.isRestored()) return;
+          unsubscribe();
+          resolve();
+        };
+        unsubscribe = library.onChange(check);
+        check();
+      });
+    }
+
+    function hasPrimaryDriveMedia() {
+      if (app.hasMountedDiskForDeviceSlot(0)) return true;
+      const library =
+        typeof app.getDiskLibrary === "function" ? app.getDiskLibrary() : null;
+      return !!(
+        library &&
+        typeof library.listFiles === "function" &&
+        library.listFiles().some(function (file) {
+          return (file.mountedSlot | 0) === 0;
+        })
+      );
+    }
+
+    function loadStandbyXex() {
+      if (!standbyXexPromise) {
+        const url = new URL("assets/standby.xex", document.baseURI).toString();
+        standbyXexPromise = window.A8EUtil.fetchOptional(url).then(function (bytes) {
+          if (!bytes) throw new Error("Built-in startup XEX could not be loaded");
+          return bytes;
         });
       }
-      return Promise.resolve();
+      return standbyXexPromise;
+    }
+
+    function restartPrimaryDrive() {
+      if (!app.isReady()) return Promise.resolve();
+      const wasRunning = app.isRunning();
+      return Promise.resolve(app.reset()).then(function () {
+        return wasRunning ? undefined : app.start();
+      }).then(function () {
+        updateStatus();
+        focusCanvas(false);
+      });
+    }
+
+    function initializeStartupMedia(bootMountedMedia) {
+      return queuePrimaryDriveOperation(function () {
+        return waitForDiskLibraryRestore().then(function () {
+          if (hasPrimaryDriveMedia()) return false;
+          return loadStandbyXex().then(function (bytes) {
+            return mountDiskToDrive(bytes, "standby.xex").then(function () {
+              return true;
+            });
+          });
+        }).then(function (standbyMounted) {
+          updateStatus();
+          if (app.isReady() && (bootMountedMedia || standbyMounted)) {
+            return restartPrimaryDrive();
+          }
+        });
+      });
     }
 
     function mountDiskToDrive(buffer, name) {
@@ -2173,10 +2294,19 @@
     }
 
     function mountDiskAndAutoStart(buffer, name) {
-      return mountDiskToDrive(buffer, name).then(function () {
-        updateStatus();
-        return autoStartAfterDiskLoad();
+      return queuePrimaryDriveOperation(function () {
+        return waitForDiskLibraryRestore().then(function () {
+          return mountDiskToDrive(buffer, name);
+        }).then(function () {
+          updateStatus();
+          return restartPrimaryDrive();
+        });
       });
+    }
+
+    function onSnapshotMediaChanged() {
+      updateStatus();
+      return initializeStartupMedia(false);
     }
 
     async function handleScreenDrop(dataTransfer) {
@@ -2393,7 +2523,12 @@
       Util.fetchOptional("../ATARIBAS.ROM"),
     ]).then(function (res) {
       try {
-        if (res[0]) app.loadOsRom(res[0]);
+        if (res[0]) {
+          app.loadOsRom(res[0]);
+          initializeStartupMedia(true).catch(function (err) {
+            console.error("Startup media boot failed:", err);
+          });
+        }
         if (res[1]) app.loadBasicRom(res[1]);
       } catch (e) {
         console.error("Auto-load error:", e);
@@ -2469,12 +2604,15 @@
         app: app,
         panel: document.getElementById("snapshotPanel"),
         button: btnSnapshots,
-        onMediaChanged: updateStatus,
+        onMediaChanged: onSnapshotMediaChanged,
         focusCanvas: focusCanvas,
       });
     }
 
     applyLayoutScheme(layoutSchemePreference);
+    initializeStartupMedia(false).catch(function (err) {
+      console.error("Startup fallback disk could not be mounted:", err);
+    });
   }
 
   window.A8EUI = {
