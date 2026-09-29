@@ -500,7 +500,10 @@ Acceptance criteria:
   register values of the line.
 - PMG pixels and collision registers match the AHRM/Altirra reference cases.
 
-Status: **implemented and probe-validated on 2026-09-25; real-content validation pending**.
+Status: **diagnostic scope certified on 2026-09-27**. The synthetic probes,
+the two-phase visual diagnostic, Altirra comparison, and visual hardware
+comparison are complete. Broader title-level comparison remains regression
+work, not an unclosed AHRM-07 acceptance criterion.
 
 Implemented in both A8E and jsA8E:
 
@@ -585,9 +588,9 @@ Viability: **high** for timers/SIO and **medium** for audio/paddles.
 
 Current gap:
 
-- Timer and SIO behavior is substantially aligned. The shared eight-mode
-  SIO clock/timer-period contract now provides the first broader cross-core
-  differential fixture; exact STIMER phase still needs an external trace.
+- Timer and SIO behavior is certified at the Stage 2 guest and shared-contract
+  scope. jsA8E's P1 STIMER-to-SEROUT phase remains an explicitly accepted,
+  contained CPU/POKEY arbitration deviation.
 - The audio mixer, DAC curve, DC blocker, clipping, and paddle model are
   approximations rather than a complete analog POKEY model.
 
@@ -651,20 +654,21 @@ Status: **in progress; digital timer/SIO, live POT reads, and continuous ALLPOT 
 - Added `implementation/AHRM08_POKEY_TEST.XEX`, a portable guest-level
   diagnostic that records timer IRQ, SEROUT, and POT/ALLPOT observations for
   external comparison on jsA8E, native A8E, Altirra, and hardware.
-- STIMER pipeline/SIO event differential fixtures beyond clock selection and
-  audio calibration are still pending. Exact analog capacitor-voltage curves
+- The Stage 2 guest-level timer/SIO contract and its shared digital fixtures
+  are certified. The only recorded timing difference is jsA8E's accepted P1
+  serial-divider phase; do not change production timing without a focused CPU
+  event-arbitration investigation. Exact analog capacitor-voltage curves
   remain an approximation pending a hardware reference capture.
 
 Completion boundary requiring external reference:
 
-- The current timer deadline is an IRQ/event scheduling abstraction. AHRM
-  distinguishes the first STIMER reload, subsequent counter reloads, audio
-  pulses, IRQ assertion, linked-timer delay, and two-tone resync. These cannot
-  be collapsed into one deadline safely without a cycle trace for regression.
-- To finish the digital timing portion, provide either an Altirra trace or a
-  hardware-observed result for a small timer/SIO diagnostic covering STIMER at
-  cycle zero, AUDF=0 and AUDF=5, linked timers, IRQST timing, and SERIN/SEROUT
-  response phases. The same diagnostic can then become the next JSONL contract.
+- Digital timer/SIO behavior is certified at the Stage 2 guest and shared
+  contract scope. The P1 serial-divider phase is an accepted, contained
+  deviation; reopening it requires a CPU timed-event/initialization
+  arbitration trace, not a padding-specific delay or timer-period adjustment.
+- Linked low-channel audio pulses are implemented in both cores. They do not
+  yet have a cross-core waveform fixture because audio sample generation and
+  host output are deliberately outside the AHRM-09 digital harness.
 - To finish audio calibration, provide a fixed reference capture for the same
   PAL or NTSC target. A 48 kHz mono PCM/WAV capture of the four-voice Self
   Test and the Prince of Persia `launcher.obx` intro, recorded at a stated
@@ -831,10 +835,11 @@ diagnostic tracing disabled.
 - 33 JavaScript test files were discovered and executed individually.
 - 32 passed, including the new `pia_ddrb_orb_contract.test.js` and
   `ahrm_machine_matrix.test.js` fixtures.
-- One pre-existing test remains red: `playfield_dynamic_geometry.test.js`.
-  Its mock renderer does not provide the newer `rendererApi.drawModeLine`
-  method and fails before exercising the geometry assertions. It is tracked
-  separately from the AHRM-01 work.
+- At the time of this baseline,
+  `playfield_dynamic_geometry.test.js` was red because its mock renderer did
+  not provide the newer `rendererApi.drawModeLine` method and failed before
+  exercising the geometry assertions. It was tracked separately from the
+  AHRM-01 work and repaired on 2026-09-25; it passes in the current suite.
 - The two previously stale baseline tests were repaired as test-infrastructure
   fixes: the headless test now finds ROMs in `A8E/build`, and the standby test
   no longer requires text removed from the current standby program.

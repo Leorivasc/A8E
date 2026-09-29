@@ -4,6 +4,17 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-29: alignment audit corrected the documentation boundary: AHRM-07
+  is certified for its synthetic and visual diagnostic scope, while broader
+  title-level comparisons remain regression work; AHRM-08 remains open only
+  for analog calibration and the explicitly accepted P1 CPU/POKEY phase
+  follow-up. `implementation/A8E/POKEY.md` now records implemented POT
+  residual charge and live `ALLPOT` reassertion instead of the obsolete
+  missing-feature statement. Linked audio pulses are explicitly outside the
+  shared AHRM-09 waveform scope. `Pokey_DebugFrame` now prints `u32` fields
+  with the correct `unsigned long` format, removing compiler format warnings.
+  The full jsA8E automation suite and all 11 native CTest probes pass.
+
 - 2026-09-29: completed the current AHRM-09 digital differential-harness
   scope. Shared JSONL fixtures now cover PIA/PORTB, POKEY timer/SIO/paddle/
   keyboard IRQ behavior, ANTIC/NMI timing, and AHRM 4.13 PMG `DMACTL`

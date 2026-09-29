@@ -20,6 +20,12 @@ fabricated SIO response is used.
 Remaining work concerns broader AHRM regression coverage (for example DDRB and
 reset/snapshot edge cases), not the title's normal startup path.
 
+The detached-fragment report below was reproducible during the 2026-09-27
+investigation in both A8E cores, but disappeared after a subsequent cold
+reload of the ATR. No production workaround was added. Keep it as an
+intermittent title-level regression watch case; reopen the beam trace only if
+it can be reproduced with a saved state or repeatable input sequence.
+
 ## Open gameplay graphics report (2026-09-27)
 
 The user supplied two jsA8E captures and one native A8E capture of vertical

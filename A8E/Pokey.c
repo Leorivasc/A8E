@@ -1211,12 +1211,12 @@ void Pokey_DebugFrame(_6502_Context_t *pContext)
 		SDL_LockAudio();
 	}
 	audioStatus = SDL_GetAudioStatus();
-	fprintf(pPokey->pDebugFile, "%llu,%s,%u,%u,%u,%llu,%llu,%llu,%llu,%d\n",
+	fprintf(pPokey->pDebugFile, "%llu,%s,%lu,%lu,%lu,%llu,%llu,%llu,%llu,%d\n",
 			pPokey->debugFrame++,
 			pStandard,
-			pPokey->cpu_hz,
-			pPokey->sample_rate_hz,
-			pPokey->ring_count,
+			(unsigned long)pPokey->cpu_hz,
+			(unsigned long)pPokey->sample_rate_hz,
+			(unsigned long)pPokey->ring_count,
 			pPokey->debugSamplesGenerated,
 			pPokey->debugSamplesConsumed,
 			pPokey->debugUnderruns,
