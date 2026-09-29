@@ -4,9 +4,33 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-29: increased the jsA8E virtual joystick dead zone from 5px to
+  10px on each axis, reducing accidental diagonal activation while keeping
+  the existing independent-axis and multi-touch direction behavior.
+
+- 2026-09-29: changed the jsA8E browser defaults from PAL/64K to NTSC and
+  128K (130XE). Explicit boot options, URL parameters, and saved local
+  preferences still take precedence; native defaults and explicit 64K
+  selections are unchanged.
+
 - 2026-09-29: replaced the jsA8E CRT toolbar button text with a Font Awesome
   retro-TV icon. When the filter is disabled, the existing toggle state now
   adds a red slash overlay; title and ARIA labels remain unchanged.
+
+- 2026-09-29: `jsA8E/{index.html,style.css,js/app/ui.js}`: added an adaptive
+  mobile presentation below `980px`. The mobile toolbar keeps lifecycle and
+  disk actions compact, the fixed bottom action bar opens joystick, keyboard,
+  Disk Library, and HostFS, and the `More` sheet exposes CRT, turbo,
+  fullscreen, ROM, assembler, snapshot, and machine settings. Tool panels open
+  one at a time in a scrollable overlay; desktop layout presets and panel
+  ownership are unchanged. Chromium validation at 390x844 confirmed the
+  full-width screen, initial closed state, and fixed action bar.
+
+- 2026-09-29: `jsA8E/{index.html,style.css,js/app/ui.js}`: synchronized the
+  mobile `More` tool buttons with the active state of their real toolbar
+  controls, including `aria-pressed` feedback. Moved the real Option-on-Start
+  toggle next to Open Disk so its on/off state is visible in the compact mobile
+  toolbar and remains backed by the existing boot configuration.
 
 - 2026-09-29: corrected the linked POKEY audio divider in both cores: high
   underflow now reloads the low counter as well as the high counter (AHRM

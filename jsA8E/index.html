@@ -34,7 +34,7 @@
         var nextStandard =
           normalizeVideoStandard(boot.videoStandard) ||
           readStoredVideoStandard() ||
-          "pal";
+          "ntsc";
 
         window.A8E_BOOT_OPTIONS = Object.assign({}, boot, {
           videoStandard: nextStandard,
@@ -125,7 +125,7 @@
       <div class="controls">
         <div class="controlsPrimary">
           <div class="primaryControls">
-            <div class="iconControls iconControlsPrimary">
+            <div id="toolbarLifecycleControls" class="iconControls iconControlsPrimary">
               <button id="btnStart" class="primaryIconBtn" title="Start emulation and run the loaded Atari system." aria-label="Start emulation and run the loaded Atari system."><i class="fa-solid fa-play"></i></button>
               <button id="btnReset" class="primaryIconBtn" disabled title="Full machine restart (powercycle). Rebuilds the emulated Atari from a blank machine state while keeping loaded files." aria-label="Full machine restart (powercycle). Rebuilds the emulated Atari from a blank machine state while keeping loaded files."><i class="fa-solid fa-rotate-right"></i></button>
               <button id="btnAudio" class="toggle-btn active primaryIconBtn" title="Toggle emulator audio output on or off." aria-label="Toggle emulator audio output on or off.">
@@ -133,19 +133,22 @@
                 <i class="fa-solid fa-volume-xmark audio-off"></i>
               </button>
             </div>
-            <label class="fileBtn fileBtnPrimary" title="Load the Atari XL operating system ROM (ATARIXL.ROM). This file is required for a normal boot. Status icon: red cross means not loaded, green check means loaded.">
+            <label id="toolbarRomOs" class="fileBtn fileBtnPrimary" title="Load the Atari XL operating system ROM (ATARIXL.ROM). This file is required for a normal boot. Status icon: red cross means not loaded, green check means loaded.">
               <input type="file" id="romOs" accept=".rom,application/octet-stream" />
               <span>ATARIXL.ROM <i id="romOsStatus" class="fa-solid fa-circle-xmark status-icon"></i></span>
             </label>
-            <label class="fileBtn fileBtnPrimary" title="Load the Atari BASIC ROM (ATARIBAS.ROM). Keep this loaded for BASIC programs; disable with Option on Start when software requires BASIC off. Status icon: red cross means not loaded, green check means loaded.">
+            <label id="toolbarRomBasic" class="fileBtn fileBtnPrimary" title="Load the Atari BASIC ROM (ATARIBAS.ROM). Keep this loaded for BASIC programs; disable with Option on Start when software requires BASIC off. Status icon: red cross means not loaded, green check means loaded.">
               <input type="file" id="romBasic" accept=".rom,application/octet-stream" />
               <span>ATARIBAS.ROM <i id="romBasicStatus" class="fa-solid fa-circle-xmark status-icon"></i></span>
             </label>
-            <label class="fileBtn diskOpenBtn" title="Open an ATR disk image, XEX executable, or ZIP archive containing ATR/XEX in drive 1.">
+            <label id="toolbarDiskOpen" class="fileBtn diskOpenBtn" title="Open an ATR disk image, XEX executable, or ZIP archive containing ATR/XEX in drive 1.">
               <input type="file" id="disk1" aria-label="Open disk image" accept=".atr,.xex,.zip,application/zip,application/octet-stream" />
               <span><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i></span>
             </label>
-            <div class="iconControls iconControlsPrimary">
+            <button id="btnOptionOnStart" class="toggle-btn primaryIconBtn" title="Toggle Option on Start. When enabled, OPTION is held during boot to disable BASIC ROM mapping for software that requires BASIC off." aria-label="Toggle Option on Start. When enabled, OPTION is held during boot to disable BASIC ROM mapping for software that requires BASIC off." aria-pressed="false">
+              <i class="fa-solid fa-hand-point-down"></i>
+            </button>
+            <div id="toolbarUtilityControls" class="iconControls iconControlsPrimary">
               <button id="btnCrt" class="toggle-btn active" title="CRT on: click for a clean image." aria-label="CRT filter" aria-pressed="true">
                 <span class="fa-layers fa-fw crt-stack" aria-hidden="true">
                   <i class="fa-solid fa-tv"></i>
@@ -180,9 +183,6 @@
               </button>
               <button id="btnKeyboardMap" class="toggle-btn active" title="Keyboard mapping: translated symbols for local layouts (recommended for BASIC typing)." aria-label="Keyboard mapping: translated symbols for local layouts (recommended for BASIC typing).">
                 <i class="fa-solid fa-language"></i>
-              </button>
-              <button id="btnOptionOnStart" class="toggle-btn" title="Toggle Option on Start. When enabled, OPTION is held during boot to disable BASIC ROM mapping for software that requires BASIC off." aria-label="Toggle Option on Start. When enabled, OPTION is held during boot to disable BASIC ROM mapping for software that requires BASIC off.">
-                <i class="fa-solid fa-hand-point-down"></i>
               </button>
               <button id="btnHostFs" class="toggle-btn" title="Toggle H: device file manager. Upload files here to access them from the emulated Atari via the H: device." aria-label="Toggle H: device file manager.">
                 <i class="fa-solid fa-folder-open"></i>
@@ -227,14 +227,14 @@
               <span>Video</span>
               <select id="videoStandardSelect" class="toolbarSelect" aria-label="Video standard">
                 <option value="pal">PAL</option>
-                <option value="ntsc">NTSC</option>
+                <option value="ntsc" selected>NTSC</option>
               </select>
             </label>
             <label class="toolbarSelectWrap" title="Select the Atari extended memory profile. The emulator restarts the machine so the new bank map is applied cleanly.">
               <span>Memory</span>
               <select id="memoryExpansionSelect" class="toolbarSelect toolbarSelectWide" aria-label="Memory expansion">
                 <option value="none">64K</option>
-                <option value="130xe-128k">128K (130XE)</option>
+                <option value="130xe-128k" selected>128K (130XE)</option>
                 <option value="rambo-192k">192K (RAMBO)</option>
                 <option value="rambo-256k">256K (RAMBO)</option>
                 <option value="rambo-320k">320K (RAMBO)</option>
@@ -609,6 +609,49 @@
       </section>
       </div>
     </main>
+
+    <div id="mobilePanelBackdrop" class="mobilePanelBackdrop" hidden></div>
+    <button id="mobilePanelClose" class="mobilePanelClose" type="button" hidden aria-label="Close mobile panel" title="Close mobile panel">
+      <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+    </button>
+    <section id="mobileToolsSheet" class="mobileToolsSheet" hidden aria-label="Mobile tools">
+      <div class="mobileSheetTitlebar">
+        <span>Tools</span>
+        <button id="mobileToolsClose" type="button" aria-label="Close mobile tools" title="Close mobile tools">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div class="mobileToolsGrid">
+        <button type="button" data-mobile-proxy="btnCrt"><i class="fa-solid fa-tv"></i><span>CRT</span></button>
+        <button type="button" data-mobile-proxy="btnTurbo"><i class="fa-solid fa-microchip"></i><span>Turbo</span></button>
+        <button type="button" data-mobile-proxy="btnSioTurbo"><i class="fa-solid fa-angles-right"></i><span>SIO turbo</span></button>
+        <button type="button" data-mobile-proxy="btnFullscreen"><i class="fa-solid fa-expand"></i><span>Display</span></button>
+        <button type="button" data-mobile-proxy="btnAppFullscreen"><i class="fa-solid fa-window-maximize"></i><span>Workspace</span></button>
+        <button type="button" data-mobile-proxy="btnKeyboardMap"><i class="fa-solid fa-language"></i><span>Key map</span></button>
+        <button type="button" data-mobile-proxy="btnControlsCollapse"><i class="fa-solid fa-sliders"></i><span>Machine</span></button>
+        <button type="button" data-mobile-proxy="toolbarRomOs"><i class="fa-solid fa-microchip"></i><span>OS ROM</span></button>
+        <button type="button" data-mobile-proxy="toolbarRomBasic"><i class="fa-solid fa-microchip"></i><span>BASIC ROM</span></button>
+        <button type="button" data-mobile-panel="assemblerPanel" data-mobile-button="btnAssembler"><i class="fa-solid fa-file-code"></i><span>Assembler</span></button>
+        <button type="button" data-mobile-panel="snapshotPanel" data-mobile-button="btnSnapshots"><i class="fa-solid fa-camera-retro"></i><span>Snapshots</span></button>
+      </div>
+    </section>
+    <nav id="mobileActionBar" class="mobileActionBar" aria-label="Mobile controls">
+      <button type="button" data-mobile-input="joystick" aria-label="Show joystick" title="Show joystick">
+        <i class="fa-solid fa-gamepad" aria-hidden="true"></i><span>Joystick</span>
+      </button>
+      <button type="button" data-mobile-input="keyboard" aria-label="Show keyboard" title="Show keyboard">
+        <i class="fa-solid fa-keyboard" aria-hidden="true"></i><span>Keyboard</span>
+      </button>
+      <button type="button" data-mobile-panel="diskLibraryPanel" data-mobile-button="btnDiskLibrary" aria-label="Open disk library" title="Open disk library">
+        <i class="fa-solid fa-hard-drive" aria-hidden="true"></i><span>Disks</span>
+      </button>
+      <button type="button" data-mobile-panel="hostfsPanel" data-mobile-button="btnHostFs" aria-label="Open HostFS" title="Open HostFS">
+        <i class="fa-solid fa-folder-open" aria-hidden="true"></i><span>HostFS</span>
+      </button>
+      <button id="mobileToolsButton" type="button" aria-label="Open mobile tools" aria-expanded="false" title="Open mobile tools">
+        <i class="fa-solid fa-ellipsis" aria-hidden="true"></i><span>More</span>
+      </button>
+    </nav>
 
     <script src="js/shared/util.js"></script>
     <script src="js/render/palette.js"></script>
