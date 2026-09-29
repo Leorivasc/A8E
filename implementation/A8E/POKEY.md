@@ -14,8 +14,11 @@
   path still needs reference-capture calibration for perceived volume,
   clipping, and browser/native output differences. jsA8E now uses
   cycle-accurate audio stepping for linked POKEY timer modes, matching the
-  native stepping model; Prince of Persia passed the Chromium auditory
-  regression check. jsA8E has one accepted AHRM-08 phase-matrix deviation:
+  native stepping model; the earlier Prince of Persia auditory check covered
+  the loading demo. A later in-game check exposed missing low-counter reload
+  at linked high underflow; both cores now reload the pair together, with
+  repeated waveform-edge regressions. In-game auditory confirmation remains
+  pending. jsA8E has one accepted AHRM-08 phase-matrix deviation:
   with the diagnostic's `P1` STIMER-to-SEROUT padding, the guest polling count
   is `05` rather than Altirra/hardware's `00`. The current native trace shows
   P1 entering with the serial divide-by-two phase low and selecting the next

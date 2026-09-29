@@ -460,6 +460,11 @@
         {reload = (period + 7) >>> 0;}
       if (!reload) reload = 1;
       chHigh.counter = reload | 0;
+      // AHRM 5.3: the high underflow reloads both counters. Reloading the
+      // low counter does not clock its audio output again.
+      const fast = (chLow === st.channels[0] && (audctl & 0x40)) ||
+        (chLow === st.channels[2] && (audctl & 0x20));
+      chLow.counter = (chLow.audf & 0xff) + (fast ? 4 : 1);
 
       pokeyAudioChannelClockOut(st, chHigh, audctl);
       return pulses | 2;

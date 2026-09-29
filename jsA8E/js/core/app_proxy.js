@@ -1352,6 +1352,7 @@
         width: canvas.width | 0,
         height: canvas.height | 0,
         audioSampleRate: audioBridge.getSampleRateHint(),
+        crtEnabled: opts.crtEnabled !== false,
         audioEnabled: !!opts.audioEnabled,
         turbo: !!opts.turbo,
         sioTurbo: opts.sioTurbo === true,
@@ -1409,6 +1410,9 @@
       },
       getSioTurbo: function () {
         return state.sioTurbo;
+      },
+      setCrtEnabled: function (value) {
+        sendCommand("setCrtEnabled", { value: !!value });
       },
       setAudioEnabled: function (v) {
         state.audioEnabled = !!v;

@@ -191,6 +191,16 @@ if(BUILD_TESTING)
   add_test(NAME pokey_timer_period_probe COMMAND pokey_timer_period_probe)
   set_tests_properties(pokey_timer_period_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
 
+  # This probe includes Pokey.c to observe private audio flip-flops.
+  set(A8E_LINKED_AUDIO_PROBE_SOURCES ${A8E_CORE_SOURCES})
+  list(REMOVE_ITEM A8E_LINKED_AUDIO_PROBE_SOURCES Pokey.c)
+  add_executable(pokey_linked_audio_probe
+    tests/pokey_linked_audio_probe.c
+    ${A8E_LINKED_AUDIO_PROBE_SOURCES}
+  )
+  a8e_configure_target(pokey_linked_audio_probe)
+  add_test(NAME pokey_linked_audio_probe COMMAND pokey_linked_audio_probe)
+
   add_executable(pokey_sio_contract_probe
     tests/pokey_sio_contract_probe.c
     ${A8E_CORE_SOURCES}

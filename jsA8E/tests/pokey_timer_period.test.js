@@ -51,7 +51,7 @@ function loadPokeyApi() {
   return context.window.A8EPokeyAudio.createApi({
     ATARI_CPU_HZ_PAL: 1773447,
     CYCLES_PER_LINE: 114,
-    POKEY_AUDIO_MAX_CATCHUP_CYCLES: 0,
+    POKEY_AUDIO_MAX_CATCHUP_CYCLES: 1000000,
     IO_AUDF1_POT0: IO_AUDF1_POT0,
     IO_AUDC1_POT1: 0xd201,
     IO_AUDF2_POT2: IO_AUDF2_POT2,
@@ -134,6 +134,50 @@ function testZeroIsTheMinimumValidDivisor() {
     );
   }
 }
+
+function testLinkedAudioReloadsBothCounters() {
+  const api = loadPokeyApi();
+  for (const lowChannel of [0, 2]) {
+    for (const fast of [false, true]) {
+      for (const slow15 of [false, true]) {
+        const ctx = makeContext();
+        const st = api.createState(48000);
+        const audctl = (lowChannel === 0 ? 0x10 : 0x08) |
+          (fast ? (lowChannel === 0 ? 0x40 : 0x20) : 0) |
+          (slow15 ? 1 : 0);
+        const base = fast ? 1 : (slow15 ? 114 : 28);
+        const first = fast ? 68 : 65; // AUDF low=$40, high=$01 (AHRM 5.3).
+        const period = fast ? 327 : 321;
+        api.onRegisterWrite(st, 0xd20f, 3);
+        api.onRegisterWrite(st, 0xd208, audctl);
+        api.onRegisterWrite(st, 0xd200 + lowChannel * 2, 0x40);
+        api.onRegisterWrite(st, 0xd202 + lowChannel * 2, 1);
+        api.onRegisterWrite(st, 0xd201 + lowChannel * 2, 0xaf);
+        api.onRegisterWrite(st, 0xd203 + lowChannel * 2, 0xaf);
+        api.onRegisterWrite(st, 0xd209, 0);
+        const lowEdges = [], highEdges = [];
+        let low = st.channels[lowChannel].output;
+        let high = st.channels[lowChannel + 1].output;
+        for (let cycle = 1; cycle <= 3 * period * base; cycle++) {
+          api.sync(ctx, st, cycle);
+          if (st.channels[lowChannel].output !== low) lowEdges.push(cycle);
+          if (st.channels[lowChannel + 1].output !== high) highEdges.push(cycle);
+          low = st.channels[lowChannel].output;
+          high = st.channels[lowChannel + 1].output;
+        }
+        const expectedLow = [];
+        for (let n = 0; n < 3; n++) {
+          expectedLow.push((n * period + first) * base,
+            (n * period + first + 256) * base);
+        }
+        assert.deepEqual(lowEdges, expectedLow, `low audio pulses AUDCTL=${audctl}`);
+        assert.deepEqual(highEdges, [1, 2, 3].map(n => n * period * base));
+      }
+    }
+  }
+}
+
+testLinkedAudioReloadsBothCounters();
 
 testZeroIsTheMinimumValidDivisor();
 testSerialClockModeSelection();
