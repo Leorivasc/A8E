@@ -177,6 +177,13 @@ function makeContext() {
       modeLineScrollExit: false,
       modeLineExitDli: false,
       modeLineEndsThisLine: false,
+      vscrolTiming: {
+        rawValue: 0,
+        activeValue: 0,
+        pendingValue: 0,
+        pendingClock: -1,
+        initialized: true,
+      },
       nmiTiming: {
         enabledByCycle7: 0,
         enabledByCycle8: 0,
@@ -320,6 +327,13 @@ function makeClockCtx() {
       modeLineScrollExit: false,
       modeLineExitDli: false,
       modeLineEndsThisLine: false,
+      vscrolTiming: {
+        rawValue: 0,
+        activeValue: 0,
+        pendingValue: 0,
+        pendingClock: -1,
+        initialized: true,
+      },
       drawLine: {
         playerMissileClockActive: false,
         playerMissileInterleaved: false,
@@ -409,9 +423,37 @@ function testExitEndLatchIgnoresVscrolWrittenAfterCycle108() {
   );
 }
 
+function testVscrolDeadlineUsesAtomicInstructionWriteCycle() {
+  const api = loadRendererBaseApi();
+  const ctx = makeClockCtx();
+
+  ctx.ioData.modeLineScrollExit = true;
+  ctx.ioData.modeLineRowCounter = 3;
+  ctx.sram[IO_VSCROL] = 3;
+  ctx.ioData.vscrolTiming.rawValue = 3;
+  ctx.ioData.vscrolTiming.pendingValue = 3;
+
+  // A write completing on cycle 108 is visible to the cycle-109 sample.
+  ctx.ioData.vscrolTiming.pendingClock = 108;
+  api.stepClockActions(ctx, 110);
+  assert.equal(ctx.ioData.modeLineEndsThisLine, true);
+
+  const late = makeClockCtx();
+  late.ioData.modeLineScrollExit = true;
+  late.ioData.modeLineRowCounter = 3;
+  late.sram[IO_VSCROL] = 3;
+  late.ioData.vscrolTiming.rawValue = 3;
+  late.ioData.vscrolTiming.pendingValue = 3;
+  // A write completing on cycle 109 is too late for that sample.
+  late.ioData.vscrolTiming.pendingClock = 109;
+  api.stepClockActions(late, 110);
+  assert.equal(late.ioData.modeLineEndsThisLine, false);
+}
+
 testVscrolEntryWrapExtendsModeLine();
 testVscrolExitLineFollowsLiveVscrol();
 testExitDliArmedAtCycle6OnMatchingRow();
 testExitDliIgnoresVscrolWrittenAfterCycle5();
 testExitEndLatchIgnoresVscrolWrittenAfterCycle108();
+testVscrolDeadlineUsesAtomicInstructionWriteCycle();
 console.log("antic_vscrol_timing tests passed");

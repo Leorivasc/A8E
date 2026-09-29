@@ -24,7 +24,11 @@ The tests execute from RAM so bank selection cannot make the diagnostic code its
 
 ## 2. Automatic profile detection
 
-Both programs test the AHRM profiles from largest to smallest. For each profile they write a different signature at `$4000` in every bank and read it back. The first profile for which every bank matches is selected as the active profile.
+Both programs test the AHRM profiles from largest to smallest. Normal profiles
+write a different signature at `$4000` in every bank and read it back. RAMBO
+256K is detected separately because banks 0-3 intentionally alias motherboard
+RAM; its detector verifies that alias group and then verifies an independent
+bank before selecting the profile.
 
 | Profile | Type | 16 KiB banks | Expansion capacity | ANTIC window according to the program |
 |---|---|---:|---:|---|
@@ -33,6 +37,7 @@ Both programs test the AHRM profiles from largest to smallest. For each profile 
 | `576R` | RAMBO | 32 | 512 KiB additional | Shared with CPU |
 | `320C` | COMPY | 16 | 256 KiB additional | Separate |
 | `320R` | RAMBO | 16 | 256 KiB additional | Shared with CPU |
+| `256R` | RAMBO | 16 | 192 KiB additional plus 64 KiB motherboard aliases | Shared with CPU |
 | `192` | RAMBO | 8 | 128 KiB additional | Shared with CPU |
 | `128` | 128 KiB profile | 4 | 64 KiB additional | Separate |
 
@@ -51,7 +56,9 @@ Therefore, detection as `1088K` confirms that the 64-bank 1088K/U1MB mapping is 
 After detecting the profile, the program visits every detected bank. For each bank it:
 
 1. Selects the bank using the `PORTB` map for the active profile.
-2. Generates a bank-dependent pattern (`BANK + $55`).
+2. Generates a bank-dependent pattern (`BANK + $55`). For RAMBO 256K, banks
+   0-3 intentionally share the bank-3 signature because they alias
+   motherboard RAM.
 3. Writes the pattern to the complete 16 KiB CPU window, `$4000-$7FFF`.
 4. Reads the complete 16 KiB window and compares every byte.
 5. Increments the error counter and marks the screen if a mismatch is found.
@@ -62,13 +69,18 @@ The result is displayed as `RW BANKS PASS` or `RW BANKS FAIL`.
 
 ### 3.2 `STAGE 2`: retention, CPU window, and 1088K map
 
-This stage verifies that banks do not alias and that switching between motherboard RAM and expanded RAM works correctly.
+This stage verifies bank retention and switching between motherboard RAM and
+expanded RAM. For RAMBO 256K it additionally expects banks 0-3 to alias the
+motherboard window, while banks 4-15 must remain independent.
 
 #### Retention and aliasing
 
 - Writes a different signature (`BANK XOR $A5`) to `$4000` in every bank.
 - Reads the banks in reverse order.
-- An error indicates that two banks may point to the same memory, that a bank-selection bit is not working, or that data is not retained when switching banks.
+- For RAMBO 256K, the four alias banks must return the same signature and the
+  remaining banks must retain independent signatures.
+- An error indicates an unexpected alias, a bank-selection bit that is not
+  working, or data that is not retained when switching banks.
 
 #### Hidden motherboard RAM
 
@@ -77,7 +89,9 @@ Before changing banks, two sentinels are written to motherboard RAM:
 - `$4000 = $A5`
 - `$7FFF = $5A`
 
-The expanded window is closed and reopened. Both values must survive. This detects implementations that damage normal RAM while switching the window.
+The expanded window is closed and reopened. Both values must survive. In
+RAMBO 256K, bank 0 is the motherboard alias, so the test also verifies that
+writing through that alias remains visible after the shared window transition.
 
 #### Independent 1088K RAMBO map check
 
@@ -123,8 +137,11 @@ The program:
 3. Writes an alternating pattern to `$4000-$43FF` and a message at `$4168`.
 4. Builds a display list in motherboard RAM at `$3000`, with its LMS pointing to `$4000`.
 5. Temporarily enables the display using that list and waits for user input.
-6. Selects the upper end of the map (`BANK = $3F`; smaller profiles mask this to their last valid bank).
-7. Repeats the pattern and display check, also exercising the high bank bits, especially `PORTB` bits 5-7 in 1088K.
+6. Selects the last detected bank (`BANK = COUNT - 1`). For RAMBO 256K the
+   first screen uses motherboard-alias bank 0 and the second uses independent
+   bank 15.
+7. Repeats the pattern and display check, exercising the high bank bits,
+   especially `PORTB` bits 5-7 in 1088K.
 8. Restores the original display list, DMA configuration, and `PORTB` value.
 
 Controls for each displayed pattern:
@@ -158,14 +175,17 @@ At the beginning, two values are written to motherboard RAM:
 - `$4000 = $A5`
 - `$7FFF = $A5`
 
-At the end of every pass, the program returns to the normal view and verifies both values. A change indicates a window-switching or window-restoration error.
+At the end of every pass, the program returns to the normal view and verifies
+both values. For RAMBO 256K the expected motherboard value is the shared
+alias signature, not the untouched `$A5` sentinel. A change beyond that
+documented alias behavior indicates a window-switching or restoration error.
 
 ### 4.2 32 stress iterations
 
 The program executes 32 iterations (`$00` through `$1F`). During each iteration it:
 
 1. Visits every bank in ascending order.
-2. Calculates a different pattern for each bank/iteration combination (`BANK XOR ITER XOR $5A`).
+2. Calculates a different pattern for each bank/iteration combination (`BANK XOR ITER XOR $5A`). For RAMBO 256K, banks 0-3 intentionally use the same bank-3 pattern.
 3. Writes the pattern to the first page (`$4000-$40FF`) and last page (`$7F00-$7FFF`) of the bank.
 4. Visits the banks in descending order.
 5. Reads and compares those two pages.
@@ -193,7 +213,7 @@ In this profile bit 7 must select another bank. If it selected the Self-Test ROM
 
 #### Smaller RAMBO profiles
 
-For `576R`, `320R`, and `192`, all banks are visited and `$5000` and `$57FF` are checked with both views. With bit 7 clear, Self-Test ROM must have priority: its bytes are captured, writes through the overlay are attempted, and the ROM reads must remain unchanged. After bit 7 is restored, the original expanded-RAM pattern must be visible again. This verifies both write isolation during the overlay and RAM recovery afterwards.
+For `576R`, `320R`, `256R`, and `192`, all banks are visited and `$5000` and `$57FF` are checked with both views. With bit 7 clear, Self-Test ROM must have priority: its bytes are captured, writes through the overlay are attempted, and the ROM reads must remain unchanged. After bit 7 is restored, the original expanded-RAM pattern must be visible again. This verifies both write isolation during the overlay and RAM recovery afterwards.
 
 #### Profiles without this control
 

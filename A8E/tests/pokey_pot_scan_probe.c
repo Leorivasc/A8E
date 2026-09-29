@@ -26,6 +26,7 @@ typedef struct
 	} while(0)
 
 #define POKEY_POT_DEFAULT_VALUE 229
+#define A8E_POT_TRACE_FIXTURE_PATH "implementation/traces/pokey_pot_contract.jsonl"
 
 static ProbeMachine_t ProbeMachine_Open(void)
 {
@@ -201,6 +202,112 @@ static int TestSkctlModeChangesDoNotRetroactivelyRescaleElapsedTime(void)
 	return 1;
 }
 
+static int TestFastScanLiveReadsUseAdjacentCounterAnd(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	static const u8 aExpected[] = {
+		0x00, 0x00, 0x00, 0x02, 0x00, 0x04, 0x04, 0x06,
+		0x00, 0x08, 0x08, 0x0a, 0x08, 0x0c, 0x0c, 0x0e, 0x00};
+	u32 i;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetPotState(&tMachine);
+	pContext->pShadowMemory[IO_SKCTL_SKSTAT] = 0x07;
+	Pokey_PotStartScan(pContext);
+
+	for(i = 0; i < sizeof(aExpected) / sizeof(aExpected[0]); i++)
+	{
+		u8 *pValue;
+		pContext->llCycleCounter = i;
+		pValue = Pokey_AUDF1_POT0(pContext, NULL);
+		REQUIRE(*pValue == aExpected[i],
+				"fast live read at cycle %u returned %02X, expected %02X",
+				(unsigned)i, *pValue, aExpected[i]);
+	}
+
+	pContext->llCycleCounter = 229;
+	REQUIRE(*Pokey_AUDF1_POT0(pContext, NULL) == 228,
+			"terminal fast live read did not return 228 AND 229");
+	pContext->llCycleCounter = 230;
+	REQUIRE(*Pokey_AUDF1_POT0(pContext, NULL) == 229,
+			"post-scan read did not return the latched 229 value");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestInputBelowThresholdReassertsAllpot(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	u32 i;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetPotState(&tMachine);
+	pContext->pShadowMemory[IO_SKCTL_SKSTAT] = 0x07;
+	for(i = 0; i < 8; i++) pIoData->aPotValues[i] = 2;
+	Pokey_PotStartScan(pContext);
+	pContext->llCycleCounter = 2;
+	Pokey_PotUpdate(pContext);
+	REQUIRE(pContext->pMemory[IO_AUDCTL_ALLPOT] == 0x00 &&
+		pContext->pMemory[IO_AUDF1_POT0] == 2,
+		"POT0 did not latch at its initial threshold");
+
+	/* Raising the target models the input falling below threshold at count 2. */
+	pIoData->aPotValues[0] = 10;
+	pContext->llCycleCounter = 3;
+	Pokey_PotUpdate(pContext);
+	REQUIRE(pContext->pMemory[IO_AUDCTL_ALLPOT] == 0x01 &&
+		pContext->pMemory[IO_AUDF1_POT0] == 3,
+		"POT0 did not resume after the input fell below threshold");
+
+	pContext->llCycleCounter = 10;
+	Pokey_PotUpdate(pContext);
+	REQUIRE(pContext->pMemory[IO_AUDCTL_ALLPOT] == 0x00 &&
+		pContext->pMemory[IO_AUDF1_POT0] == 10,
+		"POT0 did not relatch at the new threshold");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestEarlyPotgoRetainsResidualCharge(void)
+{
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	u32 i;
+	FILE *pFixture;
+	char aLine[256];
+	char aStep[96];
+	unsigned uSkctl, uTarget, uFirst, uSecond, uPot0, uAllpot;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+	pFixture = fopen(A8E_POT_TRACE_FIXTURE_PATH, "r");
+	REQUIRE(pFixture != NULL, "cannot open POT fixture");
+	REQUIRE(fgets(aLine, sizeof(aLine), pFixture) != NULL, "POT fixture is empty");
+	fclose(pFixture);
+	REQUIRE(sscanf(aLine, "{\"step\":\"%95[^\"]\",\"skctl\":%u,\"target\":%u,\"first\":%u,\"second\":%u,\"pot0\":%u,\"allpot\":%u}", aStep, &uSkctl, &uTarget, &uFirst, &uSecond, &uPot0, &uAllpot) == 7, "invalid POT fixture");
+	ProbeMachine_ResetPotState(&tMachine);
+	pContext->pShadowMemory[IO_SKCTL_SKSTAT] = (u8)uSkctl;
+	for(i = 0; i < 8; i++) pIoData->aPotValues[i] = (u8)uTarget;
+	Pokey_PotStartScan(pContext);
+	pContext->llCycleCounter = (u64)uFirst * CYCLES_PER_LINE;
+	Pokey_PotUpdate(pContext);
+	Pokey_PotStartScan(pContext);
+	pContext->llCycleCounter += (u64)uSecond * CYCLES_PER_LINE;
+	Pokey_PotUpdate(pContext);
+	REQUIRE(pContext->pMemory[IO_AUDF1_POT0] == uPot0 &&
+		pContext->pMemory[IO_AUDCTL_ALLPOT] == uAllpot,
+		"POT fixture %s mismatch", aStep);
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
 int main(int argc, char *argv[])
 {
 	if(!TestSlowScanUsesScanlineRateAndRunsToCompletion())
@@ -214,6 +321,20 @@ int main(int argc, char *argv[])
 	}
 
 	if(!TestSkctlModeChangesDoNotRetroactivelyRescaleElapsedTime())
+	{
+		return 1;
+	}
+
+	if(!TestFastScanLiveReadsUseAdjacentCounterAnd())
+	{
+		return 1;
+	}
+
+	if(!TestInputBelowThresholdReassertsAllpot())
+	{
+		return 1;
+	}
+	if(!TestEarlyPotgoRetainsResidualCharge())
 	{
 		return 1;
 	}

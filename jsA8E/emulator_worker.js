@@ -108,6 +108,7 @@
     if (text === "" || text === "none" || text === "64k" || text === "64kb" || text === "no-expansion") return "none";
     if (text === "130xe" || text === "128k" || text === "128kb" || text === "130xe-128k") return "130xe-128k";
     if (text === "192k" || text === "192kb" || text === "rambo-192k") return "rambo-192k";
+    if (text === "256k" || text === "256kb" || text === "rambo-256k") return "rambo-256k";
     if (text === "320k" || text === "320kb" || text === "rambo-320k") return "rambo-320k";
     if (text === "compy-320k" || text === "320k-compy") return "compy-320k";
     if (text === "576k" || text === "576kb" || text === "rambo-576k") return "rambo-576k";
@@ -524,6 +525,7 @@
       {
         videoStandard: normalizeVideoStandard(msg.videoStandard) || "pal",
         memoryExpansion: normalizeMemoryExpansion(msg.memoryExpansion) || "none",
+        pokeyTrace: !!msg.pokeyTrace,
       },
     );
 
@@ -595,6 +597,7 @@
         optionOnStart: !!msg.optionOnStart,
         videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
         memoryExpansion: self.A8E_BOOT_OPTIONS.memoryExpansion,
+        pokeyTrace: !!msg.pokeyTrace,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
           queueDebugState(state, force);
@@ -618,6 +621,7 @@
         optionOnStart: !!msg.optionOnStart,
         videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
         memoryExpansion: self.A8E_BOOT_OPTIONS.memoryExpansion,
+        pokeyTrace: !!msg.pokeyTrace,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
           queueDebugState(state, force);
@@ -1036,12 +1040,16 @@
         // Memory access hooks are diagnostic-only and are intentionally not
         // serialized across the Worker boundary.
         if (typeof app.setMemoryAccessHook === "function") {
-          app.setMemoryAccessHook(data.enabled ? function (kind, address, value, cycle, instruction, pc, opcode) {
-            if (address !== 0xd301 && (address < 0x4000 || address > 0x7fff)) return;
+          app.setMemoryAccessHook(data.enabled ? function (kind, address, value, cycle, instruction, pc, opcode, ctx) {
+            const isPiaPortB = address === 0xd301;
+            const isMemoryExpansionWindow = address >= 0x4000 && address <= 0x7fff;
+            const isPokeyRegister = address >= 0xd200 && address <= 0xd20f;
+            if (!isPiaPortB && !isMemoryExpansionWindow && !isPokeyRegister) return;
             self.postMessage({
               type: "memoryAccess",
               access: {
                 kind, address, value, cycle, instruction, pc, opcode,
+                accessMode: ctx && typeof ctx.accessMode === "number" ? ctx.accessMode : null,
                 bank: typeof app.getBankState === "function" ? app.getBankState() : null,
               },
             });

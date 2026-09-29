@@ -149,7 +149,19 @@ u8 *Antic_VSCROL(_6502_Context_t *pContext, u8 *pValue)
 {
 	if(pValue)
 	{
-		SRAM[IO_VSCROL] = (*pValue & 0x0f);
+		IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+		u32 lWriteCycleOffset =
+			pContext->cCurrentInstructionCycles > 0
+				? (u32)(pContext->cCurrentInstructionCycles - 1)
+				: 0;
+		u8 cValue = *pValue & 0x0f;
+
+		SRAM[IO_VSCROL] = cValue;
+		pIoData->bVscrolTimingInitialized = 1;
+		pIoData->cVscrolRawValue = cValue;
+		pIoData->cVscrolPendingValue = cValue;
+		pIoData->llVscrolPendingCycle =
+			pIoData->llCycle + lWriteCycleOffset;
 #ifdef VERBOSE_REGISTER
 		printf("             [%16llu]", pContext->llCycleCounter);
 		printf(" VSCROL: %02X\n", *pValue);

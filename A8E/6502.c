@@ -1087,6 +1087,16 @@ void _6502_Status(_6502_Context_t *pContext)
 
 void _6502_Nmi(_6502_Context_t *pContext)
 {
+	/* AHRM 4.8: when the IRQ acknowledge started at cycle 4, ANTIC's
+	 * cycle-8 NMI edge is lost even though NMIST is still updated. The
+	 * scheduler exposes the cycle-7 status event three cycles ahead of the
+	 * IRQ acknowledge, so the CPU can model this without knowing ANTIC state. */
+	if(pContext->cIrqNmiLossWindow)
+	{
+		pContext->cIrqNmiLossWindow = 0;
+		return;
+	}
+
 	/* Edge-triggered NMI: keep one pending request and service at execute boundary. */
 	pContext->cNmiPendingFlag = 1;
 }
@@ -1101,6 +1111,7 @@ void _6502_Reset(_6502_Context_t *pContext)
 	pContext->cNmiPendingFlag = 0;
 	pContext->cNmiActiveFlag = 0;
 	pContext->cIrqPendingFlag = 0;
+	pContext->cIrqNmiLossWindow = 0;
 	CPU.pc = RAM[0xfffc] | (RAM[0xfffd] << 8);
 
 	pContext->llCycleCounter += 7;
@@ -1116,6 +1127,8 @@ void _6502_Irq(_6502_Context_t *pContext)
 	}
 	else
 	{
+		pContext->cIrqNmiLossWindow =
+			(pContext->llIoBeamTimedEventCycle == pContext->llCycleCounter + 3u);
 		if(pContext->cIrqPendingFlag)
 		{
 			pContext->cIrqPendingFlag--;
@@ -1141,12 +1154,21 @@ void _6502_Execute(_6502_Context_t *pContext)
 		return;
 	}
 
+	/* If the next CPU boundary passed without an ANTIC edge, the one-cycle
+	 * loss opportunity has expired. */
+	if(pContext->cIrqNmiLossWindow && !pContext->cNmiPendingFlag)
+	{
+		pContext->cIrqNmiLossWindow = 0;
+	}
+
 	if(_6502_ServicePendingInterrupts(pContext))
 	{
 		return;
 	}
 
+	pContext->sCurrentInstructionPc = CPU.pc;
 	cCode = RAM[CPU.pc++];
+	pContext->cCurrentOpcode = cCode;
 
 	pContext->AccessFunction = NULL;
 	pContext->cPageCrossed = 0;

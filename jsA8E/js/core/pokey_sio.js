@@ -10,6 +10,13 @@
     const SERIAL_INPUT_FIRST_DATA_READY_CYCLES =
       cfg.SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
     const SERIAL_INPUT_DATA_READY_CYCLES = cfg.SERIAL_INPUT_DATA_READY_CYCLES;
+    const IO_IRQEN_IRQST = cfg.IO_IRQEN_IRQST;
+    const CYCLE_NEVER =
+      cfg.CYCLE_NEVER !== undefined ? cfg.CYCLE_NEVER : Number.POSITIVE_INFINITY;
+    const serialOutputClockAvailable = cfg.serialOutputClockAvailable;
+    const serialOutputClockPeriod = cfg.serialOutputClockPeriod;
+    const serialOutputClockNextCycle = cfg.serialOutputClockNextCycle;
+    const traceSerialEvent = cfg.traceSerialEvent;
 
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
 
@@ -48,6 +55,65 @@
 
     function effectiveEventCycle(ctx) {
       return ctx.cycleCounter;
+    }
+
+    function serialOutputDelay(ctx, fallback) {
+      if (typeof serialOutputClockPeriod === "function") {
+        const period = serialOutputClockPeriod(ctx) | 0;
+        if (period > 0) return period;
+      }
+      return fallback;
+    }
+
+    function serialOutputIsAvailable(ctx) {
+      if (typeof serialOutputClockAvailable === "function")
+        return !!serialOutputClockAvailable(ctx);
+      return true;
+    }
+
+    function scheduleSerialOutput(ctx, now, scheduleNeed, scheduleDone) {
+      const io = ctx.ioData;
+      if (!serialOutputIsAvailable(ctx)) {
+        io.serialOutputNeedDataCycle = CYCLE_NEVER;
+        io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
+        if (ctx.ram && IO_IRQEN_IRQST !== undefined)
+          ctx.ram[IO_IRQEN_IRQST] &= ~0x08;
+        cycleTimedEventUpdate(ctx);
+        return false;
+      }
+
+      const period = serialOutputDelay(ctx, SERIAL_OUTPUT_DATA_NEEDED_CYCLES);
+      const needCycle = scheduleNeed
+        ? typeof serialOutputClockNextCycle === "function"
+          ? serialOutputClockNextCycle(ctx, now)
+          : now + period
+        : 0;
+      if (scheduleNeed) io.serialOutputNeedDataCycle = needCycle;
+      if (scheduleDone) {
+        const doneDelay = scheduleNeed
+          // AHRM 5.6: the first byte is loaded into the shift register on
+          // the next output-clock edge, then ten bit cells are transmitted.
+          ? period * 21
+          : serialOutputDelay(ctx, SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES) * 20;
+        io.serialOutputTransmissionDoneCycle = scheduleNeed
+          ? needCycle + period * 20
+          : now + doneDelay;
+      }
+      if (typeof traceSerialEvent === "function") {
+        traceSerialEvent(
+          ctx,
+          scheduleNeed ? "SEROUT_SCHEDULE" : "SEROUT_DONE_SCHEDULE",
+          { now: now, period: period, scheduleNeed: !!scheduleNeed },
+        );
+      }
+      cycleTimedEventUpdate(ctx);
+      return true;
+    }
+
+    function setSioCommandLine(ctx, level) {
+      const io = ctx.ioData;
+      if (io && typeof io.piaSetControlLine === "function")
+        io.piaSetControlLine(ctx, "cb2", level ? 1 : 0);
     }
 
     function handleAbsentDevice(ctx) {
@@ -403,8 +469,11 @@
       const io = ctx.ioData;
       const now = effectiveEventCycle(ctx);
 
-      io.serialOutputNeedDataCycle = now + SERIAL_OUTPUT_DATA_NEEDED_CYCLES;
-      cycleTimedEventUpdate(ctx);
+      // CB2 is the active-low SIO command line. This electrical transition is
+      // intentionally independent of the response-byte state machine.
+      setSioCommandLine(ctx, 0);
+
+      scheduleSerialOutput(ctx, now, true, true);
 
       const buf = io.sioBuffer;
 
@@ -418,9 +487,7 @@
         const expected = (io.sioPendingBytes | 0) + 1; // data + checksum
         if (dataIndex !== expected) return;
 
-        io.serialOutputTransmissionDoneCycle =
-          now + SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES;
-        cycleTimedEventUpdate(ctx);
+        scheduleSerialOutput(ctx, now, false, true);
 
         const dataBytes = io.sioPendingBytes | 0;
         const provided = buf[SIO_DATA_OFFSET + dataBytes] & 0xff;
@@ -440,6 +507,7 @@
         io.sioPendingSector = 0;
         io.sioPendingBytes = 0;
         io.sioOutIndex = 0;
+        setSioCommandLine(ctx, 1);
         return;
       }
 
@@ -461,15 +529,14 @@
 
       // Reset outgoing command state (always, like the C emulator).
       io.sioOutIndex = 0;
+      setSioCommandLine(ctx, 1);
 
       if (sioChecksum(buf, 4) !== (buf[4] & 0xff)) {
         queueDeviceNack(ctx, now);
         return;
       }
 
-      io.serialOutputTransmissionDoneCycle =
-        now + SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES;
-      cycleTimedEventUpdate(ctx);
+      scheduleSerialOutput(ctx, now, false, true);
 
       const dev = buf[0] & 0xff;
       const cmd2 = buf[1] & 0xff;

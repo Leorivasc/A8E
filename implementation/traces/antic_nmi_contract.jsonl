@@ -1,0 +1,4 @@
+{"step":"dli-cycle-7","clock":7,"nmist":128,"nmi":0}
+{"step":"dli-cycle-8","clock":8,"nmist":128,"nmi":1}
+{"step":"cycle-7-enable","clock":9,"nmist":64,"nmi":1}
+{"step":"cycle-8-disable","clock":8,"nmist":64,"nmi":0}

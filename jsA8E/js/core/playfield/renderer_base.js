@@ -38,6 +38,7 @@
     const ioCycleTimedEvent = cfg.ioCycleTimedEvent;
     const drawPlayerMissilesClock = cfg.drawPlayerMissilesClock;
     const fetchPmgDmaCycle = cfg.fetchPmgDmaCycle;
+    const fetchPhantomMissileDmaCycle = cfg.fetchPhantomMissileDmaCycle;
 
     const ACTIVE_LINE_HSYNC_PIXELS = 24;
     const ACTIVE_LINE_COLOR_BURST_CYCLES = 6;
@@ -109,6 +110,27 @@
     function currentLineCycle(ctx, cycleOffset) {
       const io = ctx.ioData;
       return ((io.clock - io.displayListFetchCycle) | 0) + (cycleOffset | 0);
+    }
+
+    function pmgDmaCtlForCycle(ctx) {
+      const io = ctx.ioData;
+      const dmactl = ctx.sram[IO_DMACTL] & 0xff;
+      if (!io.pmgDmaCtlTimingInitialized) return dmactl;
+      // AHRM 4.13 delays only P/M DMA enable bits; addressing mode is live.
+      return (dmactl & ~0x0c) | (io.pmgDmaCtlTwoCyclesAgo & 0x0c);
+    }
+
+    function advancePmgDmaCtlTiming(ctx) {
+      const io = ctx.ioData;
+      const dmactl = ctx.sram[IO_DMACTL] & 0xff;
+      if (!io.pmgDmaCtlTimingInitialized) {
+        io.pmgDmaCtlTimingInitialized = true;
+        io.pmgDmaCtlOneCycleAgo = dmactl;
+        io.pmgDmaCtlTwoCyclesAgo = dmactl;
+        return;
+      }
+      io.pmgDmaCtlTwoCyclesAgo = io.pmgDmaCtlOneCycleAgo & 0xff;
+      io.pmgDmaCtlOneCycleAgo = dmactl;
     }
 
     function playfieldDmaAllowedAtCycle(ctx, cycleOffset) {
@@ -200,7 +222,8 @@
       if (
         lineCycle === 6 &&
         io.modeLineExitDli &&
-        (io.modeLineRowCounter & 0x0f) === (ctx.sram[IO_VSCROL] & 0x0f)
+        (io.modeLineRowCounter & 0x0f) ===
+          currentVscrolRegister(io, ctx.sram)
       ) {
         io.dliCycle = lineStartClock + 7;
         if (io.dliCycle < ctx.ioBeamTimedEventCycle) {
@@ -213,7 +236,8 @@
       // beam reaches cycle 109.
       if (lineCycle === 109 && io.modeLineScrollExit) {
         io.modeLineEndsThisLine =
-          (io.modeLineRowCounter & 0x0f) === (ctx.sram[IO_VSCROL] & 0x0f);
+          (io.modeLineRowCounter & 0x0f) ===
+          currentVscrolRegister(io, ctx.sram);
       }
 
       const drawLine = io.drawLine;
@@ -223,7 +247,12 @@
 
       if (fetchPmgDmaCycle) {
         if (lineCycle === 0 || (lineCycle >= 2 && lineCycle <= 5)) {
-          if (fetchPmgDmaCycle(ctx, lineCycle, io.video.currentDisplayLine | 0)) {
+          if (fetchPmgDmaCycle(
+            ctx,
+            lineCycle,
+            io.video.currentDisplayLine | 0,
+            pmgDmaCtlForCycle(ctx),
+          )) {
             ctx.cycleCounter++;
             // PMG DMA is invisible to playfield DMA steals since it does not delay ANTIC itself,
             // but we delay the CPU by bumping cycleCounter.
@@ -232,6 +261,20 @@
       }
       if (playfieldDmaStealCount > 0) {
         ctx.cycleCounter += playfieldDmaStealCount;
+      }
+      if (lineCycle === DISPLAY_LIST_INSTRUCTION_CYCLE && io.pmgPhantomMissileDmaPending) {
+        if (
+          fetchPhantomMissileDmaCycle &&
+          (drawLine.displayListInstructionDmaPending | 0) !== 0
+        ) {
+          fetchPhantomMissileDmaCycle(
+            ctx,
+            lineCycle,
+            io.video.currentDisplayLine | 0,
+            io.currentDisplayListCommand | 0,
+          );
+        }
+        io.pmgPhantomMissileDmaPending = false;
       }
       const refreshSlot =
         lineCycle >= REFRESH_FIRST_CYCLE &&
@@ -285,6 +328,7 @@
         );
       }
       if (ctx.cycleCounter < io.clock) CPU.executeOne(ctx);
+      advancePmgDmaCtlTiming(ctx);
       io.clock++;
     }
 
@@ -328,6 +372,30 @@
         timing.pendingClock = -1;
       }
       return timing.activeValue & 0xff;
+    }
+
+    function currentVscrolRegister(io, sram) {
+      const timing = io.vscrolTiming;
+      const rawValue = sram[IO_VSCROL] & 0x0f;
+      if (!timing) return rawValue;
+      if (!timing.initialized) {
+        timing.initialized = true;
+        timing.rawValue = rawValue;
+        timing.activeValue = rawValue;
+        timing.pendingValue = rawValue;
+        timing.pendingClock = -1;
+      } else if (rawValue !== timing.rawValue) {
+        // Direct test-probe writes are already complete bus writes.
+        timing.rawValue = rawValue;
+        timing.activeValue = rawValue;
+        timing.pendingValue = rawValue;
+        timing.pendingClock = -1;
+      }
+      if (timing.pendingClock >= 0 && (io.clock | 0) > timing.pendingClock) {
+        timing.activeValue = timing.pendingValue & 0x0f;
+        timing.pendingClock = -1;
+      }
+      return timing.activeValue & 0x0f;
     }
 
     function resolveCharacterRow(row, chactl) {
@@ -406,6 +474,7 @@
       currentBackgroundColor,
       currentBackgroundPriority,
       currentCharacterBaseRegister,
+      currentVscrolRegister,
       fetchCharacterRow8,
       fetchCharacterRow10,
       fetchCharacterRow16,

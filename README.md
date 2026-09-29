@@ -83,12 +83,16 @@ startup screens in the emulator:
   presentation; see [the investigation](ATR/amaurote.md).
 - **Mikie V1.12** completes its banked XEX load and reaches the control screen.
 - **AtariWriter Plus XE** completes its 130XE startup sequence and reaches the user menu.
-- **Karate Champion** and **Animal Party** are also covered by the generic DLI/NMI
-  and SIO compatibility work; their full title-specific startup validation remains in progress.
+- **World Karate Championship (v1,ED)** (Karate Champion) reaches gameplay and
+  starts a tournament after the generic NMI correction; see its
+  [investigation](ATR/world_karate_championship_v1_ed.md).
+- **Animal Party** completes its button-triggered second disk load and has been
+  verified in gameplay after the generic SIO response-phase correction; see
+  its [investigation](ATR/animal_party.md).
 
-These results come from generic fixes to XEX RUNAD handling, memory-bank/window
-behavior, IRQ state, and XL/XE hardware defaults; no title-specific workarounds
-are used.
+These results come from shared fixes to XEX loading, memory banking, CPU
+interrupt handling, SIO response phases, and XL/XE defaults; no title-specific
+workarounds are used.
 
 ## ROM Requirements
 

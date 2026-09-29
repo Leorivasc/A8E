@@ -143,9 +143,14 @@
           machine.ctx.ram[IO_SKCTL_SKSTAT] &= ~0x40;
         }
         machine.ctx.ram[IO_STIMER_KBCODE] = kc & 0xff;
-        machine.ctx.ram[IO_IRQEN_IRQST] &= ~IRQ_OTHER_KEY_PRESSED;
+        // AHRM 5.7/5.8: KBCODE updates while the source is masked, but a
+        // key detected with IRQEN bit 6 clear is lost as an interrupt and
+        // must not become pending when software enables it later.
         if (machine.ctx.sram[IO_IRQEN_IRQST] & IRQ_OTHER_KEY_PRESSED)
-          {CPU.irq(machine.ctx);}
+          {
+            machine.ctx.ram[IO_IRQEN_IRQST] &= ~IRQ_OTHER_KEY_PRESSED;
+            CPU.irq(machine.ctx);
+          }
         machine.ctx.ioData.keyPressCounter++;
         machine.ctx.ram[IO_SKCTL_SKSTAT] &= ~0x04;
       }

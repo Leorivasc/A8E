@@ -152,10 +152,82 @@ function testSkctlModeChangesDoNotRetroactivelyRescaleElapsedTime() {
   assert.equal(ctx.ram[IO_AUDCTL_ALLPOT], 0xff);
 }
 
+function testFastScanLiveReadsUseAdjacentCounterAnd() {
+  const api = loadPokeyApi();
+  const ctx = makeContext();
+  const expected = [
+    0x00, 0x00, 0x00, 0x02, 0x00, 0x04, 0x04, 0x06,
+    0x00, 0x08, 0x08, 0x0a, 0x08, 0x0c, 0x0c, 0x0e, 0x00,
+  ];
+
+  ctx.sram[IO_SKCTL_SKSTAT] = 0x07;
+  api.potStartScan(ctx);
+  for (let cycle = 0; cycle < expected.length; cycle++) {
+    ctx.cycleCounter = cycle;
+    api.potUpdate(ctx);
+    assert.equal(api.potReadValue(ctx, 0), expected[cycle]);
+  }
+
+  ctx.cycleCounter = 229;
+  api.potUpdate(ctx);
+  assert.equal(api.potReadValue(ctx, 0), 228);
+  ctx.cycleCounter = 230;
+  api.potUpdate(ctx);
+  assert.equal(ctx.ram[IO_AUDF1_POT0], 229);
+  assert.equal(api.potReadValue(ctx, 0), 229);
+}
+
+function testInputBelowThresholdReassertsAllpot() {
+  const api = loadPokeyApi();
+  const ctx = makeContext();
+
+  ctx.sram[IO_SKCTL_SKSTAT] = 0x07;
+  ctx.ioData.pokeyPotValues.fill(2);
+  api.potStartScan(ctx);
+  ctx.cycleCounter = 2;
+  api.potUpdate(ctx);
+  assert.equal(ctx.ram[IO_AUDCTL_ALLPOT], 0x00);
+  assert.equal(ctx.ram[IO_AUDF1_POT0], 2);
+
+  // Raising the target models an input dropping below threshold at count 2.
+  ctx.ioData.pokeyPotValues[0] = 10;
+  ctx.cycleCounter = 3;
+  api.potUpdate(ctx);
+  assert.equal(ctx.ram[IO_AUDCTL_ALLPOT], 0x01);
+  assert.equal(ctx.ram[IO_AUDF1_POT0], 3);
+
+  ctx.cycleCounter = 10;
+  api.potUpdate(ctx);
+  assert.equal(ctx.ram[IO_AUDCTL_ALLPOT], 0x00);
+  assert.equal(ctx.ram[IO_AUDF1_POT0], 10);
+}
+
+function testEarlyPotgoRetainsResidualCharge() {
+  const api = loadPokeyApi();
+  const ctx = makeContext();
+  const testCase = JSON.parse(fs.readFileSync(
+    path.join(__dirname, "..", "..", "implementation", "traces", "pokey_pot_contract.jsonl"),
+    "utf8",
+  ));
+  ctx.sram[IO_SKCTL_SKSTAT] = testCase.skctl;
+  ctx.ioData.pokeyPotValues.fill(testCase.target);
+  api.potStartScan(ctx);
+  ctx.cycleCounter = testCase.first * CYCLES_PER_LINE;
+  api.potUpdate(ctx);
+  api.potStartScan(ctx);
+  ctx.cycleCounter += testCase.second * CYCLES_PER_LINE;
+  api.potUpdate(ctx);
+  assert.equal(ctx.ram[IO_AUDF1_POT0], testCase.pot0, testCase.step);
+  assert.equal(ctx.ram[IO_AUDCTL_ALLPOT], testCase.allpot, testCase.step);
+}
+
 function main() {
   testSlowScanUsesScanlineRateAndRunsToCompletion();
   testFastScanUsesMachineClockAndEndsAt229();
   testSkctlModeChangesDoNotRetroactivelyRescaleElapsedTime();
+  testFastScanLiveReadsUseAdjacentCounterAnd();
+  testInputBelowThresholdReassertsAllpot();
+  testEarlyPotgoRetainsResidualCharge();
   console.log("pokey_pot_scan.test.js passed");
 }
 

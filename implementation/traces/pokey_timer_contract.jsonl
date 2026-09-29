@@ -1,0 +1,6 @@
+{"step":"timer1-normal-zero","skctl":3,"audctl":0,"audf1":0,"audf2":0,"audf3":0,"audf4":0,"timer":1,"expected":28}
+{"step":"timer2-normal-zero","skctl":3,"audctl":0,"audf1":0,"audf2":0,"audf3":0,"audf4":0,"timer":2,"expected":28}
+{"step":"timer4-normal-zero","skctl":3,"audctl":0,"audf1":0,"audf2":0,"audf3":0,"audf4":0,"timer":4,"expected":28}
+{"step":"timer1-fast-zero","skctl":3,"audctl":64,"audf1":0,"audf2":0,"audf3":0,"audf4":0,"timer":1,"expected":4}
+{"step":"timer2-linked-fast-zero","skctl":3,"audctl":80,"audf1":0,"audf2":0,"audf3":0,"audf4":0,"timer":2,"expected":7}
+{"step":"timer4-linked-fast-zero","skctl":3,"audctl":40,"audf1":0,"audf2":0,"audf3":0,"audf4":0,"timer":4,"expected":7}

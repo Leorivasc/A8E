@@ -11,6 +11,7 @@
     const CYCLE_NEVER = cfg.CYCLE_NEVER;
     const FIRST_VISIBLE_LINE = cfg.FIRST_VISIBLE_LINE;
     const LAST_VISIBLE_LINE = cfg.LAST_VISIBLE_LINE;
+    const PMG_REGISTER_ADDRESSES = cfg.PMG_REGISTER_ADDRESSES || [];
 
     const NMI_DLI = cfg.NMI_DLI;
     const NMI_VBI = cfg.NMI_VBI;
@@ -22,6 +23,7 @@
       cfg.IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
     const IRQ_SERIAL_OUTPUT_DATA_NEEDED = cfg.IRQ_SERIAL_OUTPUT_DATA_NEEDED;
     const IRQ_SERIAL_INPUT_DATA_READY = cfg.IRQ_SERIAL_INPUT_DATA_READY;
+    const pokeyTraceEvent = cfg.pokeyTraceEvent;
 
     const IO_VCOUNT = cfg.IO_VCOUNT;
     const IO_NMIEN = cfg.IO_NMIEN;
@@ -43,8 +45,13 @@
     const ANTIC_MODE_INFO = cfg.ANTIC_MODE_INFO;
     const drawPlayerMissilesClock = cfg.drawPlayerMissilesClock;
     const fetchPmgDmaCycle = cfg.fetchPmgDmaCycle;
+    const fetchPhantomMissileDmaCycle = cfg.fetchPhantomMissileDmaCycle;
     const drawPlayerMissiles = cfg.drawPlayerMissiles;
     const pokeyTimerPeriodCpuCycles = cfg.pokeyTimerPeriodCpuCycles;
+    const pokeySerialOutputClockTimer = cfg.pokeySerialOutputClockTimer;
+    const pokeySerialOutputClockTimerExpired =
+      cfg.pokeySerialOutputClockTimerExpired;
+    const pokeyApplyTimerReset = cfg.pokeyApplyTimerReset;
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
     const PRIO_BKG = cfg.PRIO_BKG;
     const PRIO_PF0 = cfg.PRIO_PF0;
@@ -79,6 +86,31 @@
     const ANTIC_CMD_MASK_DLI_JMP = 0x4f; // Isolates DLI, LMS, and instruction bits
     const ANTIC_CMD_MASK_JVB_DLI = 0xcf; // Isolates replayed JVB+DLI pattern
 
+    function currentVscrolRegister(ctx) {
+      const io = ctx.ioData;
+      const sram = ctx.sram;
+      const timing = io.vscrolTiming;
+      const rawValue = sram[IO_VSCROL] & 0x0f;
+      if (!timing) return rawValue;
+      if (!timing.initialized) {
+        timing.initialized = true;
+        timing.rawValue = rawValue;
+        timing.activeValue = rawValue;
+        timing.pendingValue = rawValue;
+        timing.pendingClock = -1;
+      } else if (rawValue !== timing.rawValue) {
+        timing.rawValue = rawValue;
+        timing.activeValue = rawValue;
+        timing.pendingValue = rawValue;
+        timing.pendingClock = -1;
+      }
+      if (timing.pendingClock >= 0 && (io.clock | 0) > timing.pendingClock) {
+        timing.activeValue = timing.pendingValue & 0x0f;
+        timing.pendingClock = -1;
+      }
+      return timing.activeValue & 0x0f;
+    }
+
     function resetNmiTiming(ctx) {
       const timing = ctx.ioData.nmiTiming;
       const nmien = ctx.sram[IO_NMIEN] & (NMI_DLI | NMI_VBI);
@@ -102,7 +134,7 @@
       return { enabled: false, delayOneCycle: false };
     }
 
-    function resetDrawLineState(drawLine) {
+    function resetDrawLineState(drawLine, sram) {
       drawLine.playfieldDmaStealCount = 0;
       drawLine.refreshDmaPending = 0;
       drawLine.displayListInstructionDmaPending = 0;
@@ -110,6 +142,11 @@
       drawLine.playerMissileClockActive = false;
       drawLine.playerMissileInterleaved = false;
       drawLine.pmgFirstVisibleSpan = true;
+      drawLine.pmgEventCount = 0;
+      drawLine.pmgEventOverflow = false;
+      for (let i = 0; i < PMG_REGISTER_ADDRESSES.length; i++) {
+        drawLine.pmgInitialRegisters[i] = sram[PMG_REGISTER_ADDRESSES[i]] & 0xff;
+      }
       drawLine.playerPmgShift.fill(0);
       drawLine.playerPmgState.fill(0);
       drawLine.missilePmgShift.fill(0);
@@ -163,6 +200,7 @@
             fillLine: fillLine,
             drawPlayerMissilesClock: drawPlayerMissilesClock,
             fetchPmgDmaCycle: fetchPmgDmaCycle,
+            fetchPhantomMissileDmaCycle: fetchPhantomMissileDmaCycle,
             ioCycleTimedEvent: function (c) {
               ioCycleTimedEvent(c);
             },
@@ -229,7 +267,7 @@
             // Region entry: the counter starts at VSCROL (deadline cycle
             // 0).  Values above the natural end row wrap the 4-bit counter
             // and extend the mode line (GTIA 9++).
-            startRow = sram[IO_VSCROL] & 0x0f;
+            startRow = currentVscrolRegister(ctx);
           } else if ((oldCmd & 0x2f) >= 0x22 && (cmd & 0x2f) < 0x22) {
             // Region exit: this line ends when the counter matches the
             // live VSCROL value instead of the static end row.
@@ -246,7 +284,7 @@
           io.modeLineEndsThisLine = false;
 
           const modeLineRows = scrollExit
-            ? (((sram[IO_VSCROL] & 0x0f) - startRow) & 0x0f) + 1
+            ? ((currentVscrolRegister(ctx) - startRow) & 0x0f) + 1
             : ((endRow - startRow) & 0x0f) + 1;
           io.nextDisplayListLine = io.video.currentDisplayLine + modeLineRows;
 
@@ -387,11 +425,13 @@
       const ram = ctx.ram;
       const sram = ctx.sram;
 
+      if (typeof io.piaCycleTimedEvent === "function") io.piaCycleTimedEvent(ctx);
+
       if (!io.inDrawLine && ctx.cycleCounter >= io.displayListFetchCycle) {
         if (io.video.currentDisplayLine === 0) {
           io.clock = io.displayListFetchCycle;
         }
-        resetDrawLineState(io.drawLine);
+        resetDrawLineState(io.drawLine, ctx.sram);
         resetNmiTiming(ctx);
         fetchLine(ctx);
         io.inDrawLine = true;
@@ -401,6 +441,10 @@
           drawLine(ctx);
           if (!io.drawLine.playerMissileInterleaved) drawPlayerMissiles(ctx);
           evaluateModeLineEnd(ctx);
+          io.pmgPhantomMissileDmaPending =
+            (sram[IO_DMACTL] & 0x2c) === 0x20 &&
+            io.video.currentDisplayLine >= FIRST_VISIBLE_LINE &&
+            io.video.currentDisplayLine <= LAST_VISIBLE_LINE;
           io.displayListFetchCycle += CYCLES_PER_LINE;
           advanceScanline(ctx);
         } finally {
@@ -410,6 +454,11 @@
 
       const masterEff = ctx.cycleCounter;
       const beamEff = io.clock;
+
+      if (masterEff >= io.pokeyTimerResetCycle) {
+        if (typeof pokeyApplyTimerReset === "function")
+          pokeyApplyTimerReset(ctx);
+      }
 
       if (beamEff >= io.dliCycle) {
         // NMIST is set at cycle 7 unconditionally (AHRM 4.8)
@@ -456,6 +505,8 @@
       }
 
       if (masterEff >= io.serialOutputTransmissionDoneCycle) {
+        if (typeof pokeyTraceEvent === "function")
+          pokeyTraceEvent(ctx, "TRANSMISSION_DONE", { eventCycle: masterEff });
         ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE)
           {CPU.irq(ctx);}
@@ -463,20 +514,29 @@
       }
 
       if (masterEff >= io.serialOutputNeedDataCycle) {
-        ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+        if (typeof pokeyTraceEvent === "function")
+          pokeyTraceEvent(ctx, "DATA_NEEDED", { eventCycle: masterEff });
+        // AHRM 5.7: all latched sources except XMTDONE remain inactive
+        // in IRQST while masked by IRQEN.
+        if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED)
+          {ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;}
+        // The queued byte is now loaded into the output shift register.
+        ram[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED) CPU.irq(ctx);
         io.serialOutputNeedDataCycle = CYCLE_NEVER;
       }
 
       if (masterEff >= io.serialInputDataReadyCycle) {
-        ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_INPUT_DATA_READY;
+        if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY)
+          {ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_INPUT_DATA_READY;}
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY) CPU.irq(ctx);
         io.serialInputDataReadyCycle = CYCLE_NEVER;
       }
 
       if (masterEff >= io.timer1Cycle) {
         const p1 = pokeyTimerPeriodCpuCycles(ctx, 1);
-        ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_1;
+        if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_1)
+          {ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_1;}
         if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_1) CPU.irq(ctx);
         if (p1 === 0) io.timer1Cycle = CYCLE_NEVER;
         else {
@@ -486,21 +546,41 @@
 
       if (masterEff >= io.timer2Cycle) {
         const p2 = pokeyTimerPeriodCpuCycles(ctx, 2);
-        ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_2;
+        if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_2)
+          {ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_2;}
         if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_2) CPU.irq(ctx);
         if (p2 === 0) io.timer2Cycle = CYCLE_NEVER;
         else {
-          while (io.timer2Cycle <= masterEff) io.timer2Cycle += p2;
+          while (io.timer2Cycle <= masterEff) {
+            if (
+              pokeySerialOutputClockTimer &&
+              pokeySerialOutputClockTimerExpired &&
+              pokeySerialOutputClockTimer(ctx) === 2
+            ) {
+              pokeySerialOutputClockTimerExpired(ctx, 2);
+            }
+            io.timer2Cycle += p2;
+          }
         }
       }
 
       if (masterEff >= io.timer4Cycle) {
         const p4 = pokeyTimerPeriodCpuCycles(ctx, 4);
-        ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_4;
+        if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_4)
+          {ram[IO_IRQEN_IRQST] &= ~IRQ_TIMER_4;}
         if (sram[IO_IRQEN_IRQST] & IRQ_TIMER_4) CPU.irq(ctx);
         if (p4 === 0) io.timer4Cycle = CYCLE_NEVER;
         else {
-          while (io.timer4Cycle <= masterEff) io.timer4Cycle += p4;
+          while (io.timer4Cycle <= masterEff) {
+            if (
+              pokeySerialOutputClockTimer &&
+              pokeySerialOutputClockTimerExpired &&
+              pokeySerialOutputClockTimer(ctx) === 4
+            ) {
+              pokeySerialOutputClockTimerExpired(ctx, 4);
+            }
+            io.timer4Cycle += p4;
+          }
         }
       }
 

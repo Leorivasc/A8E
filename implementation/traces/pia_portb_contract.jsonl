@@ -1,0 +1,12 @@
+{"step":"reset","event":0,"cycle":0,"pactl":60,"pbctl":60,"portb":255,"ddrb":0,"orb":0,"irq":0}
+{"step":"select-ddrb","event":1,"cycle":1,"pactl":60,"pbctl":0,"portb":255,"ddrb":0,"orb":0,"irq":0}
+{"step":"write-ddrb-zero","event":2,"cycle":2,"pactl":60,"pbctl":0,"portb":255,"ddrb":0,"orb":0,"irq":0}
+{"step":"select-orb","event":3,"cycle":3,"pactl":60,"pbctl":4,"portb":255,"ddrb":0,"orb":0,"irq":0}
+{"step":"write-orb-zero","event":4,"cycle":4,"pactl":60,"pbctl":4,"portb":255,"ddrb":0,"orb":0,"irq":0}
+{"step":"select-ddrb-again","event":5,"cycle":5,"pactl":60,"pbctl":0,"portb":255,"ddrb":0,"orb":0,"irq":0}
+{"step":"write-ddrb-03","event":6,"cycle":6,"pactl":60,"pbctl":0,"portb":252,"ddrb":3,"orb":0,"irq":0}
+{"step":"select-orb-again","event":7,"cycle":7,"pactl":60,"pbctl":4,"portb":252,"ddrb":3,"orb":0,"irq":0}
+{"step":"write-orb-ff","event":8,"cycle":8,"pactl":60,"pbctl":4,"portb":255,"ddrb":3,"orb":255,"irq":0}
+{"step":"write-orb-final-zero","event":9,"cycle":9,"pactl":60,"pbctl":4,"portb":252,"ddrb":3,"orb":0,"irq":0}
+{"step":"select-ddrb-final","event":10,"cycle":10,"pactl":60,"pbctl":0,"portb":252,"ddrb":3,"orb":0,"irq":0}
+{"step":"write-ddrb-f0","event":11,"cycle":11,"pactl":60,"pbctl":0,"portb":15,"ddrb":240,"orb":0,"irq":0}

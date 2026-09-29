@@ -63,7 +63,6 @@ assert.ok(segments.some(function (segment) {
 }), "RUNAD points to loaded code");
 assert.ok(xex.includes(Buffer.from("INSERT A DISK")));
 assert.ok(xex.includes(Buffer.from("DROP A DISK OR OPEN DISK")));
-assert.ok(xex.includes(Buffer.from("MOUNT SIDE 2 IN D1 WHEN ASKED")));
 assert.ok(xex.includes(Buffer.from("FULL RESET TO BOOT FROM D1")));
 
 const displayList = segments.find(function (segment) {

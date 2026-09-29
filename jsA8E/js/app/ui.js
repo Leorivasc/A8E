@@ -40,6 +40,7 @@
     if (text === "" || text === "none" || text === "64k" || text === "64kb" || text === "no-expansion") return "none";
     if (text === "130xe" || text === "128k" || text === "128kb" || text === "130xe-128k") return "130xe-128k";
     if (text === "192k" || text === "192kb" || text === "rambo-192k") return "rambo-192k";
+    if (text === "256k" || text === "256kb" || text === "rambo-256k") return "rambo-256k";
     if (text === "320k" || text === "320kb" || text === "rambo-320k") return "rambo-320k";
     if (text === "compy-320k" || text === "320k-compy") return "compy-320k";
     if (text === "576k" || text === "576kb" || text === "rambo-576k") return "rambo-576k";
@@ -246,6 +247,31 @@
     return null;
   }
 
+  function resolvePokeyTracePreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    if (boot) {
+      const trace = parseBooleanLike(boot.pokeyTrace);
+      if (trace !== null) return trace;
+    }
+    if (
+      window.location &&
+      typeof window.location.search === "string" &&
+      typeof window.URLSearchParams === "function"
+    ) {
+      try {
+        const params = new window.URLSearchParams(window.location.search);
+        const trace = parseBooleanLike(params.get("a8e_pokey_trace"));
+        if (trace !== null) return trace;
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+    return false;
+  }
+
   function withWorkerPreference(base, workerPreference) {
     if (workerPreference === null) return Object.assign({}, base);
     return Object.assign({}, base, {
@@ -261,6 +287,7 @@
     const nativeScreenW = canvas.width | 0;
     const nativeScreenH = canvas.height | 0;
     const workerPreference = resolveWorkerPreference();
+    const pokeyTracePreference = resolvePokeyTracePreference();
     const videoStandardPreference = persistVideoStandardPreference(
       resolveVideoStandardPreference(),
     );
@@ -903,6 +930,7 @@
         keyboardMappingMode: getKeyboardMappingModeFromUi(),
         videoStandard: videoStandardPreference,
         memoryExpansion: memoryExpansionPreference,
+        pokeyTrace: pokeyTracePreference,
       }, workerPreference));
       resizeCrtCanvas();
     } else {
@@ -919,6 +947,7 @@
           keyboardMappingMode: getKeyboardMappingModeFromUi(),
           videoStandard: videoStandardPreference,
           memoryExpansion: memoryExpansionPreference,
+          pokeyTrace: pokeyTracePreference,
         }, workerPreference));
       } catch (e) {
         // If WebGL init succeeded but shader/program setup failed, fall back to 2D by replacing the canvas.
@@ -952,6 +981,7 @@
               keyboardMappingMode: getKeyboardMappingModeFromUi(),
               videoStandard: videoStandardPreference,
               memoryExpansion: memoryExpansionPreference,
+              pokeyTrace: pokeyTracePreference,
             }, workerPreference));
             resizeCrtCanvas();
           } else {
