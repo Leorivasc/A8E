@@ -151,59 +151,6 @@ cmake --build build -j
 ./build/A8E/A8E
 ```
 
-Both implementations require the following ROM dumps (not included):
-
-- `ATARIXL.ROM` (16 KB)
-- `ATARIBAS.ROM` (8 KB)
-
-Recommended placement is the repository root:
-
-- Native app loads ROM files from its current working directory.
-- Browser app can load ROMs via UI file inputs, and also attempts `../ATARIXL.ROM` + `../ATARIBAS.ROM` when served from repo root.
-
-## Quick Start (Browser)
-
-Serve the repository root with a static HTTP server, then open `jsA8E/`.
-
-```sh
-python -m http.server 8000
-# open http://localhost:8000/jsA8E/
-```
-
-(`file://` is not sufficient because shader and ROM auto-load paths use `fetch()`.)
-
-When the browser emulator starts with D1 empty, it mounts the built-in
-`standby.xex` and shows disk-loading instructions through an ANTIC display
-list. **Open Disk** loads and starts a selected image. Disk Library mount
-changes take effect without restarting the running program, so it can request
-another disk side; the library status only confirms the mount action. Use
-**Full Reset** when you want to boot from the image currently mounted in D1.
-See the [browser README](jsA8E/README.md) for more details.
-
-For an online demo of the jsA8E version, visit https://jsa8e.anides.de/
-
-The latest unreleased development version is available at https://dev.jsa8e.anides.de/
-
-## Automation
-
-The browser port includes a stable automation surface at `window.A8EAutomation`.
-
-It is intended to be the canonical shared control surface for debugger/introspection workflows, artifact capture, HostFS access, assembler-driven development flows, and higher-level harnesses. The public surface is grouped into `system`, `media`, `input`, `debug`, `dev`, `artifacts`, and `events` while keeping the earlier flat aliases for compatibility.
-
-Current highlights include worker-acknowledged lifecycle control, URL-native ROM/disk/XEX loading, structured pause/fault events, schema-versioned failure artifacts, HostFS file automation, assembler/XEX helpers, and versioned full-machine snapshot save/load through `system.saveSnapshot()` / `system.loadSnapshot()`. The repository also includes a browser-less Node bootstrap at `jsA8E/headless.js` that instantiates the same automation API against the no-worker backend.
-
-For external agents, CI jobs, scripted regression runs, and other non-interactive control flows, prefer the browser-less bootstrap over driving the browser UI directly. It avoids DOM/worker/UI state, starts with an attached API immediately, and exposes the same grouped automation contract. For Codex-style MCP clients, `jsA8E/mcp_server.js` provides a local stdio bridge over the same runtime and grouped tool surface. See the [jsA8E README](jsA8E/README.md) for the overview and [jsA8E/AUTOMATION.md](jsA8E/AUTOMATION.md) for the full public API reference.
-
-## Quick Start (Native)
-
-Building requires **SDL 2** development headers. See the [A8E README](A8E/README.md) for full build instructions covering Windows (MSVC, MinGW), macOS (Homebrew), and Linux.
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-./build/A8E/A8E
-```
-
 Ensure `ATARIXL.ROM` and `ATARIBAS.ROM` are in the current working directory before starting.
 
 ## Controls
