@@ -104,8 +104,13 @@ Several programs that previously failed during loading now reach their normal
 startup screens in the emulator:
 
 - **AtariBlast** completes its mixed-geometry ATR load and reaches the game screen.
-- **Amaurote Plus** starts from XEX and reaches its game menu after the
-  presentation; see [the investigation](ATR/amaurote.md).
+- **Amaurote Plus** starts from XEX, shows its presentation, and reaches the
+  game menu after the joystick trigger instead of falling into the Atari
+  self-test. Validation reached the game's `$0C00` run address with
+  self-test disabled; the XEX preflight regression and full JavaScript
+  automation suite passed. The generic loader now preserves its sector cursor
+  across `INITAD` and selects a free buffer at `$0880` or above; see the
+  [investigation](ATR/amaurote.md).
 - **Mikie V1.12** completes its banked XEX load and reaches the control screen.
 - **AtariWriter Plus XE** completes its 130XE startup sequence and reaches the user menu.
 - **World Karate Championship (v1,ED)** (Karate Champion) reaches gameplay and
@@ -114,6 +119,11 @@ startup screens in the emulator:
 - **Animal Party** completes its button-triggered second disk load and has been
   verified in gameplay after the generic SIO response-phase correction; see
   its [investigation](ATR/animal_party.md).
+- **Prince of Persia** was replayed in Chromium after the linked POKEY timer
+  audio correction; the previously muffled voice returned to normal. The
+  regression coverage checks repeated low/high waveform edges for linked
+  timer pairs 1+2 and 3+4 at 1.79 MHz, 64 kHz, and 15 kHz, with the full
+  JavaScript automation suite and all 12 native CTest probes passing.
 
 These results come from shared fixes to XEX loading, memory banking, CPU
 interrupt handling, SIO response phases, and XL/XE defaults; no title-specific
