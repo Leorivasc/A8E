@@ -510,6 +510,11 @@ Simple implementation notes for this repository.
   `playfield_dynamic_geometry.test.js` renderer mock as the first action of
   AHRM-06. The test must use the current `drawModeLine` contract and reach its
   HSCROL/DMA assertions before ANTIC timing work proceeds.
+- 2026-09-24: `ATR/10Sept26.md`, the Karate Champion and Animal Party notes,
+  and the root README: reconcile the historical game summaries with current
+  validation. Keep the Bosconian POKEY timer fix separate from Karate's NMI
+  cause, and clarify that the existing SIO observer test does not cover the
+  Animal Party READ response phases.
 
 - 2026-09-24: `ATR/world_karate_championship_v1_ed.md` and
   `ATR/animal_party.md`: added title-level investigation records for the
