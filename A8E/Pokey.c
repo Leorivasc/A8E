@@ -556,6 +556,10 @@ static u8 PokeyAudio_PairTick(
 		reload = period + 7u;
 	}
 	pChHigh->counter = reload ? reload : 1u;
+	/* AHRM 5.3: high underflow reloads both counters without firing low again. */
+	pChLow->counter = (u32)pChLow->audf +
+		(((pChLow == &pPokey->aChannels[0] && (audctl & 0x40)) ||
+		  (pChLow == &pPokey->aChannels[2] && (audctl & 0x20))) ? 4u : 1u);
 
 	PokeyAudio_ChannelClockOut(pPokey, pChHigh, audctl);
 	return (u8)(cPulses | 2);

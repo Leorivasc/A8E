@@ -1,67 +1,73 @@
 # Animal Party investigation
 
-## Scope
+## Scope and status
 
-This file records the compatibility investigation for Animal Party. It is the
-title-specific place for SIO observations, applied generic fixes, validation
-results, and future tests. The implementation must remain AHRM-driven and
-must not fabricate disk responses for this title.
+This file records the Animal Party disk-load investigation, the generic SIO
+correction it motivated, and the title-level validation. The original detailed
+chronology is retained in [10Sept26.md](10Sept26.md#animal-party).
 
-## Current verified status
+As of 2026-09-24, Animal Party completes its load in jsA8E, accepts the
+joystick-button transition, completes the subsequent disk load, and has been
+verified in gameplay. A dedicated automated fixture and a same-starting-point
+comparison against Altirra or real hardware remain useful follow-up work, but
+are not blockers for the observed successful run.
 
-As of 2026-09-24, Animal Party loads successfully in jsA8E and has been
-verified during gameplay. The generic SIO response-phase correction is
-considered effective for this title. A dedicated automated regression fixture
-and a full Altirra/hardware trace comparison remain optional follow-up work,
-not blockers for the validated startup and gameplay path.
+## Symptom and investigation
 
-## Symptom and technical area
+The game reached its bitmap presentation with music. After pressing the
+joystick button, the expected green memory-display glitch appeared, but the
+second disk load did not complete in jsA8E. SIO Turbo was disabled during this
+test, ruling out the UI load-speed option as the trigger.
 
-The investigation focused on disk `READ` response timing. The Atari SIO
-protocol separates the command acknowledgment from the later Complete/data/
-checksum phase. Treating the whole response as one immediate result can make a
-loader observe the wrong phase or advance its state machine too early.
+The investigation followed the button-triggered loader path using its DCB,
+program counters `$A527` and `$A52B`, POKEY serial registers, vectors,
+disassembly, and SIO events. The observations showed the loader returning to
+its boot-load path after the button. The detailed captures established where
+to compare the SIO transaction; they did not justify a game-specific response
+or a timing workaround.
 
-The original observation was recorded as an Animal Party compatibility issue,
-but the available evidence does not yet prove that every startup failure is
-caused by this SIO phase handling. Title-level tracing is still required.
+## Generic fix
 
-## Generic solution applied
+Disk `READ` uses two distinct SIO response phases under the AHRM model:
 
-The JavaScript core now models disk `READ` responses as two phases:
+1. The drive first returns the command acknowledgment (`A`).
+2. After the acknowledgment is consumed, the drive returns Complete (`C`),
+   sector data, and its checksum.
 
-- the command acknowledgment is delivered first;
-- the Complete/data/checksum response is queued and delivered later.
+The emulator now queues the data phase separately instead of presenting the
+entire response in the acknowledgment phase. The pending read size/phase is
+preserved in emulator state and snapshots so a save/load between phases does
+not merge or lose the response. Native A8E was synchronized with the same read
+phase behavior.
 
-The pending response phase is preserved through snapshots. The same generic
-behavior is also represented in the native POKEY/SIO path. Disk high-speed
-index queries use the documented `$3F` request, while absent Type 1/3/4
-peripherals are routed silently instead of receiving fabricated responses.
+This is generic SIO behavior. It applies to disk reads generally and does not
+recognize Animal Party, fabricate title-specific bytes, or change disk timing
+for one program.
 
-These changes apply to the AHRM SIO model as a whole. They do not recognize
-Animal Party, return title-specific bytes, or alter disk timing only for one
-program.
+## Validation and coverage
 
-## Validation
+- With SIO Turbo off, the tested image completes the button-triggered second
+  load and starts gameplay in jsA8E.
+- The generic automation suite passes, and the title has been manually
+  verified in gameplay.
+- The existing `pokey_sio_disk_observer.test.js` exercises disk writes and
+  observer notifications; it does **not** directly test READ acknowledgment
+  and Complete/data framing. A focused automated test for the two READ phases
+  and snapshot preservation remains optional follow-up work.
+- A full Altirra or real-hardware trace comparison has not been recorded.
 
-- The SIO regression suite covers response sequencing and disk observers.
-- Snapshot behavior preserves the pending SIO response phase.
-- The change was initially documented as the first Animal Party compatibility
-  experiment.
-- Animal Party now completes its load and has been verified during gameplay.
-- A trace comparison with Altirra or real hardware would provide additional
-  evidence, but is not required for the current validated status.
+## Relevant implementation
+
+The response phases and pending-read state are handled in
+`jsA8E/js/core/pokey_sio.js`, with state and media integration in
+`jsA8E/js/core/{state,memory,io}.js`; the worker/API boundary is in
+`jsA8E/emulator_worker.js` and `jsA8E/js/core/app_proxy.js`. Native phase
+parity is implemented in `A8E/Pokey.c`. The temporary game-specific CDP capture
+script was removed after the investigation; the reusable automation API and
+generic SIO tests remain.
 
 ## AHRM scope
 
-The implementation follows the documented SIO acknowledgment and completion
-phases. It does not add a fabricated response, bypass the SIO state machine,
-or special-case the title. Any remaining mismatch must be isolated through a
-command, timing, checksum, disk geometry, or interrupt trace before further
-changes are made.
-
-## Next steps
-
-1. Capture Animal Party's D1 command stream, response phases, sector numbers,
-   checksums, and CPU handoff during startup if a deeper comparison is needed.
-2. Add a focused regression fixture using the validated SIO behavior.
+The implementation follows the SIO command-acknowledgment and Complete/data
+phases. Any remaining mismatch should be isolated with command, timing,
+checksum, disk-geometry, or CPU-handoff evidence before further changes.

@@ -643,6 +643,7 @@
         sceneScaleX: 2,
         sceneScaleY: 1,
         paletteRgb: video.paletteRgb,
+        crtEnabled: opts.crtEnabled !== false,
       });
     } else {
       if (!ctx2d) throw new Error("Missing 2D canvas context");
@@ -1475,6 +1476,10 @@
       getSioTurbo: function () { return sioTurbo; },
       getSkipRendering: function () { return skipRendering; },
       getMemoryExpansion: function () { return memoryExpansion; },
+      setCrtEnabled: function (value) {
+        if (renderer.setCrtEnabled) renderer.setCrtEnabled(value);
+        paint();
+      },
       setAudioEnabled: setAudioEnabled,
       getAudioEnabled: function () { return audioEnabled; },
       setOptionOnStart: setOptionOnStart,

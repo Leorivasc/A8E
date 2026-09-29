@@ -591,6 +591,7 @@
         gl: gl,
         ctx2d: ctx2d,
         debugEl: null,
+        crtEnabled: msg.crtEnabled !== false,
         audioEnabled: !!msg.audioEnabled,
         turbo: !!msg.turbo,
         sioTurbo: msg.sioTurbo !== false,
@@ -615,6 +616,7 @@
         gl: null,
         ctx2d: ctx2d,
         debugEl: null,
+        crtEnabled: msg.crtEnabled !== false,
         audioEnabled: !!msg.audioEnabled,
         turbo: !!msg.turbo,
         sioTurbo: msg.sioTurbo !== false,
@@ -740,6 +742,10 @@
         break;
       case "setSioTurbo":
         app.setSioTurbo(!!data.value);
+        break;
+      case "setCrtEnabled":
+        app.setCrtEnabled(!!data.value);
+        shouldPostState = false;
         break;
       case "setAudioEnabled":
         app.setAudioEnabled(!!data.value);

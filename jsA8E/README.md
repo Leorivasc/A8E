@@ -102,6 +102,8 @@ Additional browser-only triggers:
 
 ## UI Toggles / Features
 
+- **CRT** toggles the display filter without restarting emulation. Turn it off for sharp palette pixels without curvature, scanlines, or color bleeding. The preference is saved between sessions; CRT is on by default.
+
 - Start/Pause, Reset, Fullscreen
 - PAL/NTSC selector for video standard selection at boot
 - CPU Turbo (`~4x` speed multiplier)

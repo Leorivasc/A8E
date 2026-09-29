@@ -4,6 +4,31 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-29: corrected the linked POKEY audio divider in both cores: high
+  underflow now reloads the low counter as well as the high counter (AHRM
+  5.3), without generating an extra low-channel pulse. The 2026-09-28 change
+  had left the low counter free-running every 256 ticks after its first
+  period. Prince of Persia's in-game music was observed using an audible
+  poly-4 low channel in linked 1+2 mode, exposing a fixed-pitch voice that
+  the loading demo did not reveal. JS and native regressions check repeated
+  low/high waveform edges for both linked pairs at 1.79 MHz, 64 kHz, and
+  15 kHz. The full JS automation suite and all 12 native CTest probes pass.
+  Timer IRQ/SIO scheduling is unchanged; auditory confirmation of the
+  in-game melody remains separate from the passing divider contract.
+
+- 2026-09-29: added a persistent CRT toolbar toggle in jsA8E. Disabling it
+  renders the indexed framebuffer and palette directly to the WebGL canvas
+  with nearest-neighbor sampling, bypassing all CRT post-processing. Both
+  worker and main-thread paths apply the change immediately, including while
+  paused; Canvas 2D retains its existing clean output. The full JS automation
+  suite passes. Chromium checks verified exact clean palette pixels and
+  CRT on/off/on switching in WebGL 1/2, plus paused UI toggling and saved
+  preferences after reload in both worker and main-thread modes.
+
+- 2026-09-29: normalized one stray CRLF blank line in
+  `jsA8E/js/core/io.js`, so the alignment merge passes whitespace validation
+  without changing PIA or console I/O behavior.
+
 - 2026-09-29: alignment audit corrected the documentation boundary: AHRM-07
   is certified for its synthetic and visual diagnostic scope, while broader
   title-level comparisons remain regression work; AHRM-08 remains open only
@@ -510,6 +535,11 @@ Simple implementation notes for this repository.
   `playfield_dynamic_geometry.test.js` renderer mock as the first action of
   AHRM-06. The test must use the current `drawModeLine` contract and reach its
   HSCROL/DMA assertions before ANTIC timing work proceeds.
+- 2026-09-24: `ATR/10Sept26.md`, the Karate Champion and Animal Party notes,
+  and the root README: reconcile the historical game summaries with current
+  validation. Keep the Bosconian POKEY timer fix separate from Karate's NMI
+  cause, and clarify that the existing SIO observer test does not cover the
+  Animal Party READ response phases.
 
 - 2026-09-24: `ATR/world_karate_championship_v1_ed.md` and
   `ATR/animal_party.md`: added title-level investigation records for the

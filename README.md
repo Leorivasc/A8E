@@ -85,14 +85,71 @@ startup screens in the emulator:
   presentation; see [the investigation](ATR/amaurote.md).
 - **Mikie V1.12** completes its banked XEX load and reaches the control screen.
 - **AtariWriter Plus XE** completes its 130XE startup sequence and reaches the user menu.
-- **Karate Champion** and **Animal Party** are also covered by the generic DLI/NMI
-  and SIO compatibility work; their full title-specific startup validation remains in progress.
+- **World Karate Championship (v1,ED)** (Karate Champion) reaches gameplay and
+  starts a tournament after the generic NMI correction; see its
+  [investigation](ATR/world_karate_championship_v1_ed.md).
+- **Animal Party** completes its button-triggered second disk load and has been
+  verified in gameplay after the generic SIO response-phase correction; see
+  its [investigation](ATR/animal_party.md).
 
-These results come from generic fixes to XEX RUNAD handling, memory-bank/window
-behavior, IRQ state, and XL/XE hardware defaults; no title-specific workarounds
-are used.
+These results come from shared fixes to XEX loading, memory banking, CPU
+interrupt handling, SIO response phases, and XL/XE defaults; no title-specific
+workarounds are used.
 
 ## ROM Requirements
+
+Both implementations require the following ROM dumps (not included):
+
+- `ATARIXL.ROM` (16 KB)
+- `ATARIBAS.ROM` (8 KB)
+
+Recommended placement is the repository root:
+
+- Native app loads ROM files from its current working directory.
+- Browser app can load ROMs via UI file inputs, and also attempts `../ATARIXL.ROM` + `../ATARIBAS.ROM` when served from repo root.
+
+## Quick Start (Browser)
+
+Serve the repository root with a static HTTP server, then open `jsA8E/`.
+
+```sh
+python -m http.server 8000
+# open http://localhost:8000/jsA8E/
+```
+
+(`file://` is not sufficient because shader and ROM auto-load paths use `fetch()`.)
+
+When the browser emulator starts with D1 empty, it mounts the built-in
+`standby.xex` and shows disk-loading instructions through an ANTIC display
+list. **Open Disk** loads and starts a selected image. Disk Library mount
+changes take effect without restarting the running program, so it can request
+another disk side; the library status only confirms the mount action. Use
+**Full Reset** when you want to boot from the image currently mounted in D1.
+See the [browser README](jsA8E/README.md) for more details.
+
+For an online demo of the jsA8E version, visit https://jsa8e.anides.de/
+
+The latest unreleased development version is available at https://dev.jsa8e.anides.de/
+
+## Automation
+
+The browser port includes a stable automation surface at `window.A8EAutomation`.
+
+It is intended to be the canonical shared control surface for debugger/introspection workflows, artifact capture, HostFS access, assembler-driven development flows, and higher-level harnesses. The public surface is grouped into `system`, `media`, `input`, `debug`, `dev`, `artifacts`, and `events` while keeping the earlier flat aliases for compatibility.
+
+Current highlights include worker-acknowledged lifecycle control, URL-native ROM/disk/XEX loading, structured pause/fault events, schema-versioned failure artifacts, HostFS file automation, assembler/XEX helpers, and versioned full-machine snapshot save/load through `system.saveSnapshot()` / `system.loadSnapshot()`. The repository also includes a browser-less Node bootstrap at `jsA8E/headless.js` that instantiates the same automation API against the no-worker backend.
+
+For external agents, CI jobs, scripted regression runs, and other non-interactive control flows, prefer the browser-less bootstrap over driving the browser UI directly. It avoids DOM/worker/UI state, starts with an attached API immediately, and exposes the same grouped automation contract. For Codex-style MCP clients, `jsA8E/mcp_server.js` provides a local stdio bridge over the same runtime and grouped tool surface. See the [jsA8E README](jsA8E/README.md) for the overview and [jsA8E/AUTOMATION.md](jsA8E/AUTOMATION.md) for the full public API reference.
+
+## Quick Start (Native)
+
+Building requires **SDL 2** development headers. See the [A8E README](A8E/README.md) for full build instructions covering Windows (MSVC, MinGW), macOS (Homebrew), and Linux.
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+./build/A8E/A8E
+```
 
 Both implementations require the following ROM dumps (not included):
 

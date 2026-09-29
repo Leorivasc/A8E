@@ -288,6 +288,12 @@
     const nativeScreenH = canvas.height | 0;
     const workerPreference = resolveWorkerPreference();
     const pokeyTracePreference = resolvePokeyTracePreference();
+    let crtEnabled = true;
+    try {
+      crtEnabled = window.localStorage.getItem("a8e_crt_enabled") !== "false";
+    } catch {
+      // Keep the default when storage is unavailable.
+    }
     const videoStandardPreference = persistVideoStandardPreference(
       resolveVideoStandardPreference(),
     );
@@ -575,6 +581,16 @@
     const btnStart = document.getElementById("btnStart");
     const btnReset = document.getElementById("btnReset");
     const btnControlsCollapse = document.getElementById("btnControlsCollapse");
+    const btnCrt = document.getElementById("btnCrt");
+    function updateCrtButton() {
+      btnCrt.classList.toggle("active", crtEnabled);
+      btnCrt.setAttribute("aria-pressed", String(crtEnabled));
+      btnCrt.title = crtEnabled
+        ? "CRT on: click for a clean image."
+        : "CRT off: click to enable the CRT filter.";
+      canvas.classList.toggle("crtDisabled", !crtEnabled);
+    }
+    updateCrtButton();
     const btnFullscreen = document.getElementById("btnFullscreen");
     const btnAppFullscreen = document.getElementById("btnAppFullscreen");
     const btnTurbo = document.getElementById("btnTurbo");
@@ -923,6 +939,7 @@
         gl: null,
         ctx2d: null,
         debugEl: debugEl,
+        crtEnabled: crtEnabled,
         audioEnabled: btnAudio.classList.contains("active"),
         turbo: btnTurbo.classList.contains("active"),
         sioTurbo: btnSioTurbo.classList.contains("active"),
@@ -940,6 +957,7 @@
           gl: gl,
           ctx2d: ctx2d,
           debugEl: debugEl,
+          crtEnabled: crtEnabled,
           audioEnabled: btnAudio.classList.contains("active"),
           turbo: btnTurbo.classList.contains("active"),
           sioTurbo: btnSioTurbo.classList.contains("active"),
@@ -974,6 +992,7 @@
               gl: null,
               ctx2d: ctx2d,
               debugEl: debugEl,
+              crtEnabled: crtEnabled,
               audioEnabled: btnAudio.classList.contains("active"),
               turbo: btnTurbo.classList.contains("active"),
               sioTurbo: btnSioTurbo.classList.contains("active"),
@@ -1880,6 +1899,16 @@
     });
     bindToggleButton(btnSioTurbo, function (active) {
       app.setSioTurbo(active);
+    });
+    bindToggleButton(btnCrt, function (active) {
+      crtEnabled = active;
+      updateCrtButton();
+      app.setCrtEnabled(active);
+      try {
+        window.localStorage.setItem("a8e_crt_enabled", String(active));
+      } catch {
+        // The filter still works when storage is unavailable.
+      }
     });
     bindToggleButton(btnAudio, function (active) {
       app.setAudioEnabled(active);
