@@ -552,6 +552,22 @@
       return merged & 0xff;
     }
 
+    // Diagnostic seam for real-content investigations. It is intentionally
+    // inert unless a host installs the callback; normal PMG timing and state
+    // remain unchanged.
+    function tracePmgDma(ctx, lineCycle, y, address, value, latchAddress) {
+      const trace = ctx.ioData && ctx.ioData.pmgDmaTrace;
+      if (typeof trace !== "function") return;
+      trace({
+        line: y | 0,
+        cycle: lineCycle | 0,
+        address: address & 0xffff,
+        value: value & 0xff,
+        latchAddress: latchAddress & 0xffff,
+        latchValue: ctx.sram[latchAddress & 0xffff] & 0xff,
+      });
+    }
+
     function fetchPmgDmaCycle(ctx, lineCycle, y, delayedDmaCtl) {
       if (y >= 248) return 0;
 
@@ -582,12 +598,15 @@
       if (lineCycle === 0 && pmDmaMissiles) {
         if (pmReceiveMissiles) {
           const oldValue = sram[IO_GRAFM_TRIG1] & 0xff;
+          const address = fetchPmAddr(hires ? 768 : 384);
+          const value = ctx.ram[address] & 0xff;
           const newValue = mergeMissileDmaValue(
             sram,
             y,
-            ctx.ram[fetchPmAddr(hires ? 768 : 384)],
+            value,
           );
           sram[IO_GRAFM_TRIG1] = newValue;
+          tracePmgDma(ctx, lineCycle, y, address, value, IO_GRAFM_TRIG1);
           if (newValue !== oldValue) {
             recordPmgRegisterEvent(ctx, IO_GRAFM_TRIG1, newValue, lineCycle);
           }
@@ -597,25 +616,37 @@
       if (pmDmaPlayers) {
         if (lineCycle === 2) {
           if (pmReceivePlayers && vdelayAllowsLoad(0x10)) {
-            sram[IO_GRAFP0_P1PL] = ctx.ram[fetchPmAddr(hires ? 1024 : 512)];
+            const address = fetchPmAddr(hires ? 1024 : 512);
+            const value = ctx.ram[address] & 0xff;
+            sram[IO_GRAFP0_P1PL] = value;
+            tracePmgDma(ctx, lineCycle, y, address, value, IO_GRAFP0_P1PL);
             recordPmgRegisterEvent(ctx, IO_GRAFP0_P1PL, sram[IO_GRAFP0_P1PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 3) {
           if (pmReceivePlayers && vdelayAllowsLoad(0x20)) {
-            sram[IO_GRAFP1_P2PL] = ctx.ram[fetchPmAddr(hires ? 1280 : 640)];
+            const address = fetchPmAddr(hires ? 1280 : 640);
+            const value = ctx.ram[address] & 0xff;
+            sram[IO_GRAFP1_P2PL] = value;
+            tracePmgDma(ctx, lineCycle, y, address, value, IO_GRAFP1_P2PL);
             recordPmgRegisterEvent(ctx, IO_GRAFP1_P2PL, sram[IO_GRAFP1_P2PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 4) {
           if (pmReceivePlayers && vdelayAllowsLoad(0x40)) {
-            sram[IO_GRAFP2_P3PL] = ctx.ram[fetchPmAddr(hires ? 1536 : 768)];
+            const address = fetchPmAddr(hires ? 1536 : 768);
+            const value = ctx.ram[address] & 0xff;
+            sram[IO_GRAFP2_P3PL] = value;
+            tracePmgDma(ctx, lineCycle, y, address, value, IO_GRAFP2_P3PL);
             recordPmgRegisterEvent(ctx, IO_GRAFP2_P3PL, sram[IO_GRAFP2_P3PL], lineCycle);
           }
           return 1;
         } else if (lineCycle === 5) {
           if (pmReceivePlayers && vdelayAllowsLoad(0x80)) {
-            sram[IO_GRAFP3_TRIG0] = ctx.ram[fetchPmAddr(hires ? 1792 : 896)];
+            const address = fetchPmAddr(hires ? 1792 : 896);
+            const value = ctx.ram[address] & 0xff;
+            sram[IO_GRAFP3_TRIG0] = value;
+            tracePmgDma(ctx, lineCycle, y, address, value, IO_GRAFP3_TRIG0);
             recordPmgRegisterEvent(ctx, IO_GRAFP3_TRIG0, sram[IO_GRAFP3_TRIG0], lineCycle);
           }
           return 1;

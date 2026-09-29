@@ -4,6 +4,31 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-28: added an opt-in `ioData.pmgDmaTrace` seam in
+  `jsA8E/js/core/gtia.js`. It records P/M DMA line, slot, source address,
+  source byte, and resulting graphics latch only when a diagnostic installs a
+  callback; ordinary emulation does not enter a trace path. The AtariBlast
+  NTSC/RAMBO-1088K snapshot recorded 706 P0/P1 loads with zero source-to-latch
+  mismatches, including its detached-fragment rows. This rules out a fixed
+  vertical source-address offset and a lost P0/P1 latch load; continue at the
+  generic GTIA shift/output stage. `gtia_pmg_dma_regression`, AHRM-07 XEX,
+  and the AHRM-07 ROM boot regression pass.
+
+- 2026-09-28: added `AHRM08_CPU_BOUNDARY_TEST.{asm,XEX,md}` for the short,
+  non-production investigation of jsA8E's accepted P1 phase deviation. It
+  compares `DATA NEEDED` polling after 2-, 3-, and 4-cycle instruction paths
+  from the same `STIMER` setup. It is observational and must not be used to
+  add a padding-specific offset; compare it with native A8E, Altirra, and
+  hardware before changing CPU or POKEY timing.
+
+- 2026-09-28: the first CPU-boundary XEX comparison reported `DATA NEEDED=00`
+  for its 2-, 3-, and 4-cycle instruction cases in jsA8E, native A8E,
+  Altirra, and hardware. It rules out that isolated instruction-width model
+  as the explanation for jsA8E P1. Completion polling was `37` in jsA8E,
+  Altirra, and hardware, and `35` in native A8E; treat that as a separate
+  guest-polling observation. No production timing changed. Any follow-up must
+  preserve the matrix fixture's exact P1 path and vary only its event boundary.
+
 - 2026-09-27: certified the AHRM-07 PMG/GTIA visual diagnostic. The supplied
   NTSC/128K phase pairs show `P0/P1 COLLISION: PASS` and matching player DMA
   forms, PMBASE/HPOS/PRIOR transitions, and player/playfield mixing in

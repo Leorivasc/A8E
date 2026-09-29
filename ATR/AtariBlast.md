@@ -657,3 +657,55 @@ La corrección fue validada ejecutando nuevamente ambos medios con el loader XEX
 La causa no era un parche específico de ninguno de los juegos. Era la combinación de un handoff RUNAD que descartaba direcciones con byte alto cero y una relocalización incompleta del loader después de ampliar esa comprobación. Las correcciones se mantienen genéricas y se aplican por igual al loader JavaScript y al nativo.
 
 Los puntos restantes de la lista de compatibilidad siguen siendo mejoras generales del modelo AHRM (agregación de IRQ de POKEY/PIA/PBI, DDRB efectivo, prioridad de overlays, transiciones de bancos, acceso ANTIC y semántica de reset/snapshot). No son necesarios para que AtariBlast y Mikie completen actualmente su arranque.
+
+### Reconstrucción estática del dibujo P/M (2026-09-28)
+
+Se analizó el estado reproducible NTSC/RAMBO-1088K `blast-game.a8s` y el
+código activo del banco 13. AtariBlast no usa una secuencia por-raster de
+escrituras a `GRAFP0-3` para dibujar los enemigos: los bytes de las capturas
+proceden del DMA ordinario de P/M.
+
+La rutina residente que alterna las páginas está en `$2391-$2496`. Selecciona
+`PMBASE=$30` o `$38`, programa HPOS, SIZE y los colores desde sus tablas y
+habilita el DMA con `DMACTL=$3E`, `GRACTL=$03`. En resolución de una línea esto
+define dos buffers completos:
+
+| PMBASE | P0 | P1 | P2 | P3 |
+|---|---|---|---|---|
+| `$30` | `$3400-$34FF` | `$3500-$35FF` | `$3600-$36FF` | `$3700-$37FF` |
+| `$38` | `$3C00-$3CFF` | `$3D00-$3DFF` | `$3E00-$3EFF` | `$3F00-$3FFF` |
+
+Las rutinas bancadas, por ejemplo `$77AA`, estampan los bytes de las formas
+en pares de páginas mediante `STA abs,Y`; otros generadores (`$6638`, `$7904`
+en el estado inspeccionado) rellenan las partes de los enemigos. Las entradas
+de los jugadores son por tanto mapas de bits de pantalla ya compuestos, no
+sprites que GTIA deba construir desde GRAFP.
+
+Una traza de 120000 ciclos, que abarca cinco alternancias de PMBASE y registra
+todas las escrituras —incluidos ceros— en `$3400-$3FFF`, no encontró ninguna
+escritura en el buffer activo. Siempre se completa el buffer inactivo antes de
+la siguiente alternancia. Esto descarta una carrera de escritura CPU/DMA del
+juego como causa de los fragmentos de las piernas. También confirma que una
+solución no debe introducir una regla específica para AtariBlast ni retrasar
+sus stores.
+
+La investigación queda reducida al camino genérico que convierte el byte de
+la página activa en el latch y salida de cada jugador: dirección vertical de
+DMA de una línea, momento de carga de GRAFP y estado del desplazador. AHRM
+4.13 especifica para este caso `PMBASE + $400/$500/$600/$700 + scanline` y
+DMA en los ciclos 2-5; AHRM 6.5 especifica el latch y el desplazador. La
+siguiente prueba debe comparar por línea esos cuatro bytes y latches contra
+Altirra/hardware en un fotograma con artefacto, sin cambiar el juego ni el
+doble buffer.
+
+La sonda opt-in `pmgDmaTrace` se añadió en jsA8E para esa comparación. En una
+repetición de 40000 ciclos del snapshot capturó 706 cargas P0/P1: para cada una
+la dirección fue la esperada y el byte de memoria fue idéntico al latch
+resultante. Por ejemplo, línea 123: P0 `$3C7B=$F0` en ciclo 2 y P1
+`$3D7B=$30` en ciclo 3. Las filas que contienen las formas cuestionadas siguen
+ese mismo patrón. Ensayos reversibles de `scanline-1`, `scanline+1` y
+`scanline+2` deforman o trasladan figuras completas; no eliminan sólo los
+fragmentos y no constituyen una corrección. Se descartan por tanto tanto un
+offset vertical fijo como una pérdida de carga GRAFP. El siguiente candidato
+es la salida del desplazador GTIA después de que el latch ya contiene el byte
+correcto.
