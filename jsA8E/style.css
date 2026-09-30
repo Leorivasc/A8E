@@ -328,11 +328,18 @@ body {
   color: var(--muted);
 }
 
-.layoutSchemeBtn:hover:not(:disabled),
 .layoutSchemeBtn:focus-visible {
   color: var(--text);
   border-color: var(--border);
   background: rgba(255, 255, 255, 0.05);
+}
+
+@media (hover: hover) {
+  .layoutSchemeBtn:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border);
+    background: rgba(255, 255, 255, 0.05);
+  }
 }
 
 .layoutSchemeBtn.active {
@@ -351,11 +358,18 @@ body {
   color: var(--muted);
 }
 
-.toolbarCollapseBtn:hover:not(:disabled),
 .toolbarCollapseBtn:focus-visible {
   color: var(--text);
   background: rgba(255, 255, 255, 0.04);
   border-color: var(--border);
+}
+
+@media (hover: hover) {
+  .toolbarCollapseBtn:hover:not(:disabled) {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--border);
+  }
 }
 
 button {
@@ -387,8 +401,15 @@ button:disabled {
   cursor: wait;
 }
 
-button:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.18);
+button:active:not(:disabled) {
+  border-color: rgba(92, 200, 255, 0.55);
+  background: rgba(92, 200, 255, 0.12);
+}
+
+@media (hover: hover) {
+  button:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.18);
+  }
 }
 
 /* Toggle buttons */
@@ -402,8 +423,10 @@ button:hover:not(:disabled) {
   border-color: var(--border);
 }
 
-.toggle-btn:hover:not(:disabled) {
-  opacity: 1;
+@media (hover: hover) {
+  .toggle-btn:hover:not(:disabled) {
+    opacity: 1;
+  }
 }
 
 /* Turbo badge - only show when active */
@@ -3150,6 +3173,31 @@ canvas.crtEnabled {
   display: none;
 }
 
+.systemKeyboardInput {
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 2px;
+  min-width: 2px;
+  min-height: 2px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  opacity: 0.01;
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
+  font-size: 16px;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.systemKeyboardTouchZone {
+  display: none;
+}
+
 .mobileActionBar[hidden],
 .mobilePanelBackdrop[hidden],
 .mobilePanelClose[hidden],
@@ -3162,22 +3210,57 @@ canvas.crtEnabled {
     --mobile-action-height: 62px;
   }
 
+  .systemKeyboardInput {
+    visibility: visible;
+  }
+
+  body.system-keyboard-mode {
+    overflow: hidden;
+  }
+
+  body.system-keyboard-mode .layout {
+    overflow: hidden;
+  }
+
+  body.system-keyboard-mode .systemKeyboardTouchZone {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: block;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    outline: 0;
+    opacity: 0;
+    background: transparent;
+    pointer-events: auto;
+    touch-action: none;
+  }
+
   .topbar {
+    align-items: center;
     padding: 8px 10px;
     gap: 8px;
+    flex-wrap: nowrap;
   }
 
   .brand {
+    flex: 0 0 auto;
     min-height: 38px;
   }
 
   .controls {
-    flex-basis: 100%;
+    width: auto;
+    flex: 1 1 auto;
     min-width: 0;
     gap: 4px;
   }
 
   .controlsPrimary {
+    justify-content: flex-start;
     gap: 4px;
   }
 
@@ -3311,7 +3394,7 @@ canvas.crtEnabled {
     bottom: 0;
     left: 0;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 4px;
     min-height: var(--mobile-action-height);
     padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
@@ -3337,12 +3420,19 @@ canvas.crtEnabled {
     font-size: 17px;
   }
 
-  .mobileActionBar button:hover:not(:disabled),
   .mobileActionBar button:focus-visible,
   .mobileActionBar button.active {
     border-color: rgba(92, 200, 255, 0.45);
     background: rgba(92, 200, 255, 0.13);
     color: var(--text);
+  }
+
+  @media (hover: hover) {
+    .mobileActionBar button:hover:not(:disabled) {
+      border-color: rgba(92, 200, 255, 0.45);
+      background: rgba(92, 200, 255, 0.13);
+      color: var(--text);
+    }
   }
 
   .mobileToolsSheet {
@@ -3403,11 +3493,18 @@ canvas.crtEnabled {
     font-size: 18px;
   }
 
-  .mobileToolsGrid button:hover:not(:disabled),
   .mobileToolsGrid button:focus-visible {
     border-color: rgba(92, 200, 255, 0.55);
     background: rgba(92, 200, 255, 0.1);
     color: var(--text);
+  }
+
+  @media (hover: hover) {
+    .mobileToolsGrid button:hover:not(:disabled) {
+      border-color: rgba(92, 200, 255, 0.55);
+      background: rgba(92, 200, 255, 0.1);
+      color: var(--text);
+    }
   }
 
   .mobileToolsGrid button.active {
@@ -3451,7 +3548,8 @@ canvas.crtEnabled {
 
 @media (max-width: 600px) {
   .brand {
-    width: 100%;
+    width: auto;
+    flex: 0 0 auto;
     min-height: 32px;
   }
 

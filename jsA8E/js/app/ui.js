@@ -310,6 +310,14 @@
         : null;
     const keyboardPanel = document.getElementById("keyboardPanel");
     const joystickPanel = document.getElementById("joystickPanel");
+    const systemKeyboardInput = document.getElementById("systemKeyboardInput");
+    const systemKeyboardTouchZone = document.getElementById(
+      "systemKeyboardTouchZone",
+    );
+    let systemKeyboardEnabled = false;
+    let systemKeyboardComposing = false;
+    let systemKeyboardCompositionValue = "";
+    let systemKeyboardIgnoredValue = "";
     let app = null;
     let primaryDriveQueue = Promise.resolve();
     let standbyXexPromise = null;
@@ -681,6 +689,9 @@
       const keyboardButton = mobileActionBar.querySelector(
         '[data-mobile-input="keyboard"]',
       );
+      const systemKeyboardButton = mobileActionBar.querySelector(
+        '[data-mobile-input="system-keyboard"]',
+      );
       if (joystickButton) {
         const active = !!joystickPanel && !joystickPanel.hidden;
         joystickButton.classList.toggle("active", active);
@@ -695,6 +706,22 @@
         keyboardButton.setAttribute(
           "aria-label",
           active ? "Hide keyboard" : "Show keyboard",
+        );
+      }
+      if (systemKeyboardButton) {
+        systemKeyboardButton.classList.toggle("active", systemKeyboardEnabled);
+        systemKeyboardButton.setAttribute(
+          "aria-pressed",
+          systemKeyboardEnabled ? "true" : "false",
+        );
+        systemKeyboardButton.title = systemKeyboardEnabled
+          ? "Close device keyboard"
+          : "Open device keyboard";
+        systemKeyboardButton.setAttribute(
+          "aria-label",
+          systemKeyboardEnabled
+            ? "Close device keyboard"
+            : "Open device keyboard",
         );
       }
     }
@@ -801,6 +828,7 @@
 
     function handleMobileInput(inputName) {
       if (inputName === "joystick") {
+        if (systemKeyboardEnabled) setSystemKeyboardEnabled(false);
         const active = !!joystickPanel && !joystickPanel.hidden;
         if (active) setJoystickEnabled(false);
         else {
@@ -808,12 +836,15 @@
           setJoystickEnabled(true);
         }
       } else if (inputName === "keyboard") {
+        if (systemKeyboardEnabled) setSystemKeyboardEnabled(false);
         const active = !!keyboardPanel && !keyboardPanel.hidden;
         if (active) setKeyboardEnabled(false);
         else {
           setJoystickEnabled(false);
           setKeyboardEnabled(true);
         }
+      } else if (inputName === "system-keyboard") {
+        setSystemKeyboardEnabled(!systemKeyboardEnabled);
       }
       syncMobileInputButtons();
     }
@@ -1940,7 +1971,106 @@
       if (virtualModifiers.ctrl) setCtrlModifier(false);
     }
 
-    function setKeyboardEnabled(active) {
+    function clearSystemKeyboardInput() {
+      if (!systemKeyboardInput) return;
+      systemKeyboardInput.value = "";
+      systemKeyboardIgnoredValue = "";
+      systemKeyboardComposing = false;
+      systemKeyboardCompositionValue = "";
+    }
+
+    function systemKeyboardKey(key) {
+      if (!app || !app.onKeyDown || !app.onKeyUp) return;
+      const text = String(key || "");
+      if (!text) return;
+      const ev = {
+        key: text,
+        code: "",
+        ctrlKey: false,
+        shiftKey: text.length === 1 && text >= "A" && text <= "Z",
+        sourceToken: "syskbd:" + ++virtualTapTokenCounter,
+      };
+      app.onKeyDown(ev);
+      app.onKeyUp(ev);
+    }
+
+    function systemKeyboardPrintableChar(value) {
+      if (!value || value.length !== 1) return null;
+      if (value.charCodeAt(0) < 128) return value;
+      if (typeof value.normalize !== "function") return null;
+      const ascii = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return ascii.length === 1 && ascii.charCodeAt(0) < 128 ? ascii : null;
+    }
+
+    function sendSystemKeyboardText(text) {
+      Array.from(String(text || "")).forEach(function (value) {
+        if (value === "\n" || value === "\r") {
+          systemKeyboardKey("Enter");
+          return;
+        }
+        if (value === "\t") {
+          systemKeyboardKey("Tab");
+          return;
+        }
+        const printable = systemKeyboardPrintableChar(value);
+        if (printable !== null) systemKeyboardKey(printable);
+      });
+    }
+
+    function sendSystemKeyboardCompositionValue(value) {
+      const previous = Array.from(systemKeyboardCompositionValue);
+      const next = Array.from(String(value || ""));
+      let shared = 0;
+      while (
+        shared < previous.length &&
+        shared < next.length &&
+        previous[shared] === next[shared]
+      ) {
+        shared++;
+      }
+      for (let i = previous.length; i > shared; i--) {
+        systemKeyboardKey("Backspace");
+      }
+      if (shared < next.length)
+        sendSystemKeyboardText(next.slice(shared).join(""));
+      systemKeyboardCompositionValue = next.join("");
+    }
+
+    function consumeSystemKeyboardValue() {
+      if (!systemKeyboardInput) return;
+      const value = systemKeyboardInput.value;
+      if (value) sendSystemKeyboardText(value);
+      systemKeyboardInput.value = "";
+    }
+
+    function setSystemKeyboardEnabled(active) {
+      if (!systemKeyboardInput) return;
+      const enabled = !!active;
+      systemKeyboardEnabled = enabled;
+      document.body.classList.toggle("system-keyboard-mode", enabled);
+      if (enabled) {
+        setJoystickEnabled(false);
+        setKeyboardEnabled(false, true);
+        clearSystemKeyboardInput();
+        focusSystemKeyboardInput();
+      } else {
+        clearSystemKeyboardInput();
+        systemKeyboardInput.blur();
+        focusCanvas(true);
+      }
+      syncMobileInputButtons();
+    }
+
+    function focusSystemKeyboardInput() {
+      if (!systemKeyboardInput) return;
+      try {
+        systemKeyboardInput.focus({ preventScroll: true });
+      } catch {
+        systemKeyboardInput.focus();
+      }
+    }
+
+    function setKeyboardEnabled(active, preserveFocus) {
       if (!btnKeyboard || !keyboardPanel) return;
       const enabled = !!active;
       btnKeyboard.classList.toggle("active", enabled);
@@ -1955,7 +2085,7 @@
       if (!enabled) resetKeyboardControls();
       resizeCrtCanvas();
       queueKeyboardScaleConsistencyCheck();
-      focusCanvas(true);
+      if (!preserveFocus) focusCanvas(true);
     }
 
     function setKeyboardMappingMode(mode, applyToApp) {
@@ -2164,7 +2294,88 @@
 
     if (btnKeyboard && keyboardPanel) {
       btnKeyboard.addEventListener("click", function () {
+        if (systemKeyboardEnabled) setSystemKeyboardEnabled(false);
         setKeyboardEnabled(!btnKeyboard.classList.contains("active"));
+      });
+    }
+
+    if (systemKeyboardInput) {
+      systemKeyboardInput.addEventListener("beforeinput", function (e) {
+        if (!systemKeyboardEnabled) return;
+        if (e.inputType === "deleteContentBackward") {
+          e.preventDefault();
+          clearSystemKeyboardInput();
+          systemKeyboardKey("Backspace");
+        } else if (e.inputType === "insertLineBreak") {
+          e.preventDefault();
+          clearSystemKeyboardInput();
+          systemKeyboardKey("Enter");
+        }
+      });
+      systemKeyboardInput.addEventListener("input", function () {
+        if (!systemKeyboardEnabled) return;
+        const value = systemKeyboardInput.value;
+        if (systemKeyboardComposing) {
+          sendSystemKeyboardCompositionValue(value);
+          return;
+        }
+        if (!value) return;
+        if (systemKeyboardIgnoredValue === value) {
+          systemKeyboardIgnoredValue = "";
+          systemKeyboardInput.value = "";
+          return;
+        }
+        systemKeyboardIgnoredValue = "";
+        consumeSystemKeyboardValue();
+      });
+      systemKeyboardInput.addEventListener("compositionstart", function () {
+        systemKeyboardComposing = true;
+        systemKeyboardCompositionValue = "";
+        systemKeyboardIgnoredValue = "";
+      });
+      systemKeyboardInput.addEventListener("compositionend", function (e) {
+        const value = systemKeyboardInput.value || e.data || "";
+        sendSystemKeyboardCompositionValue(value);
+        systemKeyboardComposing = false;
+        systemKeyboardCompositionValue = "";
+        if (!value) return;
+        systemKeyboardIgnoredValue = value;
+        sendSystemKeyboardText(value);
+        systemKeyboardInput.value = "";
+        window.setTimeout(function () {
+          if (systemKeyboardIgnoredValue === value)
+            systemKeyboardIgnoredValue = "";
+        }, 0);
+      });
+      systemKeyboardInput.addEventListener("keydown", function (e) {
+        if (!systemKeyboardEnabled || e.isComposing) return;
+        if (e.key === "Tab" || e.key === "Escape") {
+          e.preventDefault();
+          clearSystemKeyboardInput();
+          systemKeyboardKey(e.key);
+          return;
+        }
+        if (
+          !("onbeforeinput" in systemKeyboardInput) &&
+          (e.key === "Backspace" || e.key === "Enter")
+        ) {
+          e.preventDefault();
+          clearSystemKeyboardInput();
+          systemKeyboardKey(e.key);
+        }
+      });
+    }
+
+    if (systemKeyboardTouchZone) {
+      systemKeyboardTouchZone.addEventListener("pointerdown", function (e) {
+        if (!systemKeyboardEnabled) return;
+        e.preventDefault();
+        focusSystemKeyboardInput();
+      });
+      systemKeyboardTouchZone.addEventListener("click", function (e) {
+        if (!systemKeyboardEnabled) return;
+        e.preventDefault();
+        focusSystemKeyboardInput();
       });
     }
 
