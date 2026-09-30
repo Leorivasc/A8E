@@ -52,7 +52,31 @@
     diskLibraryDelete: 15000,
   };
 
+  function resolveAudioWorkletUrl() {
+    const base =
+      typeof document !== "undefined" && document.baseURI
+        ? document.baseURI
+        : typeof self !== "undefined" && self.location && self.location.href
+          ? self.location.href
+          : "";
+    return new URL("js/audio/worklet.js", base).href;
+  }
+
+  function isTauriWebView() {
+    return !!(
+      window.__TAURI__ ||
+      window.__TAURI_INTERNALS__ ||
+      (window.location &&
+        typeof window.location.hostname === "string" &&
+        window.location.hostname.endsWith(".tauri.localhost"))
+    );
+  }
+
   function supportsWorker() {
+    // WebKitGTK can expose OffscreenCanvas but return no 2D context from the
+    // worker. Keep the desktop shell on the main-thread backend until the
+    // native WebView worker rendering path is reliable across platforms.
+    if (isTauriWebView()) return false;
     if (typeof window.Worker === "undefined") return false;
     if (typeof window.OffscreenCanvas === "undefined") return false;
     if (typeof window.MessageChannel === "undefined") return false;
@@ -518,8 +542,9 @@
         nodePromise = Promise.resolve(null);
         return nodePromise;
       }
+      const workletUrl = resolveAudioWorkletUrl();
       nodePromise = ctx.audioWorklet
-        .addModule("js/audio/worklet.js")
+        .addModule(workletUrl)
         .then(function () {
           if (disposed) return null;
           if (workletNode) return workletNode;
@@ -539,7 +564,8 @@
           workletNode = n;
           return n;
         })
-        .catch(function () {
+        .catch(function (error) {
+          console.error("A8E audio worklet unavailable; using ScriptProcessor fallback", error);
           setupScriptNode();
           nodePromise = Promise.resolve(null);
           return null;

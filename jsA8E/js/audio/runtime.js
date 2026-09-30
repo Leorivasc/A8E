@@ -14,6 +14,16 @@
     const IO_SKCTL_SKSTAT = cfg.IO_SKCTL_SKSTAT;
     const IO_AUDCTL_ALLPOT = cfg.IO_AUDCTL_ALLPOT;
 
+    function resolveWorkletUrl() {
+      const base =
+        typeof document !== "undefined" && document.baseURI
+          ? document.baseURI
+          : typeof self !== "undefined" && self.location && self.location.href
+            ? self.location.href
+            : "";
+      return new URL("js/audio/worklet.js", base).href;
+    }
+
     function createRuntime(opts) {
       const machine = opts.machine;
       const getAudioEnabled = opts.getAudioEnabled;
@@ -137,8 +147,9 @@
         // Prefer AudioWorklet when available.
         if (machine.audioCtx.audioWorklet && window.AudioWorkletNode) {
           machine.audioMode = "loading";
+          const workletUrl = resolveWorkletUrl();
           machine.audioCtx.audioWorklet
-            .addModule("js/audio/worklet.js")
+            .addModule(workletUrl)
             .then(function () {
               if (!machine.audioCtx || !getAudioEnabled()) return;
               const queueTarget =
@@ -209,7 +220,8 @@
                 // ignore
               }
             })
-            .catch(function () {
+            .catch(function (error) {
+              console.error("A8E audio worklet unavailable; using ScriptProcessor fallback", error);
               setupScriptProcessor();
             });
         } else {

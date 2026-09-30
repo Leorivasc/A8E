@@ -1,0 +1,57 @@
+name: Validate
+
+on:
+  push:
+    branches:
+      - main
+      - web_publish
+      - Tauri
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Native build and CTest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install --yes cmake libsdl2-dev
+
+      - name: Configure native build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build native emulator and probes
+        run: cmake --build build --parallel
+
+      - name: Run native probes
+        run: ctest --test-dir build --output-on-failure
+
+  browser:
+    name: Browser automation tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: jsA8E/package-lock.json
+
+      - name: Install browser test dependencies
+        working-directory: jsA8E
+        run: npm ci --ignore-scripts
+
+      - name: Run browser automation tests
+        working-directory: jsA8E
+        run: npm run test:automation
