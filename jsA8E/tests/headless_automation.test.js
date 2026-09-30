@@ -14,6 +14,11 @@ async function main() {
   const romDir = fs.existsSync(path.join(repoRoot, "ATARIXL.ROM"))
     ? repoRoot
     : buildDir;
+  if (!fs.existsSync(path.join(romDir, "ATARIXL.ROM"))
+      || !fs.existsSync(path.join(romDir, "ATARIBAS.ROM"))) {
+    console.log("headless_automation.test.js skipped (Atari OS/BASIC ROMs are unavailable).");
+    return;
+  }
   const runtime = await createHeadlessAutomation({
     roms: {
       os: path.join(romDir, "ATARIXL.ROM"),
