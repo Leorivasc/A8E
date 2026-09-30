@@ -28,6 +28,9 @@ The browser timing pass now covers the legacy-style active-line geometry, HSCROL
 
 The Memory selector and automation API support the AHRM profiles below:
 
+The browser UI defaults to NTSC timing and 128K (130XE) memory when no
+explicit or saved machine preference exists. PAL and 64K remain selectable.
+
 | Profile | Automation value |
 |---------|------------------|
 | 64K | `none` |
@@ -151,6 +154,10 @@ Additional browser-only triggers:
 - Option-on-Start toggle (off by default; hold OPTION during boot for BASIC-off style boot behavior)
 
 On smaller/mobile layouts, the virtual keyboard starts hidden by default.
+Mobile layouts also replace the stacked desktop tool column with a fixed
+bottom action bar and one focused, scrollable tool overlay at a time. The
+`More` sheet keeps CRT, turbo, fullscreen, ROM, assembler, snapshot, and
+machine settings available without crowding the main emulator view.
 
 For quick hardware checks from the browser console, `window.peek(address)` is available after boot. A useful example is `peek(53268)`, which reads the GTIA PAL/NTSC detect register and now returns `1` in PAL and `15` in NTSC.
 

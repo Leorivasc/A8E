@@ -50,8 +50,8 @@ The native and browser implementations support the AHRM memory-map profiles belo
 
 | Profile | Native switch | Browser/API profile |
 |---------|---------------|---------------------|
-| 64K | *(default)* | `none` |
-| 128K (130XE) | `-128K` | `130xe-128k` |
+| 64K | *(native default)* | `none` |
+| 128K (130XE) | `-128K` | `130xe-128k` *(browser default)* |
 | 192K (RAMBO) | `-192R` | `rambo-192k` |
 | 256K (RAMBO) | `-256R` | `rambo-256k` |
 | 320K (RAMBO) | `-320R` | `rambo-320k` |
@@ -79,6 +79,14 @@ layouts. The selected layout is saved locally; `Work` is the default when no
 preference exists. The toolbar also provides display and workspace fullscreen,
 CPU and SIO turbo, audio, virtual joystick and keyboard, HostFS, Disk Library,
 assembler/debugger, and snapshot controls.
+
+When no explicit or saved machine preference exists, jsA8E starts with NTSC
+timing and 128K (130XE) memory. The PAL and 64K profiles remain available in
+the selectors and API.
+
+At mobile widths, the browser presentation uses a compact lifecycle toolbar,
+a fixed bottom action bar, and focused overlays for the existing tool panels so
+the screen remains the primary view.
 
 ### Regression Tests
 

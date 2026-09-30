@@ -1008,7 +1008,7 @@
         ? "original"
         : "translated";
     const videoStandard =
-      normalizeVideoStandard(opts && opts.videoStandard) || "pal";
+      normalizeVideoStandard(opts && opts.videoStandard) || "ntsc";
 
     const state = {
       running: false,
@@ -1023,7 +1023,7 @@
       audioEnabled: false,
       optionOnStart: false,
       videoStandard: videoStandard,
-      memoryExpansion: normalizeMemoryExpansion(opts && opts.memoryExpansion) || "none",
+      memoryExpansion: normalizeMemoryExpansion(opts && opts.memoryExpansion) || "130xe-128k",
     };
 
     function applyWorkerStateSnapshot(snapshot) {
@@ -1750,9 +1750,9 @@
     if (app && typeof app.setKeyboardMappingMode !== "function")
       {app.setKeyboardMappingMode = function () {};}
     if (app && typeof app.getVideoStandard !== "function")
-      {app.getVideoStandard = function () { return normalizeVideoStandard(legacyOpts.videoStandard) || "pal"; };}
+      {app.getVideoStandard = function () { return normalizeVideoStandard(legacyOpts.videoStandard) || "ntsc"; };}
     if (app && typeof app.getMemoryExpansion !== "function")
-      {app.getMemoryExpansion = function () { return normalizeMemoryExpansion(legacyOpts.memoryExpansion) || "none"; };}
+      {app.getMemoryExpansion = function () { return normalizeMemoryExpansion(legacyOpts.memoryExpansion) || "130xe-128k"; };}
     if (app && typeof app.powerCycle !== "function")
       {app.powerCycle = function (options) {
         const result = app.reset(options);

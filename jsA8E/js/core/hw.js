@@ -43,7 +43,7 @@
       }
     }
 
-    return "pal";
+    return "ntsc";
   }
 
   function createApi(options) {

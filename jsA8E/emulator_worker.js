@@ -496,11 +496,11 @@
         videoStandard:
           app && typeof app.getVideoStandard === "function"
             ? app.getVideoStandard()
-            : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.videoStandard) || "pal",
+            : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.videoStandard) || "ntsc",
         memoryExpansion:
           app && typeof app.getMemoryExpansion === "function"
             ? app.getMemoryExpansion()
-            : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.memoryExpansion) || "none",
+            : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.memoryExpansion) || "130xe-128k",
       },
       debug:
         app && typeof app.getDebugState === "function" ? app.getDebugState() : null,
@@ -523,8 +523,8 @@
         ? self.A8E_BOOT_OPTIONS
         : {},
       {
-        videoStandard: normalizeVideoStandard(msg.videoStandard) || "pal",
-        memoryExpansion: normalizeMemoryExpansion(msg.memoryExpansion) || "none",
+        videoStandard: normalizeVideoStandard(msg.videoStandard) || "ntsc",
+        memoryExpansion: normalizeMemoryExpansion(msg.memoryExpansion) || "130xe-128k",
         pokeyTrace: !!msg.pokeyTrace,
       },
     );

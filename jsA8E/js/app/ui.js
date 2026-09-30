@@ -85,11 +85,11 @@
       }
     }
 
-    return "pal";
+    return "ntsc";
   }
 
   function persistVideoStandardPreference(videoStandard) {
-    const normalized = normalizeVideoStandard(videoStandard) || "pal";
+    const normalized = normalizeVideoStandard(videoStandard) || "ntsc";
     try {
       if (window.localStorage) {
         window.localStorage.setItem("a8e_video_standard", normalized);
@@ -142,11 +142,11 @@
       }
     }
 
-    return "none";
+    return "130xe-128k";
   }
 
   function persistMemoryExpansionPreference(memoryExpansion) {
-    const normalized = normalizeMemoryExpansion(memoryExpansion) || "none";
+    const normalized = normalizeMemoryExpansion(memoryExpansion) || "130xe-128k";
     try {
       if (window.localStorage) {
         window.localStorage.setItem("a8e_memory_expansion", normalized);
@@ -310,6 +310,14 @@
         : null;
     const keyboardPanel = document.getElementById("keyboardPanel");
     const joystickPanel = document.getElementById("joystickPanel");
+    const systemKeyboardInput = document.getElementById("systemKeyboardInput");
+    const systemKeyboardTouchZone = document.getElementById(
+      "systemKeyboardTouchZone",
+    );
+    let systemKeyboardEnabled = false;
+    let systemKeyboardComposing = false;
+    let systemKeyboardCompositionValue = "";
+    let systemKeyboardIgnoredValue = "";
     let app = null;
     let primaryDriveQueue = Promise.resolve();
     let standbyXexPromise = null;
@@ -570,6 +578,19 @@
     }
 
     onLayoutResize = function () {
+      const mobileNow = isMobileViewport();
+      if (mobileViewportState === null) {
+        mobileViewportState = mobileNow;
+        if (mobileNow) hideMobilePanels();
+      } else if (mobileViewportState !== mobileNow) {
+        mobileViewportState = mobileNow;
+        if (mobileNow) hideMobilePanels();
+        else {
+          closeMobilePanel();
+          setMobileToolsOpen(false);
+          applyLayoutScheme(layoutSchemePreference);
+        }
+      }
       resizeCrtCanvas();
       if (onPostLayoutResize) onPostLayoutResize();
     };
@@ -610,6 +631,21 @@
       document.querySelectorAll("[data-layout-scheme]"),
     );
     const secondaryControls = document.getElementById("secondaryControls");
+    const mobileActionBar = document.getElementById("mobileActionBar");
+    const mobileToolsButton = document.getElementById("mobileToolsButton");
+    const mobileToolsSheet = document.getElementById("mobileToolsSheet");
+    const mobileToolsClose = document.getElementById("mobileToolsClose");
+    const mobilePanelBackdrop = document.getElementById("mobilePanelBackdrop");
+    const mobilePanelClose = document.getElementById("mobilePanelClose");
+    const mobilePanelConfigs = Object.freeze({
+      diskLibraryPanel: { button: "btnDiskLibrary", title: "Disk Library" },
+      hostfsPanel: { button: "btnHostFs", title: "HostFS (H:)" },
+      assemblerPanel: { button: "btnAssembler", title: "Assembler Editor" },
+      snapshotPanel: { button: "btnSnapshots", title: "Snapshots" },
+    });
+    let mobilePanelId = null;
+    let mobilePanelSyncing = false;
+    let mobileViewportState = null;
 
     function getKeyboardMappingModeFromUi() {
       if (!btnKeyboardMap) return "translated";
@@ -624,7 +660,7 @@
         app && typeof app.getVideoStandard === "function"
           ? app.getVideoStandard()
           : videoStandardPreference,
-      ) || "pal";
+      ) || "ntsc";
       if (videoStandardSelect.value !== next) videoStandardSelect.value = next;
     }
 
@@ -634,8 +670,240 @@
         app && typeof app.getMemoryExpansion === "function"
           ? app.getMemoryExpansion()
           : memoryExpansionPreference,
-      ) || "none";
+      ) || "130xe-128k";
       if (memoryExpansionSelect.value !== next) memoryExpansionSelect.value = next;
+    }
+
+    function isMobileViewport() {
+      return (
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 980px)").matches
+      );
+    }
+
+    function syncMobileInputButtons() {
+      if (!mobileActionBar) return;
+      const joystickButton = mobileActionBar.querySelector(
+        '[data-mobile-input="joystick"]',
+      );
+      const keyboardButton = mobileActionBar.querySelector(
+        '[data-mobile-input="keyboard"]',
+      );
+      const systemKeyboardButton = mobileActionBar.querySelector(
+        '[data-mobile-input="system-keyboard"]',
+      );
+      if (joystickButton) {
+        const active = !!joystickPanel && !joystickPanel.hidden;
+        joystickButton.classList.toggle("active", active);
+        joystickButton.setAttribute(
+          "aria-label",
+          active ? "Hide joystick" : "Show joystick",
+        );
+      }
+      if (keyboardButton) {
+        const active = !!keyboardPanel && !keyboardPanel.hidden;
+        keyboardButton.classList.toggle("active", active);
+        keyboardButton.setAttribute(
+          "aria-label",
+          active ? "Hide keyboard" : "Show keyboard",
+        );
+      }
+      if (systemKeyboardButton) {
+        systemKeyboardButton.classList.toggle("active", systemKeyboardEnabled);
+        systemKeyboardButton.setAttribute(
+          "aria-pressed",
+          systemKeyboardEnabled ? "true" : "false",
+        );
+        systemKeyboardButton.title = systemKeyboardEnabled
+          ? "Close device keyboard"
+          : "Open device keyboard";
+        systemKeyboardButton.setAttribute(
+          "aria-label",
+          systemKeyboardEnabled
+            ? "Close device keyboard"
+            : "Open device keyboard",
+        );
+      }
+    }
+
+    function syncMobileToolButtons() {
+      document.querySelectorAll("[data-mobile-proxy]").forEach(function (button) {
+        const target = document.getElementById(
+          button.getAttribute("data-mobile-proxy"),
+        );
+        if (!target || !target.classList.contains("toggle-btn")) return;
+        const active = target.classList.contains("active");
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+        if (target.title) button.title = target.title;
+      });
+    }
+
+    function setMobileToolsOpen(open) {
+      const active = !!open;
+      if (mobileToolsSheet) mobileToolsSheet.hidden = !active;
+      if (mobileToolsButton) {
+        mobileToolsButton.classList.toggle("active", active);
+        mobileToolsButton.setAttribute("aria-expanded", active ? "true" : "false");
+        mobileToolsButton.setAttribute(
+          "aria-label",
+          active ? "Close mobile tools" : "Open mobile tools",
+        );
+      }
+      if (active) {
+        document.body.classList.add("mobile-tools-open");
+        if (mobilePanelBackdrop) mobilePanelBackdrop.hidden = false;
+      } else {
+        document.body.classList.remove("mobile-tools-open");
+        if (!mobilePanelId && mobilePanelBackdrop)
+          mobilePanelBackdrop.hidden = true;
+      }
+    }
+
+    function closeMobilePanel() {
+      if (mobilePanelId) {
+        const config = mobilePanelConfigs[mobilePanelId];
+        const panel = document.getElementById(mobilePanelId);
+        const button = config && document.getElementById(config.button);
+        mobilePanelSyncing = true;
+        if (button && button.classList.contains("active")) button.click();
+        if (panel) panel.hidden = true;
+        if (button) button.classList.remove("active");
+        mobilePanelSyncing = false;
+      }
+      mobilePanelId = null;
+      document.body.classList.remove("mobile-panel-open");
+      if (mobilePanelClose) mobilePanelClose.hidden = true;
+      if (!mobileToolsSheet || mobileToolsSheet.hidden) {
+        if (mobilePanelBackdrop) mobilePanelBackdrop.hidden = true;
+      }
+      resizeCrtCanvas();
+      syncMobileInputButtons();
+    }
+
+    function openMobilePanel(panelId) {
+      const config = mobilePanelConfigs[panelId];
+      if (!config) return;
+      if (!isMobileViewport()) {
+        const desktopButton = document.getElementById(config.button);
+        if (desktopButton) desktopButton.click();
+        return;
+      }
+      if (mobilePanelId === panelId) {
+        closeMobilePanel();
+        return;
+      }
+      closeMobilePanel();
+      setMobileToolsOpen(false);
+      const panel = document.getElementById(panelId);
+      const button = document.getElementById(config.button);
+      if (!panel || !button) return;
+      mobilePanelSyncing = true;
+      if (!button.classList.contains("active")) button.click();
+      panel.hidden = false;
+      button.classList.add("active");
+      mobilePanelSyncing = false;
+      mobilePanelId = panelId;
+      document.body.classList.add("mobile-panel-open");
+      if (mobilePanelClose) {
+        mobilePanelClose.hidden = false;
+        mobilePanelClose.setAttribute("aria-label", "Close " + config.title);
+        mobilePanelClose.title = "Close " + config.title;
+      }
+      if (mobilePanelBackdrop) mobilePanelBackdrop.hidden = false;
+      resizeCrtCanvas();
+    }
+
+    function hideMobilePanels() {
+      if (!isMobileViewport()) return;
+      closeMobilePanel();
+      Object.keys(mobilePanelConfigs).forEach(function (panelId) {
+        const config = mobilePanelConfigs[panelId];
+        const panel = document.getElementById(panelId);
+        const button = document.getElementById(config.button);
+        if (panel) panel.hidden = true;
+        if (button) button.classList.remove("active");
+      });
+    }
+
+    function handleMobileInput(inputName) {
+      if (inputName === "joystick") {
+        if (systemKeyboardEnabled) setSystemKeyboardEnabled(false);
+        const active = !!joystickPanel && !joystickPanel.hidden;
+        if (active) setJoystickEnabled(false);
+        else {
+          setKeyboardEnabled(false);
+          setJoystickEnabled(true);
+        }
+      } else if (inputName === "keyboard") {
+        if (systemKeyboardEnabled) setSystemKeyboardEnabled(false);
+        const active = !!keyboardPanel && !keyboardPanel.hidden;
+        if (active) setKeyboardEnabled(false);
+        else {
+          setJoystickEnabled(false);
+          setKeyboardEnabled(true);
+        }
+      } else if (inputName === "system-keyboard") {
+        setSystemKeyboardEnabled(!systemKeyboardEnabled);
+      }
+      syncMobileInputButtons();
+    }
+
+    function handleMobileProxy(targetId) {
+      const target = document.getElementById(targetId);
+      if (!target) return;
+      setMobileToolsOpen(false);
+      if (targetId === "btnControlsCollapse") {
+        target.click();
+        return;
+      }
+      if (target.matches("label")) {
+        const input = target.querySelector("input[type=file]");
+        if (input) input.click();
+        return;
+      }
+      target.click();
+      syncMobileToolButtons();
+    }
+
+    function wireMobileControls() {
+      if (mobileToolsButton) {
+        mobileToolsButton.addEventListener("click", function () {
+          if (mobilePanelId) closeMobilePanel();
+          setMobileToolsOpen(!mobileToolsSheet || mobileToolsSheet.hidden);
+        });
+      }
+      if (mobileToolsClose) {
+        mobileToolsClose.addEventListener("click", function () {
+          setMobileToolsOpen(false);
+        });
+      }
+      if (mobilePanelClose) {
+        mobilePanelClose.addEventListener("click", closeMobilePanel);
+      }
+      if (mobilePanelBackdrop) {
+        mobilePanelBackdrop.addEventListener("click", function () {
+          closeMobilePanel();
+          setMobileToolsOpen(false);
+        });
+      }
+      document.querySelectorAll("[data-mobile-input]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          handleMobileInput(button.getAttribute("data-mobile-input"));
+        });
+      });
+      document.querySelectorAll("[data-mobile-panel]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          openMobilePanel(button.getAttribute("data-mobile-panel"));
+        });
+      });
+      document.querySelectorAll("[data-mobile-proxy]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          handleMobileProxy(button.getAttribute("data-mobile-proxy"));
+        });
+      });
+      syncMobileInputButtons();
+      syncMobileToolButtons();
     }
 
     function updateLayoutSchemeButtons(value) {
@@ -677,6 +945,7 @@
 
       if (btnKeyboard && keyboardPanel) setKeyboardEnabled(false);
       if (btnJoystick && joystickPanel) setJoystickEnabled(false);
+      if (isMobileViewport()) hideMobilePanels();
       resizeCrtCanvas();
       queueKeyboardScaleConsistencyCheck();
     }
@@ -730,7 +999,7 @@
     let firePointerId = null;
     let stickCenter = { x: 0, y: 0 };
     const JOYSTICK_MAX_DEFLECT = 20;
-    const JOYSTICK_DEAD_ZONE = 5;
+    const JOYSTICK_DEAD_ZONE = 10;
     const JOYSTICK_DIRECTION_UP = {
       name: "up",
       key: "ArrowUp",
@@ -1702,7 +1971,106 @@
       if (virtualModifiers.ctrl) setCtrlModifier(false);
     }
 
-    function setKeyboardEnabled(active) {
+    function clearSystemKeyboardInput() {
+      if (!systemKeyboardInput) return;
+      systemKeyboardInput.value = "";
+      systemKeyboardIgnoredValue = "";
+      systemKeyboardComposing = false;
+      systemKeyboardCompositionValue = "";
+    }
+
+    function systemKeyboardKey(key) {
+      if (!app || !app.onKeyDown || !app.onKeyUp) return;
+      const text = String(key || "");
+      if (!text) return;
+      const ev = {
+        key: text,
+        code: "",
+        ctrlKey: false,
+        shiftKey: text.length === 1 && text >= "A" && text <= "Z",
+        sourceToken: "syskbd:" + ++virtualTapTokenCounter,
+      };
+      app.onKeyDown(ev);
+      app.onKeyUp(ev);
+    }
+
+    function systemKeyboardPrintableChar(value) {
+      if (!value || value.length !== 1) return null;
+      if (value.charCodeAt(0) < 128) return value;
+      if (typeof value.normalize !== "function") return null;
+      const ascii = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return ascii.length === 1 && ascii.charCodeAt(0) < 128 ? ascii : null;
+    }
+
+    function sendSystemKeyboardText(text) {
+      Array.from(String(text || "")).forEach(function (value) {
+        if (value === "\n" || value === "\r") {
+          systemKeyboardKey("Enter");
+          return;
+        }
+        if (value === "\t") {
+          systemKeyboardKey("Tab");
+          return;
+        }
+        const printable = systemKeyboardPrintableChar(value);
+        if (printable !== null) systemKeyboardKey(printable);
+      });
+    }
+
+    function sendSystemKeyboardCompositionValue(value) {
+      const previous = Array.from(systemKeyboardCompositionValue);
+      const next = Array.from(String(value || ""));
+      let shared = 0;
+      while (
+        shared < previous.length &&
+        shared < next.length &&
+        previous[shared] === next[shared]
+      ) {
+        shared++;
+      }
+      for (let i = previous.length; i > shared; i--) {
+        systemKeyboardKey("Backspace");
+      }
+      if (shared < next.length)
+        sendSystemKeyboardText(next.slice(shared).join(""));
+      systemKeyboardCompositionValue = next.join("");
+    }
+
+    function consumeSystemKeyboardValue() {
+      if (!systemKeyboardInput) return;
+      const value = systemKeyboardInput.value;
+      if (value) sendSystemKeyboardText(value);
+      systemKeyboardInput.value = "";
+    }
+
+    function setSystemKeyboardEnabled(active) {
+      if (!systemKeyboardInput) return;
+      const enabled = !!active;
+      systemKeyboardEnabled = enabled;
+      document.body.classList.toggle("system-keyboard-mode", enabled);
+      if (enabled) {
+        setJoystickEnabled(false);
+        setKeyboardEnabled(false, true);
+        clearSystemKeyboardInput();
+        focusSystemKeyboardInput();
+      } else {
+        clearSystemKeyboardInput();
+        systemKeyboardInput.blur();
+        focusCanvas(true);
+      }
+      syncMobileInputButtons();
+    }
+
+    function focusSystemKeyboardInput() {
+      if (!systemKeyboardInput) return;
+      try {
+        systemKeyboardInput.focus({ preventScroll: true });
+      } catch {
+        systemKeyboardInput.focus();
+      }
+    }
+
+    function setKeyboardEnabled(active, preserveFocus) {
       if (!btnKeyboard || !keyboardPanel) return;
       const enabled = !!active;
       btnKeyboard.classList.toggle("active", enabled);
@@ -1717,7 +2085,7 @@
       if (!enabled) resetKeyboardControls();
       resizeCrtCanvas();
       queueKeyboardScaleConsistencyCheck();
-      focusCanvas(true);
+      if (!preserveFocus) focusCanvas(true);
     }
 
     function setKeyboardMappingMode(mode, applyToApp) {
@@ -1785,19 +2153,23 @@
         btnAudio.classList.toggle("active", !!app.getAudioEnabled());
       }
       if (btnOptionOnStart && typeof app.getOptionOnStart === "function") {
-        btnOptionOnStart.classList.toggle("active", !!app.getOptionOnStart());
+        const active = !!app.getOptionOnStart();
+        btnOptionOnStart.classList.toggle("active", active);
+        btnOptionOnStart.setAttribute("aria-pressed", active ? "true" : "false");
       }
       if (typeof app.getKeyboardMappingMode === "function") {
         setKeyboardMappingMode(app.getKeyboardMappingMode(), false);
       }
 
       setButtons(app.isRunning());
+      syncMobileToolButtons();
     }
 
     function bindToggleButton(btn, onToggle) {
       if (!btn) return;
       btn.addEventListener("click", function () {
         const active = btn.classList.toggle("active");
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
         onToggle(active);
       });
     }
@@ -1922,7 +2294,88 @@
 
     if (btnKeyboard && keyboardPanel) {
       btnKeyboard.addEventListener("click", function () {
+        if (systemKeyboardEnabled) setSystemKeyboardEnabled(false);
         setKeyboardEnabled(!btnKeyboard.classList.contains("active"));
+      });
+    }
+
+    if (systemKeyboardInput) {
+      systemKeyboardInput.addEventListener("beforeinput", function (e) {
+        if (!systemKeyboardEnabled) return;
+        if (e.inputType === "deleteContentBackward") {
+          e.preventDefault();
+          clearSystemKeyboardInput();
+          systemKeyboardKey("Backspace");
+        } else if (e.inputType === "insertLineBreak") {
+          e.preventDefault();
+          clearSystemKeyboardInput();
+          systemKeyboardKey("Enter");
+        }
+      });
+      systemKeyboardInput.addEventListener("input", function () {
+        if (!systemKeyboardEnabled) return;
+        const value = systemKeyboardInput.value;
+        if (systemKeyboardComposing) {
+          sendSystemKeyboardCompositionValue(value);
+          return;
+        }
+        if (!value) return;
+        if (systemKeyboardIgnoredValue === value) {
+          systemKeyboardIgnoredValue = "";
+          systemKeyboardInput.value = "";
+          return;
+        }
+        systemKeyboardIgnoredValue = "";
+        consumeSystemKeyboardValue();
+      });
+      systemKeyboardInput.addEventListener("compositionstart", function () {
+        systemKeyboardComposing = true;
+        systemKeyboardCompositionValue = "";
+        systemKeyboardIgnoredValue = "";
+      });
+      systemKeyboardInput.addEventListener("compositionend", function (e) {
+        const value = systemKeyboardInput.value || e.data || "";
+        sendSystemKeyboardCompositionValue(value);
+        systemKeyboardComposing = false;
+        systemKeyboardCompositionValue = "";
+        if (!value) return;
+        systemKeyboardIgnoredValue = value;
+        sendSystemKeyboardText(value);
+        systemKeyboardInput.value = "";
+        window.setTimeout(function () {
+          if (systemKeyboardIgnoredValue === value)
+            systemKeyboardIgnoredValue = "";
+        }, 0);
+      });
+      systemKeyboardInput.addEventListener("keydown", function (e) {
+        if (!systemKeyboardEnabled || e.isComposing) return;
+        if (e.key === "Tab" || e.key === "Escape") {
+          e.preventDefault();
+          clearSystemKeyboardInput();
+          systemKeyboardKey(e.key);
+          return;
+        }
+        if (
+          !("onbeforeinput" in systemKeyboardInput) &&
+          (e.key === "Backspace" || e.key === "Enter")
+        ) {
+          e.preventDefault();
+          clearSystemKeyboardInput();
+          systemKeyboardKey(e.key);
+        }
+      });
+    }
+
+    if (systemKeyboardTouchZone) {
+      systemKeyboardTouchZone.addEventListener("pointerdown", function (e) {
+        if (!systemKeyboardEnabled) return;
+        e.preventDefault();
+        focusSystemKeyboardInput();
+      });
+      systemKeyboardTouchZone.addEventListener("click", function (e) {
+        if (!systemKeyboardEnabled) return;
+        e.preventDefault();
+        focusSystemKeyboardInput();
       });
     }
 
@@ -2608,6 +3061,8 @@
         focusCanvas: focusCanvas,
       });
     }
+
+    wireMobileControls();
 
     applyLayoutScheme(layoutSchemePreference);
     initializeStartupMedia(false).catch(function (err) {

@@ -621,7 +621,7 @@
     let sioTurbo = opts.sioTurbo !== false;
     const skipRendering = !!opts.skipRendering;
     let optionOnStart = !!opts.optionOnStart;
-    let memoryExpansion = normalizeMemoryExpansion(opts.memoryExpansion) || "none";
+    let memoryExpansion = normalizeMemoryExpansion(opts.memoryExpansion) || "130xe-128k";
     let keyboardMappingMode =
       opts.keyboardMappingMode === "original" ? "original" : "translated";
     if (setKeysKeyboardMappingMode)
@@ -1141,7 +1141,7 @@
         optionOnStart = !!config.optionOnStart;
       }
       if (config.memoryExpansion !== undefined) {
-        memoryExpansion = normalizeMemoryExpansion(config.memoryExpansion) || "none";
+        memoryExpansion = normalizeMemoryExpansion(config.memoryExpansion) || "130xe-128k";
       }
       if (config.keyboardMappingMode !== undefined) {
         keyboardMappingMode =
@@ -1444,7 +1444,7 @@
     }
 
     function getVideoStandard() {
-      return hwApi.VIDEO_STANDARD || "pal";
+      return hwApi.VIDEO_STANDARD || "ntsc";
     }
 
     function dispose() {

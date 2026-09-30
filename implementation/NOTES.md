@@ -4,9 +4,70 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-30: made mobile toolbar state feedback click-driven rather than
+  dependent on a sticky touch `:hover` state. Hover decoration now applies
+  only to hover-capable pointers; taps show a pressed state and the existing
+  `active` class immediately represents each toggle's on/off state.
+
+- 2026-09-30: kept the mobile Help icon and primary lifecycle controls in one
+  compact header row. The mobile controls no longer claim a full row, saving
+  vertical space above the Atari display.
+
+- 2026-09-30: fixed jsA8E mobile system-keyboard letters on composition-based
+  keyboards such as Gboard. During composition, each input update now sends
+  only its text delta to the Atari; replacement and deletion updates emit the
+  required Backspace events first. The prior implementation waited for
+  `compositionend`, so number and control keys could work while ordinary
+  letters remained pending in the mobile keyboard.
+
+- 2026-09-29: added a jsA8E mobile `Mobile` keyboard action that focuses a tiny editable
+  input to open the Android/iOS system keyboard. Committed text is translated
+  through the existing Atari key path, including ASCII symbols, Enter,
+  Backspace, Tab, Escape, incremental composition input, and accent stripping
+  where an ASCII equivalent exists. The full virtual Atari keyboard remains available
+  for OPTION/SELECT/START/RESET and other special controls; the Type button
+  reports its active state in the mobile action bar. While Mobile mode is active,
+  the Atari display has an invisible touch surface that restores input focus
+  without allowing the browser to scroll the page or close the system keyboard.
+
+- 2026-09-29: recorded an intermittent long-run graphics occurrence in the
+  jsA8E presentation/demo loop: after roughly 10–20 minutes, a large upper
+  portion of the image showed repeated/corrupted graphics while execution
+  continued. Prince of Persia was also observed to corrupt graphically after
+  prolonged scene-loop activity, although the jsA8E glitch did not reproduce
+  during several subsequent loops. A real Atari separately stopped on a green
+  screen; that was a different symptom and is not evidence that the emulator
+  glitch is caused by the accepted AHRM-08 P1 serial-divider phase deviation.
+  No fix was added. Keep PMG/GTIA/ANTIC raster state and long-run timing as
+  the follow-up investigation if the visual glitch becomes reproducible.
+
+- 2026-09-29: increased the jsA8E virtual joystick dead zone from 5px to
+  10px on each axis, reducing accidental diagonal activation while keeping
+  the existing independent-axis and multi-touch direction behavior.
+
+- 2026-09-29: changed the jsA8E browser defaults from PAL/64K to NTSC and
+  128K (130XE). Explicit boot options, URL parameters, and saved local
+  preferences still take precedence; native defaults and explicit 64K
+  selections are unchanged.
+
 - 2026-09-29: replaced the jsA8E CRT toolbar button text with a Font Awesome
   retro-TV icon. When the filter is disabled, the existing toggle state now
   adds a red slash overlay; title and ARIA labels remain unchanged.
+
+- 2026-09-29: `jsA8E/{index.html,style.css,js/app/ui.js}`: added an adaptive
+  mobile presentation below `980px`. The mobile toolbar keeps lifecycle and
+  disk actions compact, the fixed bottom action bar opens joystick, keyboard,
+  Disk Library, and HostFS, and the `More` sheet exposes CRT, turbo,
+  fullscreen, ROM, assembler, snapshot, and machine settings. Tool panels open
+  one at a time in a scrollable overlay; desktop layout presets and panel
+  ownership are unchanged. Chromium validation at 390x844 confirmed the
+  full-width screen, initial closed state, and fixed action bar.
+
+- 2026-09-29: `jsA8E/{index.html,style.css,js/app/ui.js}`: synchronized the
+  mobile `More` tool buttons with the active state of their real toolbar
+  controls, including `aria-pressed` feedback. Moved the real Option-on-Start
+  toggle next to Open Disk so its on/off state is visible in the compact mobile
+  toolbar and remains backed by the existing boot configuration.
 
 - 2026-09-29: corrected the linked POKEY audio divider in both cores: high
   underflow now reloads the low counter as well as the high counter (AHRM

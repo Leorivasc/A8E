@@ -485,7 +485,9 @@ async function createHeadlessAutomation(options) {
       sioTurbo: opts.sioTurbo !== false,
       skipRendering: opts.skipRendering !== false,
       optionOnStart: !!opts.optionOnStart,
-      memoryExpansion: opts.memoryExpansion,
+      videoStandard: opts.videoStandard,
+      memoryExpansion:
+        opts.memoryExpansion !== undefined ? opts.memoryExpansion : "130xe-128k",
       keyboardMappingMode:
         opts.keyboardMappingMode === "original" ? "original" : "translated",
     });

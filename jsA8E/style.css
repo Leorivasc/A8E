@@ -301,6 +301,12 @@ body {
   gap: 6px;
 }
 
+.primaryControls > .primaryIconBtn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+
 .layoutSchemeControls {
   display: inline-flex;
   align-items: center;
@@ -322,11 +328,18 @@ body {
   color: var(--muted);
 }
 
-.layoutSchemeBtn:hover:not(:disabled),
 .layoutSchemeBtn:focus-visible {
   color: var(--text);
   border-color: var(--border);
   background: rgba(255, 255, 255, 0.05);
+}
+
+@media (hover: hover) {
+  .layoutSchemeBtn:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border);
+    background: rgba(255, 255, 255, 0.05);
+  }
 }
 
 .layoutSchemeBtn.active {
@@ -345,11 +358,18 @@ body {
   color: var(--muted);
 }
 
-.toolbarCollapseBtn:hover:not(:disabled),
 .toolbarCollapseBtn:focus-visible {
   color: var(--text);
   background: rgba(255, 255, 255, 0.04);
   border-color: var(--border);
+}
+
+@media (hover: hover) {
+  .toolbarCollapseBtn:hover:not(:disabled) {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--border);
+  }
 }
 
 button {
@@ -381,8 +401,15 @@ button:disabled {
   cursor: wait;
 }
 
-button:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.18);
+button:active:not(:disabled) {
+  border-color: rgba(92, 200, 255, 0.55);
+  background: rgba(92, 200, 255, 0.12);
+}
+
+@media (hover: hover) {
+  button:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.18);
+  }
 }
 
 /* Toggle buttons */
@@ -396,8 +423,10 @@ button:hover:not(:disabled) {
   border-color: var(--border);
 }
 
-.toggle-btn:hover:not(:disabled) {
-  opacity: 1;
+@media (hover: hover) {
+  .toggle-btn:hover:not(:disabled) {
+    opacity: 1;
+  }
 }
 
 /* Turbo badge - only show when active */
@@ -3130,5 +3159,409 @@ canvas.crtEnabled {
 
   .snapshot-body {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Mobile presentation ----
+   Mobile uses the same emulator and panel components, but presents tool
+   panels as one focused overlay instead of stacking every desktop panel in
+   the document flow. */
+.mobileActionBar,
+.mobilePanelBackdrop,
+.mobilePanelClose,
+.mobileToolsSheet {
+  display: none;
+}
+
+.systemKeyboardInput {
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 2px;
+  min-width: 2px;
+  min-height: 2px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  opacity: 0.01;
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
+  font-size: 16px;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.systemKeyboardTouchZone {
+  display: none;
+}
+
+.mobileActionBar[hidden],
+.mobilePanelBackdrop[hidden],
+.mobilePanelClose[hidden],
+.mobileToolsSheet[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 980px) {
+  :root {
+    --mobile-action-height: 62px;
+  }
+
+  .systemKeyboardInput {
+    visibility: visible;
+  }
+
+  body.system-keyboard-mode {
+    overflow: hidden;
+  }
+
+  body.system-keyboard-mode .layout {
+    overflow: hidden;
+  }
+
+  body.system-keyboard-mode .systemKeyboardTouchZone {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: block;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    outline: 0;
+    opacity: 0;
+    background: transparent;
+    pointer-events: auto;
+    touch-action: none;
+  }
+
+  .topbar {
+    align-items: center;
+    padding: 8px 10px;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+
+  .brand {
+    flex: 0 0 auto;
+    min-height: 38px;
+  }
+
+  .controls {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .controlsPrimary {
+    justify-content: flex-start;
+    gap: 4px;
+  }
+
+  .primaryControls {
+    flex-wrap: nowrap;
+    gap: 4px;
+    overflow: hidden;
+  }
+
+  #toolbarRomOs,
+  #toolbarRomBasic,
+  #toolbarUtilityControls,
+  .layoutSchemeControls,
+  #btnControlsCollapse {
+    display: none;
+  }
+
+  #toolbarLifecycleControls {
+    flex-shrink: 0;
+    gap: 4px;
+  }
+
+  #toolbarLifecycleControls button,
+  #toolbarDiskOpen {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  #toolbarDiskOpen {
+    flex: 0 0 40px;
+  }
+
+  .layout {
+    padding: 8px 8px calc(var(--mobile-action-height) + 14px + env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+
+  .layout[data-layout-scheme="work"],
+  .layout[data-layout-scheme="development"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "screen"
+      "input"
+      "tools";
+    align-items: start;
+  }
+
+  .screenPanel {
+    gap: 6px;
+  }
+
+  .screenViewport {
+    width: 100%;
+  }
+
+  .inputPanelRow {
+    gap: 8px;
+  }
+
+  .layoutTools {
+    position: fixed;
+    z-index: 230;
+    top: 8px;
+    right: 8px;
+    bottom: calc(var(--mobile-action-height) + 8px + env(safe-area-inset-bottom));
+    left: 8px;
+    display: none;
+    grid-template-columns: minmax(0, 1fr);
+    align-content: stretch;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--sub-panel-border);
+    border-radius: 12px;
+    background: var(--sub-panel-bg);
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.6);
+  }
+
+  body.mobile-panel-open .layoutTools {
+    display: grid;
+  }
+
+  .layoutTools > [hidden] {
+    display: none !important;
+  }
+
+  .layoutTools > .disklibPanel:not([hidden]),
+  .layoutTools > .hostfsPanel:not([hidden]),
+  .layoutTools > .assemblerPanel:not([hidden]),
+  .layoutTools > .snapshotPanel:not([hidden]) {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+    align-self: stretch;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .mobilePanelBackdrop {
+    position: fixed;
+    z-index: 220;
+    inset: 0;
+    display: block;
+    background: rgba(3, 7, 13, 0.72);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+
+  .mobilePanelClose {
+    position: fixed;
+    z-index: 260;
+    top: 14px;
+    right: 14px;
+    display: inline-flex;
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    border-color: rgba(255, 255, 255, 0.16);
+    border-radius: 50%;
+    background: rgba(13, 17, 23, 0.92);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  }
+
+  .mobileActionBar {
+    position: fixed;
+    z-index: 250;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 4px;
+    min-height: var(--mobile-action-height);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    background: rgba(13, 17, 23, 0.96);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
+
+  .mobileActionBar button {
+    min-width: 0;
+    min-height: 48px;
+    padding: 4px 2px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted);
+    flex-direction: column;
+    gap: 3px;
+    font-size: 10px;
+  }
+
+  .mobileActionBar button i {
+    font-size: 17px;
+  }
+
+  .mobileActionBar button:focus-visible,
+  .mobileActionBar button.active {
+    border-color: rgba(92, 200, 255, 0.45);
+    background: rgba(92, 200, 255, 0.13);
+    color: var(--text);
+  }
+
+  @media (hover: hover) {
+    .mobileActionBar button:hover:not(:disabled) {
+      border-color: rgba(92, 200, 255, 0.45);
+      background: rgba(92, 200, 255, 0.13);
+      color: var(--text);
+    }
+  }
+
+  .mobileToolsSheet {
+    position: fixed;
+    z-index: 240;
+    right: 8px;
+    bottom: calc(var(--mobile-action-height) + 8px + env(safe-area-inset-bottom));
+    left: 8px;
+    display: block;
+    max-height: min(72vh, 560px);
+    overflow: auto;
+    border: 1px solid var(--sub-panel-border);
+    border-radius: 12px;
+    background: var(--sub-panel-bg);
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.6);
+  }
+
+  .mobileSheetTitlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 46px;
+    padding: 0 10px 0 14px;
+    border-bottom: 1px solid var(--sub-panel-border);
+    background: var(--sub-panel-header-bg);
+    color: var(--text);
+    font-size: var(--fs-base);
+    font-weight: 700;
+  }
+
+  .mobileSheetTitlebar button {
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+    min-height: 38px;
+    padding: 0;
+  }
+
+  .mobileToolsGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .mobileToolsGrid button {
+    min-height: 64px;
+    padding: 8px 4px;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--muted);
+    font-size: var(--fs-xs);
+    text-align: center;
+  }
+
+  .mobileToolsGrid button i {
+    color: var(--accent);
+    font-size: 18px;
+  }
+
+  .mobileToolsGrid button:focus-visible {
+    border-color: rgba(92, 200, 255, 0.55);
+    background: rgba(92, 200, 255, 0.1);
+    color: var(--text);
+  }
+
+  @media (hover: hover) {
+    .mobileToolsGrid button:hover:not(:disabled) {
+      border-color: rgba(92, 200, 255, 0.55);
+      background: rgba(92, 200, 255, 0.1);
+      color: var(--text);
+    }
+  }
+
+  .mobileToolsGrid button.active {
+    border-color: rgba(92, 200, 255, 0.65);
+    background: rgba(92, 200, 255, 0.18);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px rgba(92, 200, 255, 0.1);
+  }
+
+  .controlsSecondary:not([hidden]) {
+    position: fixed;
+    z-index: 260;
+    top: 8px;
+    right: 8px;
+    left: 8px;
+    display: flex;
+    min-height: 58px;
+    padding: 8px;
+    border: 1px solid var(--sub-panel-border);
+    border-radius: 12px;
+    background: var(--sub-panel-bg);
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.6);
+  }
+
+  .controlsSecondary:not([hidden]) .iconControlsSecondary {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .controlsSecondary:not([hidden]) .toolbarSelectWrap {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 6px;
+  }
+
+  .controlsSecondary:not([hidden]) .toolbarSelect {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .brand {
+    width: auto;
+    flex: 0 0 auto;
+    min-height: 32px;
+  }
+
+  .controlsPrimary {
+    width: 100%;
+  }
+
+  .primaryControls {
+    min-width: 0;
+  }
+
+  .mobileToolsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
