@@ -8,6 +8,9 @@ Simple implementation notes for this repository.
   when the user-provided Atari OS/BASIC ROMs are absent. The public CI runner
   cannot distribute those ignored firmware images, while developer and native
   build environments that provide them still execute the guest-level checks.
+  The native CI job likewise always compiles every probe but only runs CTest
+  when those ROMs are supplied, preventing a public runner from reporting
+  license-related missing firmware as an emulator regression.
 
 - 2026-09-30: replaced the upstream GitHub workflows with fork-specific CI and
   publication flows. Validation runs native CTest probes and jsA8E automation

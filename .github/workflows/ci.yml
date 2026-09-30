@@ -32,7 +32,12 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Run native probes
-        run: ctest --test-dir build --output-on-failure
+        run: |
+          if [[ -f ATARIXL.ROM && -f ATARIBAS.ROM ]]; then
+            ctest --test-dir build --output-on-failure
+          else
+            echo "::notice::Native probes require user-provided Atari OS/BASIC ROMs; compilation was validated, execution is skipped."
+          fi
 
   browser:
     name: Browser automation tests
