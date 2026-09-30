@@ -4,6 +4,23 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-30: replaced the upstream GitHub workflows with fork-specific CI and
+  publication flows. Validation runs native CTest probes and jsA8E automation
+  tests on `main`, `web_publish`, and `Tauri`; GitHub Pages deploys only from
+  `web_publish`; and pushes to `Tauri` rebuild DEB/RPM/AppImage assets and
+  replace the rolling `tauri-latest` prerelease. The inherited FTP deploys,
+  upstream release packaging, and automatic commits to `main` were removed.
+
+- 2026-09-30: made the Linux Tauri packaging helper build and export `.deb`,
+  `.rpm`, and `.AppImage` by default. `A8E_TAURI_BUNDLES` can still restrict
+  the bundle list when the AppImage `linuxdeploy` toolchain is unavailable.
+
+- 2026-09-30: updated `scripts/build-tauri-linux.sh` to export only current
+  Linux packages to `dist/tauri/linux/`. It clears `src-tauri/target/` before
+  the build to prevent stale bundle reuse and after export to remove all Tauri
+  intermediates from `src-tauri/`; the script now comments each validation,
+  build, export, and cleanup step. `dist/` is ignored by Git.
+
 - 2026-09-30: made mobile toolbar state feedback click-driven rather than
   dependent on a sticky touch `:hover` state. Hover decoration now applies
   only to hover-capable pointers; taps show a pressed state and the existing

@@ -1,0 +1,47 @@
+name: Publish web site
+
+on:
+  push:
+    branches:
+      - web_publish
+    paths:
+      - jsA8E/**
+      - .github/workflows/publish-web.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Package static site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out web publication branch
+        uses: actions/checkout@v6
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload jsA8E site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: jsA8E
+
+  deploy:
+    name: Deploy GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy site artifact
+        id: deployment
+        uses: actions/deploy-pages@v4

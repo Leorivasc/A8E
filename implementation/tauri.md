@@ -71,14 +71,27 @@ inside the repository:
 ```
 
 The script loads the rustup environment when available, checks Cargo, the
-Tauri CLI, and the required Linux development packages, then prints the
-generated `.deb` and `.rpm` artifacts. It defaults to these native Linux
-packages because AppImage's external `linuxdeploy` toolchain can require
-additional downloads. To request AppImage as well:
+Tauri CLI, and the required Linux development packages, then exports the
+generated `.deb`, `.rpm`, and `.AppImage` artifacts to `dist/tauri/linux/`. It cleans
+`src-tauri/target/` before building and after export, so Tauri intermediates
+and stale package copies do not remain under `src-tauri/`. It builds all three
+formats by default. To omit AppImage when its external `linuxdeploy` toolchain
+is unavailable:
 
 ```sh
-A8E_TAURI_BUNDLES=deb,rpm,appimage ./scripts/build-tauri-linux.sh
+A8E_TAURI_BUNDLES=deb,rpm ./scripts/build-tauri-linux.sh
 ```
+
+## Automated Tauri prerelease
+
+`main` remains the development branch. To publish a desktop build, merge the
+selected `main` commit into `Tauri`. The `Publish Tauri latest` GitHub Actions
+workflow then builds the DEB, RPM, and AppImage packages and replaces the
+assets on the rolling `tauri-latest` prerelease. That release is intentionally
+not a versioned stable release; each successful push to `Tauri` supersedes it.
+
+The web site follows the same promotion model through `web_publish`, which is
+the only branch allowed to deploy GitHub Pages.
 
 The current configuration intentionally does not add a global-shortcut
 plugin. AtariWriter shortcuts should be active while the emulator window has
