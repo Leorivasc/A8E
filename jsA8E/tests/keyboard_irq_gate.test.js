@@ -20,6 +20,11 @@ async function getContext(runtime) {
 
 async function main() {
   const repoRoot = path.resolve(__dirname, "..", "..");
+  if (!fs.existsSync(path.join(repoRoot, "ATARIXL.ROM"))
+      || !fs.existsSync(path.join(repoRoot, "ATARIBAS.ROM"))) {
+    console.log("keyboard_irq_gate.test.js skipped (Atari OS/BASIC ROMs are unavailable).");
+    return;
+  }
   const runtime = await createHeadlessAutomation({
     turbo: true,
     roms: {

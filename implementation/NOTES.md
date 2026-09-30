@@ -4,6 +4,11 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-30: made the ROM-backed jsA8E headless regressions explicitly skip
+  when the user-provided Atari OS/BASIC ROMs are absent. The public CI runner
+  cannot distribute those ignored firmware images, while developer and native
+  build environments that provide them still execute the guest-level checks.
+
 - 2026-09-30: replaced the upstream GitHub workflows with fork-specific CI and
   publication flows. Validation runs native CTest probes and jsA8E automation
   tests on `main`, `web_publish`, and `Tauri`; GitHub Pages deploys only from

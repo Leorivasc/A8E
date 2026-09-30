@@ -1,11 +1,17 @@
 /* ROM-backed regression for the OS IRQ dispatcher. Disabled POKEY timers
  * must not starve the enabled keyboard IRQ before Atari BASIC sees it. */
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 const { createHeadlessAutomation } = require("../headless");
 
 async function main() {
   const root = path.resolve(__dirname, "..", "..");
+  if (!fs.existsSync(path.join(root, "ATARIXL.ROM"))
+      || !fs.existsSync(path.join(root, "ATARIBAS.ROM"))) {
+    console.log("basic_keyboard_delivery.test.js skipped (Atari OS/BASIC ROMs are unavailable).");
+    return;
+  }
   const runtime = await createHeadlessAutomation({
     turbo: true,
     roms: {
