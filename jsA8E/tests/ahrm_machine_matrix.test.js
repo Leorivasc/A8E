@@ -50,6 +50,11 @@ async function testMemoryProfileMatrix() {
   const romDir = fs.existsSync(path.join(repoRoot, "ATARIXL.ROM"))
     ? repoRoot
     : buildDir;
+  if (!fs.existsSync(path.join(romDir, "ATARIXL.ROM"))
+      || !fs.existsSync(path.join(romDir, "ATARIBAS.ROM"))) {
+    console.log("ahrm_machine_matrix ROM profiles skipped (Atari OS/BASIC ROMs are unavailable).");
+    return;
+  }
   const expected = [
     ["none", false, 0],
     ["130xe-128k", true, 4],
