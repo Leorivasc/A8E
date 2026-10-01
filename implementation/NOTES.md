@@ -1364,3 +1364,61 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   deadlines, and `IRQST` where available. The trace is observational only and is disabled by default; its
   purpose is to decide whether the remaining P1 mismatch is a real internal
   edge difference or merely a guest polling boundary before changing timing.
+
+## Legal / License TODO
+
+Pending legal and licensing review recorded on 2026-09-30. These items are
+not resolved by the current GPL notice and must be checked before publishing
+the repository or desktop installers.
+
+- **P1 — AHRM redistribution scope:** `AHRM/` is described as a local Markdown
+  mirror of the Altirra Hardware Reference Manual, but its front matter and
+  index record substantial PDF-extraction repairs, reconstructions, and edits.
+  The original AHRM permission is stated as verbatim, free-of-charge,
+  non-commercial redistribution. Obtain written permission for the modified
+  mirror, replace it with a link to the upstream manual, or replace it with
+  independently authored factual notes. Keep AHRM material outside the
+  repository-wide GPL claim.
+
+- **P1 — Atari ROM packaging:** `ATARIXL.ROM` and `ATARIBAS.ROM` are ignored
+  by Git and intentionally absent from public CI, but local copies currently
+  exist in the workspace. Tauri uses `../jsA8E` as `frontendDist`, and the
+  packaging helper does not explicitly exclude ROM files. Build from a clean
+  staging directory or add an explicit ROM exclusion, then inspect every DEB,
+  RPM, AppImage, and web artifact before publication. Never publish ROM dumps
+  without documented distribution rights.
+
+- **P1 — Copyright ownership and GPL identifier:** the README attributes the
+  original source and project documentation to Sascha Springer for 2004–2026,
+  while later source, JavaScript, documentation, and packaging contributions
+  come from additional authors. The source files generally retain only the
+  2004 Sascha Springer header and do not carry a GPL/SPDX notice or a changed
+  date. Confirm copyright ownership or assignments, credit contributors, add
+  file-level notices where appropriate, and choose one unambiguous identifier:
+  `GPL-2.0-only` or `GPL-2.0-or-later`.
+
+- **P2 — CRT shader provenance:** the UI credits Timothy Lottes, but the
+  optimized/inlined GLSL files do not retain an origin, license, or modification
+  notice. Verify the exact source and preserve the upstream public-domain
+  attribution/permission text together with a note describing the port and
+  optimizations.
+
+- **P2 — Third-party frontend inventory:** `jsA8E/index.html` loads Font
+  Awesome 6.5.1 and `fflate` 0.8.2 from jsDelivr; `style.css` loads Google
+  Fonts. Add a `THIRD_PARTY_NOTICES` document covering runtime and build-time
+  dependencies, including Font Awesome's component-specific MIT/OFL/CC-BY
+  terms and fflate's MIT notice. For offline Tauri releases, vendor or
+  otherwise pin the assets and retain the required notices.
+
+- **P2 — Logo, icon, and Atari trademark provenance:** `jsA8E/a8e.webp` and
+  `src-tauri/icons/icon.png` depict an Atari 800 XL and use Atari branding, but
+  their source, author, and license are undocumented. Record the asset
+  provenance and permission, verify trademark and image rights, and add a
+  clear non-affiliation statement before commercial or public distribution.
+
+- **P3 — Package metadata and binary notices:** `jsA8E/package.json` and
+  `src-tauri/Cargo.toml` do not declare project license metadata, and release
+  artifacts have no visible third-party dependency notice. Add consistent
+  metadata and generate a reproducible notices bundle for Cargo/Tauri and
+  frontend dependencies, including the corresponding source/license access
+  required for GPL binaries.
