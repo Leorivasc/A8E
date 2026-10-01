@@ -4,6 +4,13 @@
 
 Simple implementation notes for this repository.
 
+- 2026-09-30: added an origin-scoped IndexedDB ROM library for user-provided
+  Atari OS (16 KiB) and BASIC (8 KiB) files. Browser startup prefers optional
+  server files and falls back independently to saved user files; new uploads
+  replace the corresponding local record, and the secondary controls expose a
+  delete action. When startup still lacks a ROM, a matching popup links to the
+  file selectors. No ROM dump is added to the project.
+
 - 2026-09-30: made the ROM-backed jsA8E headless regressions explicitly skip
   when the user-provided Atari OS/BASIC ROMs are absent. The public CI runner
   cannot distribute those ignored firmware images, while developer and native
@@ -1422,3 +1429,10 @@ the repository or desktop installers.
   metadata and generate a reproducible notices bundle for Cargo/Tauri and
   frontend dependencies, including the corresponding source/license access
   required for GPL binaries.
+
+- **P1 — Local ROM persistence is not a license grant:** the browser now keeps
+  user-selected ROM bytes in origin-scoped IndexedDB and does not add them to
+  the repository or upload them to the project server. This lowers the risk of
+  accidental redistribution, but it does not authorize the user to possess or
+  share a ROM dump. Add a concise user-facing notice and confirm that the
+  distribution and support terms are appropriate for the jurisdictions served.

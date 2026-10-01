@@ -145,7 +145,7 @@ Both implementations require the following ROM dumps (not included):
 Recommended placement is the repository root:
 
 - Native app loads ROM files from its current working directory.
-- Browser app can load ROMs via UI file inputs, and also attempts `../ATARIXL.ROM` + `../ATARIBAS.ROM` when served from repo root.
+- Browser app first attempts `../ATARIXL.ROM` + `../ATARIBAS.ROM` when served from repo root. If either file is absent, the user can select it through the UI; selected ROMs are retained only in that browser's origin-scoped IndexedDB so they do not need to be uploaded on every launch. The secondary controls include a button to delete those local copies. No ROM dump is embedded in the project or uploaded by this feature.
 
 ## Quick Start (Browser)
 

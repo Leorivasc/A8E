@@ -3,6 +3,9 @@
 
   const Util = window.A8EUtil;
   let currentApp = null;
+  let romLibrary = null;
+  let romLibraryReady = Promise.resolve();
+  const romSources = { os: null, basic: null };
 
   function parseBooleanLike(value) {
     if (value === true || value === false) return value;
@@ -319,6 +322,8 @@
     let systemKeyboardCompositionValue = "";
     let systemKeyboardIgnoredValue = "";
     let app = null;
+    let romNoticeReady = false;
+    let romNoticeDismissed = false;
     let primaryDriveQueue = Promise.resolve();
     let standbyXexPromise = null;
     const useWorkerApp =
@@ -602,6 +607,7 @@
     const btnStart = document.getElementById("btnStart");
     const btnReset = document.getElementById("btnReset");
     const btnControlsCollapse = document.getElementById("btnControlsCollapse");
+    const btnClearStoredRoms = document.getElementById("btnClearStoredRoms");
     const btnCrt = document.getElementById("btnCrt");
     function updateCrtButton() {
       btnCrt.classList.toggle("active", crtEnabled);
@@ -955,6 +961,11 @@
     const disk1 = document.getElementById("disk1");
     const romOsStatus = document.getElementById("romOsStatus");
     const romBasicStatus = document.getElementById("romBasicStatus");
+    const romNotice = document.getElementById("romNotice");
+    const romNoticeMessage = document.getElementById("romNoticeMessage");
+    const romNoticeClose = document.getElementById("romNoticeClose");
+    const romNoticeOs = document.getElementById("romNoticeOs");
+    const romNoticeBasic = document.getElementById("romNoticeBasic");
     const atariKeyboard = document.getElementById("atariKeyboard");
     const joystickArea = document.getElementById("joystickArea");
     const joystickStick = document.getElementById("joystickStick");
@@ -1279,6 +1290,13 @@
           throw e;
         }
       }
+    }
+
+    if (window.A8ERomLibrary && window.A8ERomLibrary.createApi) {
+      romLibrary = window.A8ERomLibrary.createApi().create();
+      romLibraryReady = romLibrary.init().catch(function (err) {
+        console.warn("User ROM persistence is unavailable:", err);
+      });
     }
 
     window.addEventListener("beforeunload", cleanup);
@@ -2122,6 +2140,85 @@
       return Promise.resolve();
     }
 
+    function setRomSource(kind, source) {
+      if (Object.prototype.hasOwnProperty.call(romSources, kind)) {
+        romSources[kind] = source || null;
+      }
+    }
+
+    function updateRomStatusTitle(element, label, loaded, source) {
+      if (!element) return;
+      const sourceLabel = source === "server"
+        ? "from the server"
+        : source === "browser"
+          ? "from this browser's local storage"
+          : source === "user"
+            ? "from the selected file"
+            : "for this session";
+      element.title = loaded
+        ? label + " loaded " + sourceLabel + "."
+        : label + " is not loaded.";
+    }
+
+    function refreshStoredRomButton() {
+      if (!btnClearStoredRoms || !romLibrary) return Promise.resolve();
+      return romLibrary.list().then(function (records) {
+        const count = records.length;
+        btnClearStoredRoms.disabled = count === 0;
+        btnClearStoredRoms.title = count
+          ? "Delete " + count + " user-uploaded ROM" + (count === 1 ? "" : "s") + " saved in this browser."
+          : "No user-uploaded ROMs are saved in this browser.";
+        btnClearStoredRoms.setAttribute("aria-label", btnClearStoredRoms.title);
+      }).catch(function (err) {
+        console.warn("Could not inspect stored ROMs:", err);
+      });
+    }
+
+    async function persistUserRom(kind, bytes, filename) {
+      if (!romLibrary) return;
+      try {
+        await romLibraryReady;
+        await romLibrary.put(kind, bytes, { filename: filename });
+        await refreshStoredRomButton();
+      } catch (err) {
+        // A browser storage failure must not prevent using a valid ROM for
+        // the current session.
+        console.warn("Could not save user ROM in browser storage:", err);
+      }
+    }
+
+    async function loadRomFromServerOrStorage(kind, serverBytes) {
+      if (serverBytes) {
+        if (kind === "os") app.loadOsRom(serverBytes);
+        else app.loadBasicRom(serverBytes);
+        setRomSource(kind, "server");
+        return true;
+      }
+      if (!romLibrary) return false;
+      const stored = await romLibrary.get(kind);
+      if (!stored) return false;
+      if (kind === "os") app.loadOsRom(stored.bytes);
+      else app.loadBasicRom(stored.bytes);
+      setRomSource(kind, "browser");
+      return true;
+    }
+
+    function updateRomNotice() {
+      if (!romNotice || !romNoticeReady) return;
+      const missing = [];
+      if (!app.hasOsRom()) missing.push("Atari OS ROM (ATARIXL.ROM)");
+      if (!app.hasBasicRom()) missing.push("Atari BASIC ROM (ATARIBAS.ROM)");
+      if (missing.length === 0) {
+        romNotice.hidden = true;
+        romNoticeDismissed = false;
+        return;
+      }
+      if (romNoticeDismissed) return;
+      romNoticeMessage.textContent =
+        "Please provide " + missing.join(" and ") + " to start the emulator.";
+      romNotice.hidden = false;
+    }
+
     function updateStatus() {
       // Update OS ROM status icon
       if (app.hasOsRom()) {
@@ -2140,6 +2237,18 @@
         romBasicStatus.classList.remove("fa-circle-check");
         romBasicStatus.classList.add("fa-circle-xmark");
       }
+      updateRomStatusTitle(
+        romOsStatus,
+        "Atari OS ROM",
+        app.hasOsRom(),
+        romSources.os,
+      );
+      updateRomStatusTitle(
+        romBasicStatus,
+        "Atari BASIC ROM",
+        app.hasBasicRom(),
+        romSources.basic,
+      );
 
       // Reconcile config toggle buttons with the app's current state so that
       // snapshot restore (which writes config internally) keeps the UI in sync.
@@ -2163,6 +2272,7 @@
 
       setButtons(app.isRunning());
       syncMobileToolButtons();
+      updateRomNotice();
     }
 
     function bindToggleButton(btn, onToggle) {
@@ -2633,14 +2743,59 @@
       });
     }
 
-    attachFileInput(romOs, function (buf) {
+    attachFileInput(romOs, async function (buf, name) {
+      await persistUserRom("os", buf, name);
       app.loadOsRom(buf);
+      setRomSource("os", "user");
+      romNoticeDismissed = false;
       return initializeStartupMedia(true);
     });
 
-    attachFileInput(romBasic, function (buf) {
+    attachFileInput(romBasic, async function (buf, name) {
+      await persistUserRom("basic", buf, name);
       app.loadBasicRom(buf);
+      setRomSource("basic", "user");
+      romNoticeDismissed = false;
     });
+
+    if (btnClearStoredRoms) {
+      btnClearStoredRoms.addEventListener("click", async function () {
+        if (!romLibrary || btnClearStoredRoms.disabled) return;
+        if (window.confirm && !window.confirm("Delete the user-uploaded ROMs saved in this browser?")) {
+          return;
+        }
+        try {
+          await romLibrary.clear();
+          setRomSource("os", null);
+          setRomSource("basic", null);
+          await refreshStoredRomButton();
+          updateStatus();
+        } catch (err) {
+          console.error("Could not delete stored ROMs:", err);
+        }
+      });
+    }
+
+    function openRomInput(input) {
+      if (input && typeof input.click === "function") input.click();
+    }
+
+    if (romNoticeClose) {
+      romNoticeClose.addEventListener("click", function () {
+        romNoticeDismissed = true;
+        romNotice.hidden = true;
+      });
+    }
+    if (romNoticeOs) {
+      romNoticeOs.addEventListener("click", function () {
+        openRomInput(romOs);
+      });
+    }
+    if (romNoticeBasic) {
+      romNoticeBasic.addEventListener("click", function () {
+        openRomInput(romBasic);
+      });
+    }
 
     attachFileInput(
       disk1,
@@ -2974,22 +3129,24 @@
     Promise.all([
       Util.fetchOptional("../ATARIXL.ROM"),
       Util.fetchOptional("../ATARIBAS.ROM"),
-    ]).then(function (res) {
+    ]).then(async function (res) {
       try {
-        if (res[0]) {
-          app.loadOsRom(res[0]);
-          initializeStartupMedia(true).catch(function (err) {
-            console.error("Startup media boot failed:", err);
-          });
+        await romLibraryReady;
+        const osLoaded = await loadRomFromServerOrStorage("os", res[0]);
+        await loadRomFromServerOrStorage("basic", res[1]);
+        if (osLoaded) {
+          await initializeStartupMedia(true);
         }
-        if (res[1]) app.loadBasicRom(res[1]);
       } catch (e) {
         console.error("Auto-load error:", e);
       }
+      await refreshStoredRomButton();
+      romNoticeReady = true;
       updateStatus();
     });
 
     updateStatus();
+    romLibraryReady.then(refreshStoredRomButton);
     updateFullscreenButton();
     setSecondaryControlsExpanded(false, true);
     setKeyboardMappingMode(getKeyboardMappingModeFromUi(), true);
