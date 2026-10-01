@@ -120,6 +120,10 @@ Behavior:
   origin-scoped IndexedDB. New file-input selections replace the saved copy;
   the trash button in the secondary controls deletes both saved ROMs. The
   browser does not send these selected ROM bytes to the project server.
+- After the server and IndexedDB checks, a popup appears if one or both ROMs
+  are still missing. It names the missing ROM and provides direct **Load OS
+  ROM** and **Load BASIC ROM** actions. The popup closes automatically once
+  both ROMs are loaded, or can be dismissed temporarily.
 - Disk image/program load (`Open Disk`) accepts `.atr`, `.xex`, and `.zip`.
   - `.zip` archives are scanned for the first `.atr` (preferred) or `.xex` entry and loaded directly.
   - `.xex` files are converted in-memory to an ATR-compatible boot stream using the same XEX boot loader logic as the native path.
