@@ -148,6 +148,7 @@ Recommended placement is the repository root:
 
 - Native app loads ROM files from its current working directory.
 - Browser app first attempts `../ATARIXL.ROM` + `../ATARIBAS.ROM` when served from repo root. If either file is absent, the user can select it through the UI; selected ROMs are retained only in that browser's origin-scoped IndexedDB so they do not need to be uploaded on every launch. The secondary controls include a button to delete those local copies. No ROM dump is embedded in the project or uploaded by this feature.
+- If startup still lacks one or both ROMs after checking the server and local storage, a popup identifies the missing file(s) and provides direct buttons to load them. The popup disappears once both ROMs are available.
 
 ## Quick Start (Browser)
 
