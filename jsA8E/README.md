@@ -116,6 +116,10 @@ Behavior:
 - The emulator only becomes start-ready after both ROMs are loaded.
 - Load ROMs via the top bar file inputs, or
 - Serve from repo root and let auto-load try `../ATARIXL.ROM` and `../ATARIBAS.ROM`.
+- If a server ROM is absent, a previously selected user ROM is restored from
+  origin-scoped IndexedDB. New file-input selections replace the saved copy;
+  the trash button in the secondary controls deletes both saved ROMs. The
+  browser does not send these selected ROM bytes to the project server.
 - Disk image/program load (`Open Disk`) accepts `.atr`, `.xex`, and `.zip`.
   - `.zip` archives are scanned for the first `.atr` (preferred) or `.xex` entry and loaded directly.
   - `.xex` files are converted in-memory to an ATR-compatible boot stream using the same XEX boot loader logic as the native path.

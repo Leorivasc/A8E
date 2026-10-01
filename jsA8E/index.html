@@ -245,6 +245,9 @@
                 <option value="ultimate1mb">Ultimate1MB (1MB) (WIP)</option>
               </select>
             </label>
+            <button id="btnClearStoredRoms" class="toggle-btn" type="button" disabled title="Delete user-uploaded ROMs saved in this browser." aria-label="Delete user-uploaded ROMs saved in this browser.">
+              <i class="fa-solid fa-trash"></i>
+            </button>
           </div>
         </div>
       </div>
@@ -674,6 +677,29 @@
       enterkeyhint="enter"
       aria-label="Type with the device keyboard"
     />
+    <section id="romNotice" class="romNotice" hidden role="dialog" aria-modal="false" aria-labelledby="romNoticeTitle" aria-describedby="romNoticeMessage">
+      <div class="romNoticeCard">
+        <button id="romNoticeClose" class="romNoticeClose" type="button" aria-label="Close ROM notice" title="Close ROM notice">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+        <div class="romNoticeHeading">
+          <i class="fa-solid fa-microchip" aria-hidden="true"></i>
+          <h2 id="romNoticeTitle">ROM files required</h2>
+        </div>
+        <p id="romNoticeMessage">Provide the Atari ROM files to start the emulator.</p>
+        <div class="romNoticeActions">
+          <button id="romNoticeOs" class="romNoticeAction" type="button">
+            <i class="fa-solid fa-upload" aria-hidden="true"></i>
+            <span>Load OS ROM</span>
+          </button>
+          <button id="romNoticeBasic" class="romNoticeAction" type="button">
+            <i class="fa-solid fa-upload" aria-hidden="true"></i>
+            <span>Load BASIC ROM</span>
+          </button>
+        </div>
+        <p class="romNoticeHint">The selected files can be kept in this browser for the next launch.</p>
+      </div>
+    </section>
 
     <script src="js/shared/util.js"></script>
     <script src="js/render/palette.js"></script>
@@ -709,6 +735,7 @@
     <script src="js/core/gtia.js"></script>
     <script src="js/core/hostfs.js"></script>
     <script src="js/core/disk_library.js"></script>
+    <script src="js/core/rom_library.js"></script>
     <script src="js/core/hdevice.js"></script>
     <script src="js/core/debugger.js"></script>
     <script src="js/core/atari_support.js"></script>
