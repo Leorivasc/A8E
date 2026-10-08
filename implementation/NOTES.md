@@ -16,6 +16,12 @@ Simple implementation notes for this repository.
   the initial state derived from PORTB. Added a memory-expansion probe
   regression covering the OS-off transition.
 
+- 2026-10-08: established cross-application parity as a project requirement.
+  Every new capability must be implemented and tested in both `jsA8E` and
+  native A8E. Platform-specific adapters are allowed, but shared behavior,
+  data contracts, and regression coverage must remain aligned; a feature is
+  incomplete while it exists in only one application.
+
 - 2026-09-30: added an origin-scoped IndexedDB ROM library for user-provided
   Atari OS (16 KiB) and BASIC (8 KiB) files. Browser startup prefers optional
   server files and falls back independently to saved user files; new uploads
