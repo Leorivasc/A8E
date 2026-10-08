@@ -65,6 +65,7 @@
   const XEX_BOOT_LOADER_RESERVED_START = 0x0700;
   const XEX_BOOT_LOADER_RESERVED_END = 0x087f;
   const XEX_SEGMENT_MARKER = 0xff;
+  const XEX_PORTB_ADDRESS = 0xd301;
 
   const ATR_HEADER_SIZE = 16;
   const ATR_SECTOR_SIZE = 128;
@@ -626,7 +627,10 @@
       basicEnabled: (effectivePortB & 0x02) === 0,
       osEnabled: (effectivePortB & 0x01) !== 0,
       floatingPointEnabled: (effectivePortB & 0x01) !== 0,
-      selfTestEnabled: (effectivePortB & 0x80) === 0,
+      // AHRM 2.6: Self-test is selected by PB7 only while OS ROM is
+      // enabled.  Clearing PB0 disables Self-test regardless of PB7.
+      selfTestEnabled:
+        (effectivePortB & 0x80) === 0 && (effectivePortB & 0x01) !== 0,
       basicRomLoaded: !!mediaState.basicRomLoaded,
       osRomLoaded: !!mediaState.osRomLoaded,
       floatingPointRomLoaded: !!mediaState.floatingPointRomLoaded,
@@ -716,6 +720,7 @@
       addr >= 0x5000 &&
       addr <= 0x57ff &&
       (effectivePortB & 0x80) === 0 &&
+      (effectivePortB & 0x01) !== 0 &&
       mediaState.selfTestRomLoaded
     ) {
       return {
@@ -779,34 +784,221 @@
     return null;
   }
 
-  // Trace loaded INIT code for STA $D301 preceded by LDA #imm.
-  // Uses only bytes already loaded so future segments cannot affect preflight.
-  // Returns the immediate value (future portB) if found, or null if not determinable.
-  function tracePortBFromInitCode(loadedRam, loadedMask, initAddr) {
-    if (typeof initAddr !== "number" || initAddr <= 0 || initAddr > 0xffff) return null;
+  // Trace the accumulator through the straight-line portion of an INITAD
+  // routine until it writes PORTB.  This is deliberately conservative: an
+  // unsupported control-flow or data-flow operation returns null rather than
+  // guessing a PORTB value from a nearby immediate load.  The small abstract
+  // interpreter covers the MMU idioms used by XL/XE software, including
+  // LDA $D301 / AND|ORA|EOR #imm / STA $D301.
+  function tracePortBFromInitCode(
+    loadedRam,
+    loadedMask,
+    initAddr,
+    initialPortB,
+  ) {
+    if (typeof initAddr !== "number" || initAddr <= 0 || initAddr > 0xffff)
+      return null;
     if (!loadedRam || !loadedMask) return null;
 
-    const scanLimit = 256;
-    for (let k = 0; k < scanLimit; k++) {
-      const pc = (initAddr + k) & 0xffff;
-      const pc1 = (pc + 1) & 0xffff;
-      const pc2 = (pc + 2) & 0xffff;
-      if (!loadedMask[pc] || !loadedMask[pc1] || !loadedMask[pc2]) return null;
-      if (
-        loadedRam[pc] === 0x8d &&
-        loadedRam[pc1] === 0x01 &&
-        loadedRam[pc2] === 0xd3
-      ) {
-        // STA $D301 stores register A, so only LDA #imm is a valid source.
-        for (let back = 1; back <= 16; back++) {
-          const prev = (pc - back) & 0xffff;
-          const prev1 = (prev + 1) & 0xffff;
-          if (!loadedMask[prev] || !loadedMask[prev1]) continue;
-          if (loadedRam[prev] === 0xa9) {
-            return loadedRam[prev1] & 0xff;
-          }
+    const unknown = -1;
+    let accumulator = unknown;
+    let x = unknown;
+    let y = unknown;
+    const stack = [];
+    let pc = initAddr & 0xffff;
+
+    function readByte(address) {
+      const addr = address & 0xffff;
+      return loadedMask[addr] ? loadedRam[addr] & 0xff : null;
+    }
+
+    function readWord(address) {
+      const lo = readByte(address);
+      const hi = readByte((address | 0) + 1);
+      return lo === null || hi === null ? null : lo | (hi << 8);
+    }
+
+    function readAccumulator(address) {
+      if ((address & 0xffff) === XEX_PORTB_ADDRESS)
+        return sanitizePortB(initialPortB | 0);
+      return unknown;
+    }
+
+    function requireBytes(count) {
+      for (let i = 0; i < count; i++) {
+        if (readByte(pc + i) === null) return false;
+      }
+      return true;
+    }
+
+    function immediate() {
+      return readByte(pc + 1);
+    }
+
+    function zeroPageAddress() {
+      return readByte(pc + 1);
+    }
+
+    function absoluteAddress() {
+      return readWord(pc + 1);
+    }
+
+    for (let steps = 0; steps < 256; steps++) {
+      const opcode = readByte(pc);
+      if (opcode === null) return null;
+
+      switch (opcode) {
+        case 0x08: // PHP
+        case 0x18: // CLC
+        case 0x28: // PLP
+        case 0x38: // SEC
+        case 0x58: // CLI
+        case 0x78: // SEI
+        case 0xd8: // CLD
+        case 0xea: // NOP
+        case 0xf8: // SED
+          pc = (pc + 1) & 0xffff;
+          break;
+
+        case 0x48: // PHA
+          stack.push(accumulator);
+          pc = (pc + 1) & 0xffff;
+          break;
+
+        case 0x68: // PLA
+          accumulator = stack.length ? stack.pop() : unknown;
+          pc = (pc + 1) & 0xffff;
+          break;
+
+        case 0xa9: // LDA #imm
+          if (!requireBytes(2)) return null;
+          accumulator = immediate();
+          pc = (pc + 2) & 0xffff;
+          break;
+
+        case 0xa5: // LDA zp
+        case 0xb5: // LDA zp,X
+          if (!requireBytes(2)) return null;
+          accumulator = unknown;
+          pc = (pc + 2) & 0xffff;
+          break;
+
+        case 0xad: // LDA abs
+        case 0xbd: // LDA abs,X
+        case 0xb9: // LDA abs,Y
+        case 0xa1: // LDA (zp,X)
+        case 0xb1: { // LDA (zp),Y
+          const size = opcode === 0xad || opcode === 0xbd || opcode === 0xb9 ? 3 : 2;
+          if (!requireBytes(size)) return null;
+          const address = size === 3 ? absoluteAddress() : null;
+          accumulator = address === null ? unknown : readAccumulator(address);
+          pc = (pc + size) & 0xffff;
+          break;
         }
-        return null;
+
+        case 0xa2: // LDX #imm
+          if (!requireBytes(2)) return null;
+          x = immediate();
+          pc = (pc + 2) & 0xffff;
+          break;
+
+        case 0xa0: // LDY #imm
+          if (!requireBytes(2)) return null;
+          y = immediate();
+          pc = (pc + 2) & 0xffff;
+          break;
+
+        case 0xa6: // LDX zp
+        case 0xb6: // LDX zp,Y
+        case 0xae: // LDX abs
+        case 0xbe: // LDX abs,Y
+          if (!requireBytes(opcode === 0xae || opcode === 0xbe ? 3 : 2)) return null;
+          x = unknown;
+          pc = (pc + (opcode === 0xae || opcode === 0xbe ? 3 : 2)) & 0xffff;
+          break;
+
+        case 0xa4: // LDY zp
+        case 0xb4: // LDY zp,X
+        case 0xac: // LDY abs
+        case 0xbc: // LDY abs,X
+          if (!requireBytes(opcode === 0xac || opcode === 0xbc ? 3 : 2)) return null;
+          y = unknown;
+          pc = (pc + (opcode === 0xac || opcode === 0xbc ? 3 : 2)) & 0xffff;
+          break;
+
+        case 0x8a: // TXA
+          accumulator = x;
+          pc = (pc + 1) & 0xffff;
+          break;
+
+        case 0x98: // TYA
+          accumulator = y;
+          pc = (pc + 1) & 0xffff;
+          break;
+
+        case 0xaa: // TAX
+          x = accumulator;
+          pc = (pc + 1) & 0xffff;
+          break;
+
+        case 0xa8: // TAY
+          y = accumulator;
+          pc = (pc + 1) & 0xffff;
+          break;
+
+        case 0x29: // AND #imm
+        case 0x09: // ORA #imm
+        case 0x49: { // EOR #imm
+          if (!requireBytes(2)) return null;
+          const value = immediate();
+          if (accumulator !== unknown) {
+            if (opcode === 0x29) accumulator &= value;
+            else if (opcode === 0x09) accumulator |= value;
+            else accumulator ^= value;
+            accumulator &= 0xff;
+          }
+          pc = (pc + 2) & 0xffff;
+          break;
+        }
+
+        case 0x24: // BIT zp
+        case 0x2c: // BIT abs
+          if (!requireBytes(opcode === 0x2c ? 3 : 2)) return null;
+          pc = (pc + (opcode === 0x2c ? 3 : 2)) & 0xffff;
+          break;
+
+        case 0x85: // STA zp
+        case 0x95: // STA zp,X
+        case 0x86: // STX zp
+        case 0x96: // STX zp,Y
+        case 0x84: // STY zp
+        case 0x94: // STY zp,X
+          if (!requireBytes(2)) return null;
+          pc = (pc + 2) & 0xffff;
+          break;
+
+        case 0x8d: { // STA abs
+          if (!requireBytes(3)) return null;
+          const address = absoluteAddress();
+          if (address === XEX_PORTB_ADDRESS) {
+            return accumulator === unknown ? null : sanitizePortB(accumulator);
+          }
+          pc = (pc + 3) & 0xffff;
+          break;
+        }
+
+        case 0x9d: // STA abs,X
+        case 0x99: // STA abs,Y
+        case 0x8e: // STX abs
+        case 0x8c: // STY abs
+          if (!requireBytes(3)) return null;
+          pc = (pc + 3) & 0xffff;
+          break;
+
+        default:
+          // Branches, calls, indirect jumps, and unmodelled instructions can
+          // change control flow or the accumulator. Do not guess past them.
+          return null;
       }
     }
     return null;
@@ -883,7 +1075,12 @@
       if (initAddrChanged) {
         const initAddr = (currentInitAddrLo & 0xff) | ((currentInitAddrHi & 0xff) << 8);
         if (initAddr > 0) {
-          const newPortB = tracePortBFromInitCode(loadedRam, loadedMask, initAddr);
+          const newPortB = tracePortBFromInitCode(
+            loadedRam,
+            loadedMask,
+            initAddr,
+            currentPortB,
+          );
           if (newPortB !== null) currentPortB = sanitizePortB(newPortB);
         }
         // Boot loader clears INITAD after calling it.

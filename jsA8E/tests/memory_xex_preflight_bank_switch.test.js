@@ -217,6 +217,56 @@ function testSelfTestWriteStillFailsWithoutBankSwitch() {
   );
 }
 
+function testSelfTestIsDisabledWhenOsIsDisabled() {
+  const runtime = createRuntime();
+  const xex = buildXex([
+    { start: 0x5000, data: Uint8Array.from([0x12, 0x34]) },
+  ]);
+
+  const result = runtime.loadDiskToDeviceSlotDetailed(
+    xex.buffer,
+    "SELFTEST_OS_OFF.XEX",
+    0,
+    { portB: 0x7c },
+  );
+
+  assert.equal(result.xexPreflight.code, "xex_preflight_passed");
+  assert.equal(result.xexPreflight.overlaps.length, 0);
+}
+
+function testInitadTraceModelsPortBReadModifyWrite() {
+  const runtime = createRuntime();
+  const initCode = Uint8Array.from([
+    0x08, // PHP
+    0x78, // SEI
+    0xad, 0x0e, 0xd4, // LDA NMIEN
+    0x48, // PHA
+    0xa9, 0x00, // LDA #$00
+    0x8d, 0x0e, 0xd4, // STA NMIEN
+    0xad, 0x01, 0xd3, // LDA PORTB
+    0x48, // PHA
+    0x29, 0xfe, // AND #$FE
+    0x8d, 0x01, 0xd3, // STA PORTB
+    0x60, // RTS
+  ]);
+  const xex = buildXex([
+    { start: 0x0600, data: initCode },
+    { start: 0x02e2, data: Uint8Array.from([0x00, 0x06]) },
+    { start: 0x5000, data: Uint8Array.from([0x12, 0x34]) },
+    { start: 0xa000, data: Uint8Array.from([0x56, 0x78]) },
+  ]);
+
+  const result = runtime.loadDiskToDeviceSlotDetailed(
+    xex.buffer,
+    "INIT_PORTB_READ_MODIFY_WRITE.XEX",
+    0,
+    { portB: 0xff },
+  );
+
+  assert.equal(result.xexPreflight.code, "xex_preflight_passed");
+  assert.equal(result.xexPreflight.overlaps.length, 0);
+}
+
 function testInitadTraceCanDisableBasicFromAlreadyLoadedCode() {
   const runtime = createRuntime();
   const xex = buildXex([
@@ -325,6 +375,8 @@ testPortBSwitchCanOpenSelfTestRam();
 testPortBSwitchCanOpenBasicRam();
 testOptionOnStartDisablesBasicForPreflight();
 testSelfTestWriteStillFailsWithoutBankSwitch();
+testSelfTestIsDisabledWhenOsIsDisabled();
+testInitadTraceModelsPortBReadModifyWrite();
 testInitadTraceCanDisableBasicFromAlreadyLoadedCode();
 testInitadTraceIgnoresNonAccumulatorLoadsBeforeSta();
 testInitadTraceDoesNotUseFutureSegments();
