@@ -4,6 +4,18 @@
 
 Simple implementation notes for this repository.
 
+- 2026-10-07: corrected the generic jsA8E XEX preflight bank-map analysis. The
+  Self-test window now follows the AHRM dependency on OS ROM being enabled, and
+  INITAD PORTB tracking uses a conservative 6502 data-flow interpreter instead
+  of matching an unrelated nearby immediate value. Added regressions for
+  Rio Grande 3D's `LDA $D301` / `AND #$FE` / `STA $D301` sequence, OS-off
+  Self-test RAM, and the existing protected-memory cases.
+
+- 2026-10-07: aligned the native PIA model with the same AHRM Self-test rule.
+  Native Self-test state now requires both PB7 clear and PB0 set, including
+  the initial state derived from PORTB. Added a memory-expansion probe
+  regression covering the OS-off transition.
+
 - 2026-09-30: added an origin-scoped IndexedDB ROM library for user-provided
   Atari OS (16 KiB) and BASIC (8 KiB) files. Browser startup prefers optional
   server files and falls back independently to saved user files; new uploads
