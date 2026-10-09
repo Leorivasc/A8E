@@ -436,6 +436,14 @@
           <button class="disklib-btn disklib-btn-danger disklib-del-sel-btn" title="Delete selected images" disabled>
             <i class="fa-solid fa-trash"></i> Delete
           </button>
+          <span class="disklib-toolbar-sep"></span>
+          <button class="disklib-btn disklib-export-btn" title="Export the complete library">
+            <i class="fa-solid fa-box-archive"></i> Export Library
+          </button>
+          <button class="disklib-btn disklib-import-btn" title="Import a complete library package">
+            <i class="fa-solid fa-file-import"></i> Import Library
+          </button>
+          <input type="file" class="disklib-import-input" accept=".a8e,.zip,application/zip,application/octet-stream" hidden />
         </div>
         <div class="disklib-drop-zone">
           <div class="disklib-table-scroll">
@@ -734,6 +742,8 @@
     <script src="js/core/antic.js"></script>
     <script src="js/core/gtia.js"></script>
     <script src="js/core/hostfs.js"></script>
+    <script src="js/core/library_archive.js"></script>
+    <script src="js/core/library_package.js"></script>
     <script src="js/core/disk_library.js"></script>
     <script src="js/core/rom_library.js"></script>
     <script src="js/core/hdevice.js"></script>

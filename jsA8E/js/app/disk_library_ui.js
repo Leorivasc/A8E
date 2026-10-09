@@ -55,6 +55,9 @@
     const selectNoneBtn = panel.querySelector(".disklib-sel-none-btn");
     const downloadBtn = panel.querySelector(".disklib-dl-sel-btn");
     const deleteBtn = panel.querySelector(".disklib-del-sel-btn");
+    const exportBtn = panel.querySelector(".disklib-export-btn");
+    const importBtn = panel.querySelector(".disklib-import-btn");
+    const importInput = panel.querySelector(".disklib-import-input");
     const statusEl = panel.querySelector(".disklib-status");
     const countEl = panel.querySelector(".disklib-stat-count");
     const selectedEl = panel.querySelector(".disklib-stat-sel");
@@ -336,6 +339,64 @@
           render();
         }).catch(function (err) {
           setStatus(err && err.message ? err.message : "Delete failed", "error");
+        });
+      });
+    }
+
+    if (exportBtn) {
+      exportBtn.addEventListener("click", function () {
+        setStatus("Exporting library...", "busy");
+        library.exportPackage({ fileName: "library.a8e" })
+          .then(function (result) {
+            const blob = new Blob([result.bytes], { type: "application/zip" });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = result.fileName || "library.a8e";
+            anchor.hidden = true;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+            setStatus("Library exported", "success");
+          })
+          .catch(function (err) {
+            setStatus(err && err.message ? err.message : "Library export failed", "error");
+          });
+      });
+    }
+    if (importBtn && importInput) {
+      importBtn.addEventListener("click", function () { importInput.click(); });
+      importInput.addEventListener("change", function () {
+        const file = importInput.files && importInput.files[0];
+        importInput.value = "";
+        if (!file) return;
+        setStatus("Validating library package...", "busy");
+        file.arrayBuffer().then(function (buffer) {
+          const bytes = new Uint8Array(buffer);
+          const previewBytes = new Uint8Array(bytes);
+          const commitBytes = new Uint8Array(bytes);
+          return library.previewImport(previewBytes.buffer).then(function (preview) {
+            const summary = preview.summary || {};
+            const warning = preview.warning ? "\n\n" + preview.warning : "";
+            const message = "Add " + (summary.added || 0) +
+              " entries, skip " + (summary.duplicates || 0) +
+              " duplicates, and preserve " + (summary.conflicts || 0) +
+              " conflict(s)?" + warning;
+            if (!confirm(message)) {
+              setStatus("Library import canceled", "success");
+              return null;
+            }
+            setStatus("Importing library...", "busy");
+            return library.importPackage(commitBytes.buffer);
+          });
+        }).then(function (result) {
+          if (!result) return;
+          const summary = result.summary || {};
+          setStatus("Imported " + (summary.added || 0) + " entries", "success");
+          render();
+        }).catch(function (err) {
+          setStatus(err && err.message ? err.message : "Library import failed", "error");
         });
       });
     }

@@ -2,8 +2,9 @@
   "use strict";
 
   const DB_NAME = "a8e_disk_library";
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   const STORE_NAME = "entries";
+  const META_STORE_NAME = "metadata";
   const FLUSH_DELAY_MS = 350;
 
   function getExtension(name) {
@@ -77,6 +78,7 @@
       let db = null;
       let ready = false;
       let mountsRestored = false;
+      let libraryVersion = 1;
 
       function emitChange() {
         listeners.forEach(function (listener) {
@@ -243,6 +245,9 @@
             if (!database.objectStoreNames.contains(STORE_NAME)) {
               database.createObjectStore(STORE_NAME, { keyPath: "id" });
             }
+            if (!database.objectStoreNames.contains(META_STORE_NAME)) {
+              database.createObjectStore(META_STORE_NAME, { keyPath: "key" });
+            }
           };
           request.onsuccess = function (event) {
             db = event.target.result;
@@ -262,9 +267,29 @@
                 const entry = hydrateRecord(rawEntries[i]);
                 if (entry) entries.set(entry.id, entry);
               }
-              ready = true;
-              emitChange();
-              resolve();
+              let metadataTx;
+              try {
+                metadataTx = db.transaction(META_STORE_NAME, "readonly");
+              } catch (err) {
+                ready = true;
+                emitChange();
+                resolve();
+                return;
+              }
+              const metadata = metadataTx.objectStore(META_STORE_NAME).get("libraryVersion");
+              metadata.onsuccess = function () {
+                if (metadata.result && Number.isInteger(metadata.result.value)) {
+                  libraryVersion = Math.max(1, metadata.result.value | 0);
+                }
+                ready = true;
+                emitChange();
+                resolve();
+              };
+              metadata.onerror = function () {
+                ready = true;
+                emitChange();
+                resolve();
+              };
             };
             getAll.onerror = function () {
               ready = true;
@@ -607,6 +632,165 @@
         });
       }
 
+      function getPackageApi() {
+        return window.A8ELibraryPackage && window.A8ELibraryPackage.createApi
+          ? window.A8ELibraryPackage.createApi()
+          : null;
+      }
+
+      function exportPackage(options) {
+        const packageApi = getPackageApi();
+        if (!packageApi) return Promise.reject(new Error("A8E library package support is unavailable"));
+        const records = [];
+        let pending = Promise.resolve();
+        entries.forEach(function (entry) {
+          pending = pending.then(function () {
+            return flushEntry(entry).then(function () {
+              records.push({
+                id: entry.id,
+                name: currentName(entry),
+                format: entry.format === "xex" && entry.runtimeBytes ? "atr" : entry.format,
+                bytes: currentBytes(entry),
+                created: entry.created,
+                modified: entry.modified,
+                mountedSlot: entry.slot,
+              });
+            });
+          });
+        });
+        return pending.then(function () {
+          const config = options && typeof options === "object" ? options : {};
+          const devices = {};
+          const writeProtected = {};
+          entries.forEach(function (entry) {
+            if (entry.slot >= 0 && entry.slot < 8) {
+              devices["D" + (entry.slot + 1)] = entry.id;
+              writeProtected["D" + (entry.slot + 1)] = false;
+            }
+          });
+          return packageApi.exportPackage(records, {
+            libraryVersion: config.libraryVersion || libraryVersion,
+            createdAt: config.createdAt,
+            workspace: { devices: devices, writeProtected: writeProtected },
+            fileName: config.fileName || "library.a8e",
+          });
+        }).then(function (result) {
+          return {
+            buffer: result.bytes.buffer,
+            manifest: result.manifest,
+            fileName: result.fileName,
+          };
+        });
+      }
+
+      function inspectPackage(data) {
+        const packageApi = getPackageApi();
+        if (!packageApi) return Promise.reject(new Error("A8E library package support is unavailable"));
+        return packageApi.importPackage(data);
+      }
+
+      function localPackageRecords() {
+        const records = [];
+        entries.forEach(function (entry) {
+          records.push({
+            id: entry.id,
+            name: currentName(entry),
+            format: entry.format === "xex" && entry.runtimeBytes ? "atr" : entry.format,
+            bytes: cloneBytes(currentBytes(entry)),
+            created: entry.created,
+            modified: entry.modified,
+          });
+        });
+        return records;
+      }
+
+      function previewImport(data) {
+        const packageApi = getPackageApi();
+        if (!packageApi) return Promise.reject(new Error("A8E library package support is unavailable"));
+        return packageApi.importPackage(data).then(function (imported) {
+          const plan = packageApi.planImport(localPackageRecords(), imported);
+          plan.warning = imported.manifest.libraryVersion > libraryVersion
+            ? "The imported library is newer than this local library."
+            : "";
+          return plan;
+        });
+      }
+
+      function cloneImportedEntry(record) {
+        const entry = makeEntry(record.name, record.bytes, record.id);
+        entry.created = Number.isFinite(record.created) ? record.created : Date.now();
+        entry.modified = Number.isFinite(record.modified) ? record.modified : entry.created;
+        entry.slot = -1;
+        return entry;
+      }
+
+      function persistImportAtomically(importedEntries, nextVersion) {
+        const committedVersion = Math.max(1, nextVersion | 0);
+        if (!db) {
+          libraryVersion = committedVersion;
+          return Promise.resolve();
+        }
+        let tx;
+        try {
+          tx = db.transaction([STORE_NAME, META_STORE_NAME], "readwrite");
+        } catch (err) {
+          return Promise.reject(err);
+        }
+        return new Promise(function (resolve, reject) {
+          const entryStore = tx.objectStore(STORE_NAME);
+          importedEntries.forEach(function (entry) {
+            entryStore.put(clonePersistedEntry(entry));
+          });
+          const metadataStore = tx.objectStore(META_STORE_NAME);
+          metadataStore.put({ key: "libraryVersion", value: committedVersion });
+          tx.oncomplete = function () {
+            libraryVersion = committedVersion;
+            resolve();
+          };
+          tx.onabort = function () {
+            reject(tx.error || new Error("Disk library import transaction aborted"));
+          };
+          tx.onerror = function () {
+            reject(tx.error || new Error("Disk library import transaction failed"));
+          };
+        });
+      }
+
+      function importPackage(data) {
+        return previewImport(data).then(function (plan) {
+          const importedEntries = plan.additions.map(cloneImportedEntry);
+          const nextVersion = Math.max(libraryVersion + 1, plan.manifest.libraryVersion | 0);
+          return persistImportAtomically(importedEntries, nextVersion).then(function () {
+            importedEntries.forEach(function (entry) {
+              entries.set(entry.id, entry);
+            });
+            emitChange();
+            const restored = [];
+            const mountErrors = [];
+            let pending = Promise.resolve();
+            plan.mounts.forEach(function (mount) {
+              pending = pending.then(function () {
+                if (!mountDisk) return;
+                return mountFile(mount.id, mount.slot)
+                  .then(function () { restored.push(mount); })
+                  .catch(function (err) {
+                    mountErrors.push({ id: mount.id, slot: mount.slot, error: err && err.message ? err.message : String(err) });
+                  });
+              });
+            });
+            return pending.then(function () {
+              return {
+                summary: plan.summary,
+                warning: plan.warning,
+                libraryVersion: libraryVersion,
+                restoredMounts: restored,
+                mountErrors: mountErrors,
+              };
+            });
+          });
+        });
+      }
+
       function restoreMounts() {
         let pending = Promise.resolve();
         entries.forEach(function (entry) {
@@ -638,6 +822,11 @@
         flush: flush,
         downloadFile: downloadFile,
         deleteFile: deleteFile,
+        exportPackage: exportPackage,
+        inspectPackage: inspectPackage,
+        previewImport: previewImport,
+        importPackage: importPackage,
+        getLibraryVersion: function () { return libraryVersion; },
         restoreMounts: restoreMounts,
         reconcileMounts: reconcileMounts,
         onDiskMediaChanged: onDiskMediaChanged,

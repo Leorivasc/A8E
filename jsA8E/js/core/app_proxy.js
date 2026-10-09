@@ -49,6 +49,10 @@
     diskLibraryUnmount: 15000,
     diskLibraryFlush: 15000,
     diskLibraryDownload: 30000,
+    diskLibraryExport: 60000,
+    diskLibraryInspect: 60000,
+    diskLibraryPreviewImport: 60000,
+    diskLibraryImport: 60000,
     diskLibraryDelete: 15000,
   };
 
@@ -969,6 +973,51 @@
       return sendRequest("diskLibraryDelete", { id: String(id || "") });
     }
 
+    function exportPackage(options) {
+      return sendRequest(
+        "diskLibraryExport",
+        options && typeof options === "object" ? options : {},
+        null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryExport },
+      ).then(function (result) {
+        if (result && result.buffer && isArrayBufferLike(result.buffer)) {
+          result.bytes = new Uint8Array(result.buffer);
+          delete result.buffer;
+        }
+        return result || null;
+      });
+    }
+
+    function inspectPackage(data) {
+      const buffer = toArrayBuffer(data);
+      return sendRequest(
+        "diskLibraryInspect",
+        { buffer: buffer },
+        [buffer],
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryInspect },
+      );
+    }
+
+    function previewImport(data) {
+      const buffer = toArrayBuffer(data);
+      return sendRequest(
+        "diskLibraryPreviewImport",
+        { buffer: buffer },
+        [buffer],
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryPreviewImport },
+      );
+    }
+
+    function importPackage(data) {
+      const buffer = toArrayBuffer(data);
+      return sendRequest(
+        "diskLibraryImport",
+        { buffer: buffer },
+        [buffer],
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryImport },
+      );
+    }
+
     return {
       snapshotFromWire: snapshotFromWire,
       api: {
@@ -983,6 +1032,10 @@
         flush: flush,
         downloadFile: downloadFile,
         deleteFile: deleteFile,
+        exportPackage: exportPackage,
+        inspectPackage: inspectPackage,
+        previewImport: previewImport,
+        importPackage: importPackage,
         onChange: onChange,
       },
     };

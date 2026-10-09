@@ -359,6 +359,8 @@
       "js/core/gtia.js",
       "js/core/hostfs.js",
       "js/core/disk_library.js",
+      "js/core/library_archive.js",
+      "js/core/library_package.js",
       "js/core/hdevice.js",
       "js/core/debugger.js",
       "js/core/atari_support.js",
@@ -990,6 +992,25 @@
         const library = requireDiskLibrary();
         const result = await library.downloadFile(data.id || "");
         postDiskLibrarySnapshot();
+        return result;
+      }
+      case "diskLibraryExport": {
+        const library = requireDiskLibrary();
+        return library.exportPackage(data || {});
+      }
+      case "diskLibraryInspect": {
+        const library = requireDiskLibrary();
+        return library.inspectPackage(data.buffer || new ArrayBuffer(0));
+      }
+      case "diskLibraryPreviewImport": {
+        const library = requireDiskLibrary();
+        return library.previewImport(data.buffer || new ArrayBuffer(0));
+      }
+      case "diskLibraryImport": {
+        const library = requireDiskLibrary();
+        const result = await library.importPackage(data.buffer || new ArrayBuffer(0));
+        postDiskLibrarySnapshot();
+        postState();
         return result;
       }
       case "diskLibraryDelete": {

@@ -51,6 +51,9 @@ set(A8E_CORE_SOURCES
   Antic.c
   AtariIo.c
   Gtia.c
+  LibraryArchive.c
+  LibraryPackage.c
+  LibraryStore.c
   Pia.c
   Pokey.c
 )
@@ -133,6 +136,28 @@ add_executable(A8E
 a8e_configure_target(A8E)
 
 if(BUILD_TESTING)
+  add_executable(library_archive_probe
+    tests/library_archive_probe.c
+    LibraryArchive.c
+  )
+
+  a8e_configure_target(library_archive_probe)
+
+  add_test(NAME library_archive_probe COMMAND library_archive_probe)
+  set_tests_properties(library_archive_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+  add_executable(library_package_probe
+    tests/library_package_probe.c
+    LibraryArchive.c
+    LibraryPackage.c
+    LibraryStore.c
+  )
+
+  a8e_configure_target(library_package_probe)
+
+  add_test(NAME library_package_probe COMMAND library_package_probe)
+  set_tests_properties(library_package_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
   add_executable(antic_timing_probe
     tests/antic_timing_probe.c
     ${A8E_CORE_SOURCES}

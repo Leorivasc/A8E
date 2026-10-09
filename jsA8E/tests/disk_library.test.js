@@ -23,6 +23,8 @@ function loadApi() {
     String: String,
     Number: Number,
     Boolean: Boolean,
+    TextEncoder: TextEncoder,
+    TextDecoder: TextDecoder,
     Map: Map,
     Set: Set,
     Error: Error,
@@ -30,7 +32,12 @@ function loadApi() {
   context.window = context;
   context.self = context;
   vm.createContext(context);
-  vm.runInContext(source, context, { filename: "disk_library.js" });
+  ["library_archive.js", "library_package.js", "disk_library.js"].forEach(function (file) {
+    const fileSource = file === "disk_library.js"
+      ? source
+      : fs.readFileSync(path.join(__dirname, "..", "js", "core", file), "utf8");
+    vm.runInContext(fileSource, context, { filename: file });
+  });
   return context.window.A8EDiskLibrary.createApi();
 }
 
@@ -84,8 +91,26 @@ async function main() {
   assert.equal(files.find(function (file) { return file.id === second.id; }).mountedSlot, 0);
   assert.deepEqual(unmounted, [0]);
 
+  const exported = await library.exportPackage({
+    libraryVersion: 3,
+    createdAt: "2026-10-08T15:00:00Z",
+  });
+  assert.ok(exported.buffer && exported.buffer.byteLength > 0);
+  const inspected = await library.inspectPackage(exported.buffer);
+  assert.equal(inspected.manifest.schemaVersion, 1);
+  assert.equal(inspected.manifest.libraryVersion, 3);
+  assert.equal(inspected.manifest.library.length, 2);
+  assert.equal(inspected.manifest.workspace.devices.D1, second.id);
+
   await library.deleteFile(second.id);
   assert.equal(library.listFiles().length, 1);
+  const imported = await library.importPackage(exported.buffer);
+  assert.equal(imported.summary.added, 1);
+  assert.equal(imported.summary.duplicates, 1);
+  assert.equal(imported.restoredMounts.length, 1);
+  assert.equal(library.listFiles().length, 2);
+  await assert.rejects(library.importPackage(new Uint8Array([1, 2, 3])), /Invalid A8E ZIP archive/);
+  assert.equal(library.listFiles().length, 2);
   console.log("disk_library.test.js passed");
 }
 

@@ -1,6 +1,7 @@
 # Full Library Management
 
-Status: design proposal; no implementation has been started.
+Status: implementation in progress; the portable package baseline is now
+implemented and the library UI/storage migration remains outstanding.
 
 Date: 2026-10-08
 
@@ -17,7 +18,31 @@ working copies, modification times, revisions, and disk assignments such as
 
 This document records the library model and the user experience discussed for
 the future implementation. It is intentionally a design document; it does not
-authorize or describe an implementation in the current change.
+authorize unrelated changes outside the Full Library project.
+
+## Implemented baseline
+
+The first implementation slice now exists in both applications:
+
+- the dependency-free ZIP method-0 codec reads and writes standard `.a8e`
+  archives;
+- `library.json` schema v1 is validated with the frozen format, version,
+  timestamps, entry identity, blob path, size, and SHA-256 rules;
+- `jsA8E` can export its current disk-library records and inspect an imported
+  package before storage changes are made, including the current D1:-D8:
+  assignments;
+- native A8E exposes the matching package read/write/manifest-validation core;
+- shared regression coverage checks the same package contract in JavaScript and
+  native CTest.
+
+The current import operation now has a complete browser transaction path:
+`jsA8E` previews the package, deduplicates equal hashes, preserves differing
+stable-ID content as an imported conflict copy, increments `libraryVersion`,
+and commits all new records plus metadata in one IndexedDB transaction. A8E
+has the matching backend staging store: it validates and decodes a complete
+package before replacing its visible package snapshot. Folder records, the
+native application-owned directory, richer revision merging, and the native
+floating Library window remain subsequent phases.
 
 ## Project parity
 
@@ -747,6 +772,12 @@ The import/export portion of this project follows these phases:
 - export selected ATR/XEX files and current writable ATR copies;
 - restore `D1:` through `D8:` assignments and write protection;
 - validate hashes and file formats during import.
+
+The first browser transaction path is implemented. Its preview/commit API is
+available through the disk library and the browser panel now exposes Export
+Library and Import Library actions. Native A8E has the corresponding staged
+package store; its merge with a persistent native multi-drive repository is
+deferred until that repository exists.
 
 ### Phase 2: complete library migration
 

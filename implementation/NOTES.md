@@ -4,6 +4,43 @@
 
 Simple implementation notes for this repository.
 
+- 2026-10-08: started the Full Library implementation on branch `FullLibrary`.
+  Added a dependency-free ZIP method-0 archive codec to both `jsA8E` and
+  native A8E for the frozen `library.json` v1 package contract. The codec
+  validates UTF-8 paths, CRC-32, central-directory consistency, duplicate and
+  unsafe paths, and corruption. A shared deterministic ZIP fixture is read and
+  produced by both implementations. The JS suite, full native A8E target, and
+  all 13 native CTest probes pass in an isolated Visual Studio/NMake build.
+  The pre-existing `build/msvc` solution still has an environment-specific
+  MSBuild `FileTracker` `Access denied` failure during its incremental build.
+
+- 2026-10-08: added the first portable package layer on top of the ZIP codec.
+  Both applications validate the frozen manifest contract, compute SHA-256
+  content identities, and read/write `library.json` plus content-addressed
+  `blobs/` entries. jsA8E disk-library instances can export their current
+  records and inspect packages through both main-thread and Worker paths;
+  native A8E exposes the matching package API and CTest probe. Import is still
+  validation-only and does not mutate storage until the atomic migration layer
+  is implemented. Also corrected the native ZIP writer's central-directory
+  size calculation, which had been measured after the end record began.
+
+- 2026-10-09: implemented the next Full Library import slice in both
+  applications. jsA8E now separates non-mutating preview from commit, detects
+  equal-hash duplicates, preserves differing stable-ID content as renamed
+  conflict copies, restores available D1:-D8: assignments, persists the
+  incremented `libraryVersion`, and commits imported entries plus metadata in a
+  single IndexedDB transaction. The Disk Library panel now exposes complete
+  Export Library and Import Library actions. Native A8E adds an SDL-independent
+  staged package store that replaces its visible snapshot only after complete
+  package validation; native multi-drive repository merge and persistence are
+  still pending. JS and native regressions cover conflicts, invalid-package
+  rollback, and unchanged state after a failed import.
+
+- 2026-10-09: manually validated the browser workflow on the Full Library
+  branch: export the complete library, remove the local contents, and import
+  the exported package again. The library was restored successfully, providing
+  the first practical end-to-end confirmation of the package flow.
+
 - 2026-10-07: corrected the generic jsA8E XEX preflight bank-map analysis. The
   Self-test window now follows the AHRM dependency on OS ROM being enabled, and
   INITAD PORTB tracking uses a conservative 6502 data-flow interpreter instead
