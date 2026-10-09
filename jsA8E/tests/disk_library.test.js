@@ -111,6 +111,24 @@ async function main() {
   assert.equal(library.listFiles().length, 2);
   await assert.rejects(library.importPackage(new Uint8Array([1, 2, 3])), /Invalid A8E ZIP archive/);
   assert.equal(library.listFiles().length, 2);
+  const folder = await library.createFolder("Projects");
+  const folderFile = await library.addFile("FOLDER.ATR", new Uint8Array([5]), folder.id);
+  const blank = await library.createBlankAtr("EMPTY.ATR", folder.id);
+  assert.equal(blank.format, "atr");
+  assert.equal(blank.size, 16 + 720 * 128);
+  const blankDownload = await library.downloadFile(blank.id);
+  const blankBytes = new Uint8Array(blankDownload.buffer);
+  assert.equal(blankBytes[0], 0x96);
+  assert.equal(blankBytes[1], 0x02);
+  assert.equal(blankBytes[4], 0x80);
+  assert.equal(library.listFiles(folder.id).length, 2);
+  assert.ok(library.listFiles(folder.id).some(function (file) { return file.id === folderFile.id; }));
+  assert.ok(library.listFiles(folder.id).some(function (file) { return file.id === blank.id; }));
+  await library.moveFile(folderFile.id, "root");
+  assert.equal(library.listFiles(folder.id).length, 1);
+  await library.deleteFile(blank.id);
+  assert.equal(library.listFiles(folder.id).length, 0);
+  await library.deleteFolder(folder.id);
   console.log("disk_library.test.js passed");
 }
 

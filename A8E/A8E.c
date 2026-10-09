@@ -19,10 +19,44 @@
 
 #include "6502.h"
 #include "AtariIo.h"
+#include "LibraryRepository.h"
+#include "LibraryWindow.h"
 #include "Pokey.h"
 
 /* Global window handle — used by Pokey.c to update the title bar. */
 SDL_Window *g_pSdlWindow = NULL;
+
+static void A8E_LoadLibraryWorkspace(
+	_6502_Context_t *pContext,
+	const A8E_LibraryRepository_t *pRepository)
+{
+	uint32_t lDrive;
+	for(lDrive = 0; lDrive < 8u; lDrive++)
+	{
+		const char *pEntryId = A8E_LibraryRepository_GetDeviceEntryId(
+			pRepository, lDrive);
+		uint16_t sIndex;
+		if(!pEntryId) continue;
+		for(sIndex = 0; sIndex < pRepository->sRecordCount; sIndex++)
+		{
+			const A8E_LibraryRepositoryRecord_t *pRecord =
+				A8E_LibraryRepository_GetRecord(pRepository, sIndex);
+			const uint8_t *pBytes;
+			uint32_t lSize;
+			if(!pRecord || strcmp(pRecord->pId, pEntryId) != 0) continue;
+			pBytes = A8E_LibraryRepository_GetPayload(pRepository, pRecord->pPath, &lSize);
+			if(!pBytes || !AtariIoMountDisk(
+				pContext, lDrive, pBytes, lSize, pRecord->pName,
+				(uint8_t)!A8E_LibraryRepository_IsDeviceWriteProtected(
+					pRepository, lDrive)))
+			{
+				fprintf(stderr, "A8E: failed to mount library entry %s in D%u:\n",
+					pEntryId, lDrive + 1u);
+			}
+			break;
+		}
+	}
+}
 
 /********************************************************************
 *
@@ -59,7 +93,11 @@ int main(int argc, char *argv[])
 	u32 lFullscreen = 0;
 	char cMemoryTitle[64];
 	char cWindowTitle[160];
+	A8E_LibraryRepository_t tLibraryRepository;
+	A8E_LibraryWindow_t tLibraryWindow;
 	int lIndex;
+	A8E_LibraryRepository_Init(&tLibraryRepository);
+	memset(&tLibraryWindow, 0, sizeof(tLibraryWindow));
 
 	if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0)
 	{
@@ -220,7 +258,22 @@ int main(int argc, char *argv[])
 
 	pAtariContext = _6502_Open();
 	AtariIoOpenWithMemory(pAtariContext, lMode, pDiskFileName, eVideoStandard, eMemoryExpansion);
+	{
+		FILE *pLibraryManifest = fopen("library/library.json", "rb");
+		if(pLibraryManifest)
+		{
+			char sError[160];
+			fclose(pLibraryManifest);
+			if(A8E_LibraryRepository_LoadDirectory(
+				&tLibraryRepository, "library", sError, sizeof(sError)))
+			{
+				A8E_LoadLibraryWorkspace(pAtariContext, &tLibraryRepository);
+			}
+			else fprintf(stderr, "A8E: library load skipped: %s\n", sError);
+		}
+	}
 	printf("A8E memory: opened %s\n", cMemoryTitle);
+	A8E_LibraryWindow_Init(&tLibraryWindow, pAtariContext, &tLibraryRepository);
 	llCycles = CYCLES_PER_LINE *
 		(eVideoStandard == ATARI_VIDEO_NTSC ? LINES_PER_SCREEN_NTSC : LINES_PER_SCREEN_PAL);
 	{
@@ -264,10 +317,12 @@ int main(int argc, char *argv[])
 		SDL_RenderClear(pRenderer);
 		SDL_RenderCopy(pRenderer, pScreenTexture, NULL, NULL);
 		SDL_RenderPresent(pRenderer);
+		A8E_LibraryWindow_Draw(&tLibraryWindow);
 		Pokey_DebugFrame(pAtariContext);
 
 		while(SDL_PollEvent(&tEvent))
 		{
+			if(A8E_LibraryWindow_HandleEvent(&tLibraryWindow, &tEvent)) continue;
 			if(tEvent.type == SDL_QUIT)
 			{
 				goto Exit;
@@ -275,6 +330,11 @@ int main(int argc, char *argv[])
 
 			if(tEvent.type == SDL_KEYDOWN)
 			{
+				if(tEvent.key.keysym.sym == SDLK_F9 && tEvent.key.repeat == 0)
+				{
+					A8E_LibraryWindow_Toggle(&tLibraryWindow);
+					continue;
+				}
 				if(tEvent.key.keysym.sym == SDLK_F11)
 				{
 					cTurboFlag = 1;
@@ -308,7 +368,8 @@ int main(int argc, char *argv[])
 				}
 			}
 
-			if(tEvent.type == SDL_KEYDOWN || tEvent.type == SDL_KEYUP)
+			if((tEvent.type == SDL_KEYDOWN || tEvent.type == SDL_KEYUP) &&
+				tEvent.key.windowID == SDL_GetWindowID(pWindow))
 			{
 				AtariIoKeyboardEvent(pAtariContext, &tEvent.key);
 			}
@@ -351,6 +412,9 @@ int main(int argc, char *argv[])
 	}
 
 Exit:
+	A8E_LibraryWindow_SaveDirty(&tLibraryWindow);
+	A8E_LibraryWindow_Free(&tLibraryWindow);
+	A8E_LibraryRepository_Free(&tLibraryRepository);
 	AtariIoClose(pAtariContext);
 	_6502_Close(pAtariContext);
 	SDL_FreeSurface(pScreenSurface);

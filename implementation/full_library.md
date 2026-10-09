@@ -1,9 +1,10 @@
 # Full Library Management
 
-Status: implementation in progress; the portable package baseline is now
-implemented and the library UI/storage migration remains outstanding.
+Status: implementation in progress; the portable package baseline, browser
+navigation view, and native SDL Library MVP are implemented. Native folder
+navigation/editing and ATR contents preview remain follow-up work.
 
-Date: 2026-10-08
+Date: 2026-10-09
 
 ## Purpose
 
@@ -31,7 +32,8 @@ The first implementation slice now exists in both applications:
 - `jsA8E` can export its current disk-library records and inspect an imported
   package before storage changes are made, including the current D1:-D8:
   assignments;
-- native A8E exposes the matching package read/write/manifest-validation core;
+- native A8E exposes the matching package read/write/manifest-validation core
+  plus file-based import/export and blank ATR creation;
 - shared regression coverage checks the same package contract in JavaScript and
   native CTest.
 
@@ -40,9 +42,73 @@ The current import operation now has a complete browser transaction path:
 stable-ID content as an imported conflict copy, increments `libraryVersion`,
 and commits all new records plus metadata in one IndexedDB transaction. A8E
 has the matching backend staging store: it validates and decodes a complete
-package before replacing its visible package snapshot. Folder records, the
-native application-owned directory, richer revision merging, and the native
-floating Library window remain subsequent phases.
+package before replacing its visible package snapshot. Folder records, richer
+revision merging, and the remaining native Library editing actions remain
+subsequent phases. The native SIO backend now has independent D1:-D8: media
+slots and Device ID selection, the repository adapter persists the shared
+directory contract, and the initial SDL UI mounts entries through that backend.
+
+The first compact browser navigation slice is now implemented. jsA8E stores
+folders in IndexedDB, migrates older entries to the `Library` root, supports
+the current-folder path and parent navigation, creates folders, uploads into
+the open folder, displays the classic D1:-D4: controls, and provides per-file
+download, move, and delete actions. Folder rows also support rename and safe
+empty-folder deletion. The library core still preserves D1:-D8: mounts
+for newer software and package interoperability, but D5:-D8: are deliberately
+hidden from this DOS-oriented view. Folder metadata and entry `folderId` values
+are optional schema-v1 fields so older packages remain importable. Native A8E
+accepts the same extended manifest fields through its package layer; its native
+window exposes the repository mount view and package actions. The browser view now also includes a
+mounted-devices panel above the navigation list, showing occupied D1:-D8:
+slots, logical folder/file paths, and an `Unmount` action.
+
+The native repository phase has now started. Native A8E can load and save the
+same application-owned `library.json` and `blobs/` directory used by the
+shared schema. Loading stages the manifest and every referenced blob, then
+validates the complete set before replacing the visible snapshot; saving
+writes payloads before installing the manifest. The native floating Library
+window and the adapter that maps its records to the native D1:-D8: slots are
+now present in the initial mount/eject slice.
+
+Native A8E now also checks the default `library/library.json` at startup. When
+the package contains a workspace assignment, the corresponding ATR/XEX payload
+is mounted in the requested D1:-D8: slot and its write-protection state is
+restored. XEX media is normalized into the same bootable ATR working image used
+by the command-line path. A command-line D1: image remains the fallback when
+the repository has no workspace assignment. Dirty mounted working copies are
+flushed back into updated manifest revisions on eject and emulator exit.
+
+The first native SDL adapter is now available through F9. It presents the
+repository entries in a compact list with ATR/XEX type labels and D1:-D8:
+mount cells. Clicking a drive cell mounts the selected entry, clicking the
+same occupied cell unmounts it, and moving an entry to another drive first
+ejects its previous logical mount.
+
+That native editing slice is now implemented as well. Typing in the Library
+window filters names case-insensitively by substring; Delete removes an
+unmounted entry; right-clicking a mounted drive cell toggles runtime write
+protection; and dirty working copies are saved on eject and emulator exit. A
+working-copy save creates or reuses the content-addressed blob, updates the
+entry path, size, hash, modification time, and `libraryVersion`, then reloads
+the repository only after the directory save succeeds. Native package
+import/export and blank ATR creation are available through the typed SDL
+prompt; folder editing remains a separate follow-up operation.
+When a native XEX working copy is modified, its converted ATR bytes are
+persisted as an ATR entry so a later mount never attempts to parse that
+working image as XEX.
+Runtime mount/eject and write-protection changes now persist immediately in
+the schema-v1 workspace maps, so a native restart restores the latest
+selection and protection state. Native package interchange and blank ATR
+creation are now available through the SDL keyboard prompt: `I` imports a
+validated `.a8e` package, `E` exports the current repository, and `N` creates
+a standard writable ATR. The prompt is deliberately dependency-free and uses
+typed paths/names confirmed with Enter.
+
+The browser navigation also provides interactive global search immediately
+above the status bar. Search is case-insensitive and matches any part of a
+filename. Results are presented as a virtual folder, include their original
+folder path, and retain the normal mount and file actions without changing the
+physical folder of an entry.
 
 ## Project parity
 
@@ -67,6 +133,11 @@ The JSON file contains metadata, folders, entries, revisions, hashes, and
 workspace/mount information. Binary ATR and XEX content is stored as
 content-addressed payloads referenced by SHA-256. A complete portable package
 therefore contains `library.json` plus the referenced binary files.
+
+Multiple library entries may reference the same content-addressed blob. This
+is intentional: two differently named working entries can contain identical
+bytes. The manifest preserves both logical entries, while the package stores
+the shared binary only once under `blobs/<sha256>.<type>`.
 
 ```text
 a8e-library-export/
@@ -477,6 +548,23 @@ The first implementation accepts files, not recursive directory drops. A
 future directory-drop enhancement may preserve a relative folder hierarchy,
 but it must use the same folder IDs and validation rules as ordinary uploads.
 
+### Create a blank ATR
+
+The navigation toolbar must also provide a `Create blank ATR` action. It must:
+
+- create a valid, writable blank ATR image in the folder currently open;
+- propose a non-conflicting filename and allow the user to edit it before
+  creation;
+- make the new image immediately available for mounting, editing, download,
+  and complete-library export;
+- preserve the normal stable ID, timestamps, dirty-state, and SHA-256 rules;
+- never replace an existing entry without an explicit confirmation.
+
+The first implementation should use a documented standard blank-disk geometry;
+the selected baseline is a 90 KiB ATR containing 720 sectors of 128 bytes. The
+geometry remains an implementation constant rather than being inferred from
+the current mounted drive.
+
 ### Folder and entry organization
 
 The initial library implementation must allow users to create, rename, and
@@ -538,6 +626,14 @@ The first ATR viewer is intentionally limited to a read-only inspection path:
 - individual-file extraction/download;
 - ATASCII-aware text preview and hexadecimal fallback;
 - explicit raw-sector view for unrecognized or custom images.
+
+The cross-application inspection core for this scope is now in place. It
+validates ATR geometry and recognizes the shared DOS 2.x/MyDOS VTOC and
+directory layout in both jsA8E and native A8E, while keeping image inspection
+read-only. jsA8E now integrates the contents view, internal-file download,
+ATASCII preview, and hexadecimal fallback in the existing panel. The native
+floating Library window now has the same initial platform-specific mount view;
+its ATR contents view remains pending.
 
 The first viewer will not edit, import, delete, repair, or reallocate files
 inside an ATR. Those operations remain later projects because they require
@@ -821,7 +917,8 @@ The recommended order is:
    cancellation;
 3. export/import complete ATR/XEX library entries and current ATR working
    copies, including compatibility warnings and atomic migration;
-4. add folder metadata, the compact navigation view, Upload, and drag/drop;
+4. add folder metadata, the compact navigation view, Upload, drag/drop, and
+   Create blank ATR;
 5. add create/rename/move operations for folders and library entries;
 6. add interactive global search as a virtual-folder view;
 7. add the ATR viewer, filesystem detection, status-bar type reporting, and

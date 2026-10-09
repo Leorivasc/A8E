@@ -123,6 +123,35 @@
       io.sioInIndex = 0;
       io.sioInSize = 0;
       io.sioPendingReadSize = 0;
+      io.sioPendingWriteResult = 0;
+    }
+
+    function traceSio(ctx, event, fields) {
+      const io = ctx && ctx.ioData;
+      if (io) {
+        const sp = ctx.cpu && Number.isFinite(ctx.cpu.sp)
+          ? ctx.cpu.sp & 0xff
+          : null;
+        const stack = sp === null || !ctx.ram
+          ? null
+          : Array.from({ length: 8 }, function (_, index) {
+              return ctx.ram[0x100 + ((sp + 1 + index) & 0xff)] & 0xff;
+            });
+        const trace = Array.isArray(io.sioTrace) ? io.sioTrace : (io.sioTrace = []);
+        const record = Object.assign({
+          event: event,
+          cycle: ctx.cycleCounter,
+          pc: Number.isFinite(ctx.currentInstructionPc)
+            ? (ctx.currentInstructionPc & 0xffff)
+            : null,
+          sp: sp,
+          stack: stack,
+        }, fields || {});
+        trace.push(record);
+        if (trace.length > 128) trace.splice(0, trace.length - 128);
+      }
+      if (typeof traceSerialEvent === "function")
+        traceSerialEvent(ctx, event, fields);
     }
 
     function queueSerinResponse(ctx, now, size) {
@@ -130,6 +159,12 @@
       io.sioInSize = size | 0;
       io.sioInIndex = 0;
       io.serialInputDataReadyCycle = now + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+      traceSio(ctx, "SIO_RESPONSE_QUEUED", {
+        size: io.sioInSize,
+        firstByte: io.sioBuffer[0] & 0xff,
+        pendingReadSize: io.sioPendingReadSize | 0,
+        pendingWriteResult: io.sioPendingWriteResult | 0,
+      });
       cycleTimedEventUpdate(ctx);
     }
 
@@ -213,6 +248,15 @@
       buf[dataSize + 1] = sioChecksum(buf.subarray(1, dataSize + 1), dataSize);
       io.sioPendingReadSize = 0;
       queueSerinResponse(ctx, now, dataSize + 2);
+      return true;
+    }
+
+    function queuePendingWriteResult(ctx, now) {
+      const io = ctx.ioData;
+      const result = io.sioPendingWriteResult | 0;
+      if (result === 0) return false;
+      io.sioPendingWriteResult = 0;
+      queueSingleByteResponse(ctx, now, result);
       return true;
     }
 
@@ -339,16 +383,23 @@
           writeAckComplete(buf);
           if (sectorSize === DISK_SECTOR_SIZE_SINGLE) {
             buf[2] = 0x10;
-            buf[3] = 0x00;
-            buf[4] = 0x01;
+            // AHRM 10.2: byte +1 is the inverted FDC status. FF means
+            // ready with no write-protect, media, or command errors.
+            buf[3] = 0xff;
+            // AHRM 10.2: this is the format timeout, not the normal
+            // command timeout. Keep it in the range used by real drives so
+            // DOS does not reuse an unrealistically short value for another
+            // drive's FORMAT command.
+            buf[4] = 0xe0;
             buf[5] = 0x00;
-            buf[6] = 0x11;
+            buf[6] = 0xf0;
           } else {
             buf[2] = 0x30;
-            buf[3] = 0x00;
-            buf[4] = 0x01;
+            // AHRM 10.2: byte +1 is the inverted FDC status.
+            buf[3] = 0xff;
+            buf[4] = 0xe0;
             buf[5] = 0x00;
-            buf[6] = 0x31;
+            buf[6] = 0x10;
           }
           queueSerinResponse(ctx, now, 7);
           notifyDiskActivity(io, mounted, "status");
@@ -374,6 +425,7 @@
           io.sioPendingCmd = cmd & 0xff;
           io.sioPendingSector = sectorIndex2 & 0xffff;
           io.sioPendingBytes = si2.bytes | 0;
+          io.sioPendingWriteResult = 0;
 
           // ACK command frame; host will then send the data frame.
           queueSingleByteResponse(ctx, now, CHAR_ACK);
@@ -381,15 +433,24 @@
         }
 
         if (cmd === CMD_FORMAT) {
-          // FORMAT: clear data area (very minimal).
+          // FORMAT: clear the data area and return the sector-sized bad-sector
+          // list required by the disk protocol. An empty list is terminated
+          // by $FFFF (AHRM 10.4, Format).
           if (!disk || !diskSize || diskSize <= DISK_HEADER_SIZE) {
             queueDeviceNack(ctx, now);
             return;
           }
           disk.fill(0, DISK_HEADER_SIZE);
+          buf.fill(0, 2, 2 + sectorSize);
+          buf[2] = 0xff;
+          buf[3] = 0xff;
+          buf[sectorSize + 2] = sioChecksum(
+            buf.subarray(2, sectorSize + 2),
+            sectorSize,
+          );
           notifyDiskMediaChanged(io, mounted);
           notifyDiskActivity(io, mounted, "format");
-          queueAckComplete(ctx, now);
+          queueAckData(ctx, now, 2, sectorSize);
           return;
         }
 
@@ -422,6 +483,14 @@
           !canAccessSector(disk, diskSize, si) ||
           si.bytes !== payloadBytes
         ) {
+          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
+            command: cmd,
+            payloadBytes: payloadBytes | 0,
+            sector: io.sioPendingSector | 0,
+            calculatedChecksum: calculated,
+            providedChecksum: providedCrc & 0xff,
+            result: CHAR_NACK,
+          });
           queueDeviceNack(ctx, now);
           return;
         }
@@ -438,8 +507,14 @@
               break;
             }
           }
-          writeAckStatus(buf, ok ? CHAR_COMPLETE : CHAR_ERROR);
-          queueSerinResponse(ctx, now, 2);
+          io.sioPendingWriteResult = ok ? CHAR_COMPLETE : CHAR_ERROR;
+          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
+            command: cmd,
+            payloadBytes: payloadBytes | 0,
+            sector: io.sioPendingSector | 0,
+            result: io.sioPendingWriteResult,
+          });
+          queueSingleByteResponse(ctx, now, CHAR_ACK);
           if (ok) notifyDiskActivity(io, mounted, "verify");
           return;
         }
@@ -448,7 +523,39 @@
         disk.set(buf.subarray(payloadOffset, payloadOffset + si.bytes), si.offset);
         notifyDiskMediaChanged(io, mounted);
         notifyDiskActivity(io, mounted, "write");
-        queueAckComplete(ctx, now);
+        if (cmd === CMD_WRITE_SECTOR) {
+          // AHRM 10.4: WRITE includes a drive-side readback verification.
+          // The emulated media is memory-backed, so no wall-clock delay is
+          // needed; the data is nevertheless re-read before reporting the
+          // final result.
+          let verified = true;
+          for (let vi = 0; vi < si.bytes; vi++) {
+            if (
+              (disk[si.offset + vi] & 0xff) !==
+              (buf[payloadOffset + vi] & 0xff)
+            ) {
+              verified = false;
+              break;
+            }
+          }
+          io.sioPendingWriteResult = verified ? CHAR_COMPLETE : CHAR_ERROR;
+          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
+            command: cmd,
+            payloadBytes: payloadBytes | 0,
+            sector: io.sioPendingSector | 0,
+            result: io.sioPendingWriteResult,
+          });
+          queueSingleByteResponse(ctx, now, CHAR_ACK);
+        } else {
+          io.sioPendingWriteResult = CHAR_COMPLETE;
+          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
+            command: cmd,
+            payloadBytes: payloadBytes | 0,
+            sector: io.sioPendingSector | 0,
+            result: CHAR_COMPLETE,
+          });
+          queueSingleByteResponse(ctx, now, CHAR_ACK);
+        }
       }
 
       return {
@@ -532,7 +639,20 @@
       setSioCommandLine(ctx, 1);
 
       if (sioChecksum(buf, 4) !== (buf[4] & 0xff)) {
-        queueDeviceNack(ctx, now);
+        // AHRM 9.1: invalid command frames are ignored silently so that
+        // unrelated devices on the bus cannot interfere with one another.
+        // Keep this observable in the opt-in POKEY trace. This is diagnostic
+        // only: emitting a trace record must not turn an invalid frame into a
+        // NAK or otherwise alter the bus-visible result.
+        traceSio(ctx, "SIO_COMMAND_DROPPED", {
+          device: buf[0] & 0xff,
+          command: buf[1] & 0xff,
+          aux1: buf[2] & 0xff,
+          aux2: buf[3] & 0xff,
+          calculatedChecksum: sioChecksum(buf, 4),
+          providedChecksum: buf[4] & 0xff,
+          reason: "invalid-command-checksum",
+        });
         return;
       }
 
@@ -542,6 +662,13 @@
       const cmd2 = buf[1] & 0xff;
       const aux1 = buf[2] & 0xff;
       const aux2 = buf[3] & 0xff;
+      traceSio(ctx, "SIO_COMMAND_RECEIVED", {
+        device: dev,
+        command: cmd2,
+        aux1: aux1,
+        aux2: aux2,
+        checksum: buf[4] & 0xff,
+      });
       const handler2 = sioDeviceHandlers[dev];
       if (handler2 && handler2.onCommandFrame) {
         handler2.onCommandFrame(ctx, now, cmd2, aux1, aux2);
@@ -566,13 +693,27 @@
         io.sioInIndex = (io.sioInIndex + 1) & 0xffff;
         io.sioInSize = (io.sioInSize - 1) | 0;
         ctx.ram[IO_SEROUT_SERIN] = b;
+        traceSio(ctx, "SIO_RESPONSE_READ", {
+          value: b,
+          remaining: io.sioInSize | 0,
+          pendingReadSize: io.sioPendingReadSize | 0,
+          pendingWriteResult: io.sioPendingWriteResult | 0,
+        });
         if ((io.sioInSize | 0) > 0) {
           io.serialInputDataReadyCycle =
             effectiveEventCycle(ctx) + SERIAL_INPUT_DATA_READY_CYCLES;
           cycleTimedEventUpdate(ctx);
         } else {
           io.sioInIndex = 0;
-          queuePendingReadData(ctx, effectiveEventCycle(ctx));
+          const now = effectiveEventCycle(ctx);
+          if (!queuePendingReadData(ctx, now))
+            queuePendingWriteResult(ctx, now);
+          traceSio(ctx, "SIO_RESPONSE_PHASE_COMPLETE", {
+            pendingReadSize: io.sioPendingReadSize | 0,
+            pendingWriteResult: io.sioPendingWriteResult | 0,
+            nextSize: io.sioInSize | 0,
+            nextFirstByte: io.sioInSize > 0 ? io.sioBuffer[0] & 0xff : null,
+          });
         }
       }
       return ctx.ram[IO_SEROUT_SERIN] & 0xff;

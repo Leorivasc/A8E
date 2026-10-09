@@ -6021,6 +6021,10 @@ void AtariIoOpenWithMemory(
 		exit(1);
 	}
 	memset(pIoData->pDisk1, 0, MAX_DISK_SIZE);
+	pIoData->apDisk[0] = pIoData->pDisk1;
+	pIoData->alDiskSize[0] = 0;
+	pIoData->abDiskWritable[0] = 1;
+	pIoData->abDiskDirty[0] = 0;
 
 	if(pDiskFileName)
 	{
@@ -6029,6 +6033,9 @@ void AtariIoOpenWithMemory(
 		if(pFile)
 		{
 			pIoData->lDiskSize = fread(pIoData->pDisk1, 1, MAX_DISK_SIZE, pFile);
+			pIoData->alDiskSize[0] = pIoData->lDiskSize;
+			strncpy(pIoData->acDiskName[0], pDiskFileName, sizeof(pIoData->acDiskName[0]) - 1u);
+			pIoData->acDiskName[0][sizeof(pIoData->acDiskName[0]) - 1u] = '\0';
 			AtariIo_CloseFileOrWarn(pFile, pDiskFileName);
 
 			if(IsXexFile(pDiskFileName))
@@ -6045,6 +6052,7 @@ void AtariIoOpenWithMemory(
 						AtariIo_LogError("A8E: Failed to convert XEX to ATR: %s\n",
 										 pDiskFileName);
 					}
+					pIoData->alDiskSize[0] = pIoData->lDiskSize;
 					free(pXexCopy);
 				}
 				else
@@ -6077,6 +6085,142 @@ void AtariIoOpenWithMemory(
 	Pokey_Init(pContext);
 }
 
+int AtariIoMountDisk(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	const u8 *pBytes,
+	u32 lSize,
+	const char *pName,
+	u8 bWritable)
+{
+	IoData_t *pIoData;
+	u8 *pCopy;
+	u8 *pConverted = NULL;
+	const u8 *pMountBytes = pBytes;
+	u32 lMountSize = lSize;
+
+	if(!pContext || lDrive >= 8u || !pBytes || lSize == 0u) return 0;
+	if(IsXexFile(pName))
+	{
+		u32 lNormalizedSize;
+		u32 lAtrSize;
+		if(!XexGetNormalizedSize(pBytes, lSize, &lNormalizedSize)) return 0;
+		lAtrSize = 16u + 384u + ((lNormalizedSize + 127u) / 128u) * 128u;
+		if(lAtrSize > MAX_DISK_SIZE) return 0;
+		pConverted = (u8 *)malloc(lAtrSize);
+		if(!pConverted) return 0;
+		if(!XexToAtr(pConverted, &lMountSize, (u8 *)pBytes, lSize))
+		{
+			free(pConverted);
+			return 0;
+		}
+		pMountBytes = pConverted;
+	}
+	if(lMountSize == 0u || lMountSize > MAX_DISK_SIZE)
+	{
+		free(pConverted);
+		return 0;
+	}
+	pIoData = (IoData_t *)pContext->pIoData;
+	if(lDrive == 0u)
+	{
+		memcpy(pIoData->pDisk1, pMountBytes, lMountSize);
+		pIoData->lDiskSize = lMountSize;
+		pIoData->apDisk[0] = pIoData->pDisk1;
+	}
+	else
+	{
+		pCopy = (u8 *)malloc(lMountSize);
+		if(!pCopy)
+		{
+			free(pConverted);
+			return 0;
+		}
+		memcpy(pCopy, pMountBytes, lMountSize);
+		free(pIoData->apDisk[lDrive]);
+		pIoData->apDisk[lDrive] = pCopy;
+	}
+	pIoData->alDiskSize[lDrive] = lMountSize;
+	pIoData->abDiskWritable[lDrive] = bWritable ? 1u : 0u;
+	pIoData->abDiskDirty[lDrive] = 0u;
+	if(pName)
+	{
+		strncpy(pIoData->acDiskName[lDrive], pName, sizeof(pIoData->acDiskName[lDrive]) - 1u);
+		pIoData->acDiskName[lDrive][sizeof(pIoData->acDiskName[lDrive]) - 1u] = '\0';
+	}
+	else pIoData->acDiskName[lDrive][0] = '\0';
+	free(pConverted);
+	return 1;
+}
+
+int AtariIoUnmountDisk(
+	_6502_Context_t *pContext,
+	u32 lDrive)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return 0;
+	pIoData = (IoData_t *)pContext->pIoData;
+	if(lDrive == 0u)
+	{
+		pIoData->lDiskSize = 0u;
+		pIoData->alDiskSize[0] = 0u;
+		pIoData->abDiskDirty[0] = 0u;
+		pIoData->abDiskWritable[0] = 1u;
+		pIoData->acDiskName[0][0] = '\0';
+		return 1;
+	}
+	free(pIoData->apDisk[lDrive]);
+	pIoData->apDisk[lDrive] = NULL;
+	pIoData->alDiskSize[lDrive] = 0u;
+	pIoData->abDiskDirty[lDrive] = 0u;
+	pIoData->acDiskName[lDrive][0] = '\0';
+	return 1;
+}
+
+const u8 *AtariIoGetDiskBytes(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u32 *pSize)
+{
+	IoData_t *pIoData;
+	if(pSize) *pSize = 0u;
+	if(!pContext || lDrive >= 8u) return NULL;
+	pIoData = (IoData_t *)pContext->pIoData;
+	if(pSize) *pSize = pIoData->alDiskSize[lDrive];
+	return pIoData->apDisk[lDrive];
+}
+
+u8 AtariIoIsDiskDirty(
+	_6502_Context_t *pContext,
+	u32 lDrive)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return 0u;
+	pIoData = (IoData_t *)pContext->pIoData;
+	return pIoData->abDiskDirty[lDrive];
+}
+
+void AtariIoSetDiskWritable(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u8 bWritable)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return;
+	pIoData = (IoData_t *)pContext->pIoData;
+	pIoData->abDiskWritable[lDrive] = bWritable ? 1u : 0u;
+}
+
+u8 AtariIoIsDiskWritable(
+	_6502_Context_t *pContext,
+	u32 lDrive)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return 0u;
+	pIoData = (IoData_t *)pContext->pIoData;
+	return pIoData->abDiskWritable[lDrive];
+}
+
 void AtariIoClose(_6502_Context_t *pContext)
 {
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
@@ -6087,6 +6231,7 @@ void AtariIoClose(_6502_Context_t *pContext)
 
 	free(pIoData->tVideoData.pPriorityData);
 	free(pIoData->pDisk1);
+	for(u32 lDrive = 1u; lDrive < 8u; lDrive++) free(pIoData->apDisk[lDrive]);
 	free(pIoData->pBasicRom);
 	free(pIoData->pOsRom);
 	free(pIoData->pSelfTestRom);
@@ -6271,6 +6416,9 @@ void AtariIoKeyboardEvent(_6502_Context_t *pContext, SDL_KeyboardEvent *pKeyboar
 			if(pFile)
 			{
 				pIoData->lDiskSize = fread(pIoData->pDisk1, 1, MAX_DISK_SIZE, pFile);
+				pIoData->alDiskSize[0] = pIoData->lDiskSize;
+				strncpy(pIoData->acDiskName[0], "D1.ATR", sizeof(pIoData->acDiskName[0]) - 1u);
+				pIoData->acDiskName[0][sizeof(pIoData->acDiskName[0]) - 1u] = '\0';
 				AtariIo_CloseFileOrWarn(pFile, "D1.ATR");
 #ifdef VERBOSE_SIO
 				printf("Disk name: %s, size = %lu\n", "D1.ATR", pIoData->lDiskSize);

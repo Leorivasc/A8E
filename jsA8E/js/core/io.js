@@ -611,6 +611,7 @@
               io.sioInSize = 0;
               io.sioInIndex = 0;
               io.sioPendingReadSize = 0;
+              io.sioPendingWriteResult = 0;
             }
             // AHRM 5.3: the slow clock phase is set when initialization ends.
             if (wasPokeyInitializing && (v & 0x03) !== 0) {

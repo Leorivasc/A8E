@@ -253,6 +253,14 @@ typedef struct
 	u8 aPotCharge[8]; /* residual charge, in POT-count equivalents */
 	u64 llPotChargeLastCycle;
 
+	/* Native library media slots. Slot zero remains mirrored by pDisk1 for
+	 * compatibility with the command-line boot path. */
+	u8 *apDisk[8];
+	u32 alDiskSize[8];
+	u8 abDiskWritable[8];
+	u8 abDiskDirty[8];
+	u8 cSioDriveIndex;
+	char acDiskName[8][128];
 	u8 *pDisk1;
 	u32 lDiskSize;
 
@@ -306,5 +314,36 @@ void AtariIoDrawScreen(
 	u32 lScreenHeight);
 
 void AtariIoKeyboardEvent(_6502_Context_t *pContext, SDL_KeyboardEvent *pKeyboardEvent);
+
+/* Mounts a caller-owned copy of an ATR/XEX image in D1:-D8:. */
+int AtariIoMountDisk(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	const u8 *pBytes,
+	u32 lSize,
+	const char *pName,
+	u8 bWritable);
+
+int AtariIoUnmountDisk(
+	_6502_Context_t *pContext,
+	u32 lDrive);
+
+const u8 *AtariIoGetDiskBytes(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u32 *pSize);
+
+u8 AtariIoIsDiskDirty(
+	_6502_Context_t *pContext,
+	u32 lDrive);
+
+void AtariIoSetDiskWritable(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u8 bWritable);
+
+u8 AtariIoIsDiskWritable(
+	_6502_Context_t *pContext,
+	u32 lDrive);
 
 #endif

@@ -142,6 +142,14 @@ static void Sha256Hex(const uint8_t *pData, uint32_t lSize, char aHex[65])
 	aHex[64] = '\0';
 }
 
+void A8E_LibraryPackage_Sha256Hex(
+	const uint8_t *pBytes,
+	uint32_t lSize,
+	char aHex[65])
+{
+	Sha256Hex(pBytes, lSize, aHex);
+}
+
 static void SetError(char *pError, uint32_t lErrorSize, const char *pMessage)
 {
 	if(!pError || lErrorSize == 0) return;
@@ -297,15 +305,34 @@ static int VerifyPayloadManifest(
 	return 1;
 }
 
-static uint32_t CountPathReferences(const uint8_t *pJson, uint32_t lJsonSize)
+static uint32_t CountUniquePathReferences(const uint8_t *pJson, uint32_t lJsonSize)
 {
 	const char *p = (const char *)pJson;
 	const char *pEnd = p + lJsonSize;
 	uint32_t lCount = 0;
 	while((p = FindBytes(p, pEnd, "\"path\":\"", 8)) != NULL)
 	{
-		lCount++;
-		p += 8;
+		const char *pValue = p + 8;
+		const char *pValueEnd = (const char *)memchr(pValue, '"', (size_t)(pEnd - pValue));
+		const char *pPrevious = (const char *)pJson;
+		int lSeen = 0;
+		if(!pValueEnd) break;
+		while((pPrevious = FindBytes(pPrevious, p, "\"path\":\"", 8)) != NULL)
+		{
+			const char *pPreviousValue = pPrevious + 8;
+			const char *pPreviousEnd = (const char *)memchr(
+				pPreviousValue, '"', (size_t)(p - pPreviousValue));
+			if(pPreviousEnd &&
+				(size_t)(pPreviousEnd - pPreviousValue) == (size_t)(pValueEnd - pValue) &&
+				memcmp(pPreviousValue, pValue, (size_t)(pValueEnd - pValue)) == 0)
+			{
+				lSeen = 1;
+				break;
+			}
+			pPrevious = pPrevious + 8;
+		}
+		if(!lSeen) lCount++;
+		p = pValueEnd + 1;
 	}
 	return lCount;
 }
@@ -445,7 +472,7 @@ int A8E_LibraryPackage_Read(
 				A8E_LibraryArchive_FreeEntries(pEntries, sCount);
 				return 0;
 			}
-			lPathCount = CountPathReferences(pEntries[i].pBytes, pEntries[i].lSize);
+			lPathCount = CountUniquePathReferences(pEntries[i].pBytes, pEntries[i].lSize);
 			{
 				uint16_t j;
 				for(j = 0; j < sCount; j++)

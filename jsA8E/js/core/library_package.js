@@ -117,6 +117,11 @@
     return typeof value === "string" && value.length > 0 && value.length <= 256;
   }
 
+  function validFolderName(value) {
+    return typeof value === "string" && value.length > 0 && value.length <= 256 &&
+      value !== "." && value !== ".." && !value.includes("/");
+  }
+
   function validateManifest(manifest) {
     if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) fail("manifest is not an object");
     if (manifest.format !== FORMAT) fail("unsupported format");
@@ -124,8 +129,23 @@
     if (!Number.isInteger(manifest.libraryVersion) || manifest.libraryVersion < 1) fail("invalid libraryVersion");
     if (!validTime(manifest.createdAt)) fail("invalid createdAt");
     if (!Array.isArray(manifest.library)) fail("library must be an array");
+    const folderIds = new Set(["root"]);
+    if (manifest.folders !== undefined) {
+      if (!Array.isArray(manifest.folders)) fail("folders must be an array");
+      manifest.folders.forEach(function (folder) {
+        if (!folder || !validId(folder.id) || (folder.id !== "root" && folderIds.has(folder.id))) fail("duplicate or invalid folder id");
+        if (!validFolderName(folder.name)) fail("invalid folder name");
+        if (folder.parentId !== null && folder.parentId !== undefined && !validId(folder.parentId)) fail("invalid folder parent");
+        if (!validTime(folder.createdAt) || !validTime(folder.modifiedAt)) fail("invalid folder timestamp");
+        folderIds.add(folder.id);
+      });
+      const root = manifest.folders.find(function (folder) { return folder.id === "root"; });
+      if (root && root.parentId !== null && root.parentId !== undefined) fail("root folder has a parent");
+      manifest.folders.forEach(function (folder) {
+        if (folder.parentId !== null && folder.parentId !== undefined && !folderIds.has(folder.parentId)) fail("missing folder parent");
+      });
+    }
     const ids = new Set();
-    const paths = new Set();
     manifest.library.forEach(function (entry) {
       if (!entry || typeof entry !== "object") fail("invalid library entry");
       if (!validId(entry.id) || ids.has(entry.id)) fail("duplicate or invalid entry id");
@@ -134,12 +154,14 @@
       if (entry.type !== "atr" && entry.type !== "xex") fail("unsupported entry type");
       if (!/^blobs\/[0-9a-f]{64}\.(atr|xex)$/.test(entry.path)) fail("invalid blob path");
       if (entry.path.endsWith("." + entry.type) === false) fail("blob type mismatch");
-      if (paths.has(entry.path)) fail("duplicate blob path");
-      paths.add(entry.path);
+      // Multiple library entries may intentionally reference the same
+      // content-addressed blob. The archive stores that binary once while
+      // preserving each entry's name, folder, timestamps, and identity.
       if (!Number.isInteger(entry.size) || entry.size < 0) fail("invalid entry size");
       if (!/^[0-9a-f]{64}$/.test(entry.sha256) || entry.sha256 !== entry.path.substring(6, 70)) fail("invalid entry sha256");
       if (!validTime(entry.createdAt) || !validTime(entry.modifiedAt)) fail("invalid entry timestamp");
       if (entry.mountedSlot !== undefined && (!Number.isInteger(entry.mountedSlot) || entry.mountedSlot < -1 || entry.mountedSlot > 7)) fail("invalid mountedSlot");
+      if (entry.folderId !== undefined && !folderIds.has(entry.folderId)) fail("invalid entry folder");
     });
     if (manifest.workspace !== undefined) {
       if (!manifest.workspace || typeof manifest.workspace !== "object") fail("invalid workspace");
@@ -172,6 +194,7 @@
         createdAt: new Date(record.created || Date.now()).toISOString(),
         modifiedAt: new Date(record.modified || Date.now()).toISOString(),
         mountedSlot: typeof record.mountedSlot === "number" ? record.mountedSlot | 0 : -1,
+        folderId: record.folderId || "root",
       };
     });
     const manifest = {
@@ -181,6 +204,26 @@
       createdAt: now,
       library: library,
     };
+    if (Array.isArray(config.folders)) {
+      manifest.folders = config.folders.map(function (folder) {
+        return {
+          id: String(folder.id || ""),
+          name: String(folder.name || ""),
+          parentId: folder.parentId === undefined ? null : folder.parentId,
+          createdAt: new Date(folder.created || Date.now()).toISOString(),
+          modifiedAt: new Date(folder.modified || Date.now()).toISOString(),
+        };
+      });
+      if (!manifest.folders.some(function (folder) { return folder.id === "root"; })) {
+        manifest.folders.unshift({
+          id: "root",
+          name: "Library",
+          parentId: null,
+          createdAt: now,
+          modifiedAt: now,
+        });
+      }
+    }
     if (config.workspace) manifest.workspace = config.workspace;
     validateManifest(manifest);
     return manifest;
@@ -200,13 +243,22 @@
     return candidate;
   }
 
-  function planImport(localRecords, importedPackage) {
+  function planImport(localRecords, importedPackage, localFolders) {
     if (!importedPackage || !importedPackage.manifest || !Array.isArray(importedPackage.entries)) {
       fail("import package is incomplete");
     }
     const localById = new Map();
     const localByHash = new Map();
     const usedNames = new Set();
+    const localFolderById = new Map();
+    const localFolderNames = new Map();
+    (localFolders || [{ id: "root", name: "Library", parentId: null }]).forEach(function (folder) {
+      const id = String(folder.id || "");
+      if (!id) return;
+      localFolderById.set(id, folder);
+      const key = String(folder.parentId || "root") + "\n" + String(folder.name || "").toUpperCase();
+      localFolderNames.set(key, id);
+    });
     (localRecords || []).forEach(function (record) {
       const id = String(record.id || "");
       const name = String(record.name || "");
@@ -223,7 +275,51 @@
       conflicts: 0,
       renamed: 0,
       mounts: 0,
+      foldersAdded: 0,
     };
+
+    const folderMap = new Map([["root", "root"]]);
+    const folders = [];
+    const importedFolders = Array.isArray(importedPackage.manifest.folders)
+      ? importedPackage.manifest.folders.slice()
+      : [];
+    importedFolders.sort(function (a, b) {
+      return (a.parentId ? 1 : 0) - (b.parentId ? 1 : 0);
+    });
+    importedFolders.forEach(function (folder) {
+      if (folder.id === "root") return;
+      const parentId = folderMap.get(folder.parentId || "root") || "root";
+      const sameId = localFolderById.get(folder.id) || null;
+      let id = folder.id;
+      let name = folder.name;
+      if (sameId && String(sameId.name).toUpperCase() === String(name).toUpperCase() && String(sameId.parentId || "root") === parentId) {
+        folderMap.set(folder.id, sameId.id);
+        return;
+      }
+      if (sameId) id = folder.id + "-import";
+      while (localFolderById.has(id) || folders.some(function (item) { return item.id === id; })) id += "-2";
+      let nameKey = parentId + "\n" + name.toUpperCase();
+      if (localFolderNames.has(nameKey)) {
+        let suffix = 1;
+        const base = name;
+        do {
+          suffix++;
+          name = base + " (imported" + (suffix > 2 ? " " + suffix : "") + ")";
+          nameKey = parentId + "\n" + name.toUpperCase();
+        } while (localFolderNames.has(nameKey));
+      }
+      folderMap.set(folder.id, id);
+      localFolderNames.set(nameKey, id);
+      const addition = {
+        id: id,
+        name: name,
+        parentId: parentId,
+        created: Date.parse(folder.createdAt),
+        modified: Date.parse(folder.modifiedAt),
+      };
+      folders.push(addition);
+      summary.foldersAdded++;
+    });
 
     importedPackage.entries.forEach(function (item) {
       const manifest = item.manifest;
@@ -261,6 +357,7 @@
         created: Date.parse(manifest.createdAt),
         modified: Date.parse(manifest.modifiedAt),
         mountedSlot: typeof manifest.mountedSlot === "number" ? manifest.mountedSlot : -1,
+        folderId: folderMap.get(manifest.folderId || "root") || "root",
         sha256: hash,
       });
       summary.added++;
@@ -284,6 +381,7 @@
     return {
       manifest: importedPackage.manifest,
       additions: additions,
+      folders: folders,
       mounts: mounts,
       summary: summary,
     };

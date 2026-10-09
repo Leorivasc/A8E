@@ -412,45 +412,81 @@
       <section id="diskLibraryPanel" class="disklibPanel" hidden aria-label="Persistent disk image library">
         <div class="disklib-titlebar">
           <i class="fa-solid fa-hard-drive disklib-title-icon"></i>
-          <span class="disklib-title-text">Disk Library (D1:-D4:)</span>
+          <span class="disklib-title-text">Disk Library</span>
+          <span class="disklib-current-path" aria-live="polite">Library</span>
           <span class="disklib-status" aria-live="polite"></span>
         </div>
+        <div class="disklib-mounted-panel">
+          <div class="disklib-mounted-title"><i class="fa-solid fa-plug"></i> Mounted devices</div>
+          <div class="disklib-mounted-list"></div>
+        </div>
         <div class="disklib-toolbar">
-          <label class="disklib-label">Add</label>
-          <button class="disklib-btn disklib-upload-btn" title="Upload ATR or XEX files">
-            <i class="fa-solid fa-upload"></i> Upload
+          <button class="disklib-btn disklib-upload-btn" title="Upload ATR or XEX files" aria-label="Upload ATR or XEX files">
+            <i class="fa-solid fa-upload" aria-hidden="true"></i>
           </button>
           <input type="file" class="disklib-upload-input" accept=".atr,.xex,application/octet-stream" multiple hidden />
-          <span class="disklib-toolbar-sep"></span>
-          <label class="disklib-label">Select</label>
-          <button class="disklib-btn disklib-sel-all-btn" title="Select all library entries">
-            <i class="fa-solid fa-check-double"></i> All
+          <button class="disklib-btn disklib-new-folder-btn" title="Create a folder" aria-label="Create a folder">
+            <i class="fa-solid fa-folder-plus" aria-hidden="true"></i>
           </button>
-          <button class="disklib-btn disklib-sel-none-btn" title="Deselect all library entries">
-            <i class="fa-regular fa-square"></i> None
+          <button class="disklib-btn disklib-new-atr-btn" title="Create a blank ATR in the current folder" aria-label="Create a blank ATR in the current folder">
+            <i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i>
           </button>
           <span class="disklib-toolbar-sep"></span>
-          <button class="disklib-btn disklib-dl-sel-btn" title="Download selected images" disabled>
-            <i class="fa-solid fa-download"></i> Download
+          <button class="disklib-btn disklib-sel-all-btn" title="Select all library entries" aria-label="Select all library entries">
+            <i class="fa-solid fa-check-double" aria-hidden="true"></i>
           </button>
-          <button class="disklib-btn disklib-btn-danger disklib-del-sel-btn" title="Delete selected images" disabled>
-            <i class="fa-solid fa-trash"></i> Delete
+          <button class="disklib-btn disklib-sel-none-btn" title="Deselect all library entries" aria-label="Deselect all library entries">
+            <i class="fa-regular fa-square" aria-hidden="true"></i>
           </button>
           <span class="disklib-toolbar-sep"></span>
-          <button class="disklib-btn disklib-export-btn" title="Export the complete library">
-            <i class="fa-solid fa-box-archive"></i> Export Library
+          <button class="disklib-btn disklib-dl-sel-btn" title="Download selected images" aria-label="Download selected images" disabled>
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
           </button>
-          <button class="disklib-btn disklib-import-btn" title="Import a complete library package">
-            <i class="fa-solid fa-file-import"></i> Import Library
+          <button class="disklib-btn disklib-btn-danger disklib-del-sel-btn" title="Delete selected images" aria-label="Delete selected images" disabled>
+            <i class="fa-solid fa-trash" aria-hidden="true"></i>
+          </button>
+          <span class="disklib-toolbar-sep"></span>
+          <button class="disklib-btn disklib-export-btn" title="Export the complete library" aria-label="Export the complete library">
+            <i class="fa-solid fa-box-archive" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-import-btn" title="Import a complete library package" aria-label="Import a complete library package">
+            <i class="fa-solid fa-file-import" aria-hidden="true"></i>
           </button>
           <input type="file" class="disklib-import-input" accept=".a8e,.zip,application/zip,application/octet-stream" hidden />
+        </div>
+        <div class="disklib-atr-view" hidden>
+          <div class="disklib-atr-toolbar">
+            <button class="disklib-btn disklib-atr-back-btn" type="button" title="Back to library" aria-label="Back to library">
+              <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+            </button>
+            <span class="disklib-atr-title"></span>
+            <span class="disklib-flex"></span>
+            <button class="disklib-btn disklib-atr-download-btn" type="button" title="Download the ATR image" aria-label="Download the ATR image">
+              <i class="fa-solid fa-download" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="disklib-atr-info" aria-live="polite"></div>
+          <div class="disklib-atr-content">
+            <div class="disklib-atr-cols-header">
+              <span>Name</span>
+              <span>Sectors</span>
+              <span>Start</span>
+              <span>Status</span>
+              <span></span>
+            </div>
+            <div class="disklib-atr-list"></div>
+          </div>
+          <div class="disklib-atr-preview" hidden>
+            <div class="disklib-atr-preview-title"></div>
+            <pre class="disklib-atr-preview-text"></pre>
+          </div>
         </div>
         <div class="disklib-drop-zone">
           <div class="disklib-table-scroll">
             <div class="disklib-cols-header">
               <span class="disklib-col disklib-col-chk"><input type="checkbox" class="disklib-master-chk" title="Select or deselect all" /></span>
               <span class="disklib-col disklib-col-name">Name</span>
-              <span class="disklib-col disklib-col-size">Size</span>
+              <span class="disklib-col disklib-col-rw">RW</span>
               <span class="disklib-col disklib-col-drive">D1:</span>
               <span class="disklib-col disklib-col-drive">D2:</span>
               <span class="disklib-col disklib-col-drive">D3:</span>
@@ -460,6 +496,10 @@
             <div class="disklib-list"></div>
           </div>
           <div class="disklib-drop-hint"><i class="fa-solid fa-upload"></i> Drop ATR or XEX files here</div>
+        </div>
+        <div class="disklib-searchbar">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input class="disklib-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search library..." aria-label="Search library" />
         </div>
         <div class="disklib-statusbar">
           <span class="disklib-stat-count">0 files</span>
@@ -742,6 +782,7 @@
     <script src="js/core/antic.js"></script>
     <script src="js/core/gtia.js"></script>
     <script src="js/core/hostfs.js"></script>
+    <script src="js/core/atr_inspector.js"></script>
     <script src="js/core/library_archive.js"></script>
     <script src="js/core/library_package.js"></script>
     <script src="js/core/disk_library.js"></script>

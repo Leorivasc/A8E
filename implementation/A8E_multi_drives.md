@@ -1,7 +1,7 @@
 # A8E Native Multi-Drive and Library Subproject
 
-Status: design proposal  
-Date: 2026-10-08
+Status: implementation in progress
+Date: 2026-10-09
 
 ## Purpose
 
@@ -36,15 +36,29 @@ The native application currently:
 
 - accepts one ATR or XEX path as a command-line argument;
 - defaults to `d1.atr` when no path is provided;
-- stores a single disk buffer in `IoData_t` as `pDisk1` with `lDiskSize`;
-- routes virtual SIO disk operations through that single disk buffer;
+- stores independent D1:-D8: media slots in `IoData_t`; D1: also retains the
+  legacy `pDisk1`/`lDiskSize` compatibility view;
+- routes virtual SIO disk operations through the slot selected by the command
+  Device ID;
 - reloads `D1.ATR` from the current directory when F11 is pressed;
-- has no persistent disk library;
-- has no D2: or multi-drive mounting interface;
-- has no native Library window or workspace export/import flow.
+- has a persistent native repository adapter for `library.json` plus `blobs/`,
+  and startup restores workspace assignments into the corresponding slots;
+- has a native D1:-D8: mounting interface through the SDL Library window;
+- exposes native package import/export and blank ATR creation through the SDL
+  Library window, while folder navigation/editing remains pending.
 
 The current implementation therefore cannot reproduce the multi-disk workflow
 available in jsA8E, such as AtariWriter in D1: with a documents disk in D2:.
+
+The first backend slice is now implemented: native emulator state owns eight
+independent media slots, mount/unmount/access APIs, writable and dirty flags,
+and the SIO dispatcher selects the addressed slot from D1: through D8:. The
+legacy D1: command-line buffer remains compatible. The repository adapter can
+load and save a complete validated local snapshot, startup restores workspace
+assignments, and the SDL Library window provides initial mount/eject controls.
+Runtime dirty-copy persistence, workspace persistence, package interchange,
+and blank ATR creation are implemented; folder navigation/editing remains
+pending.
 
 ## Current SIO bus implementation
 
@@ -64,7 +78,7 @@ Pokey_SEROUT_SERIN()
    |
    +-- collects the five command bytes
    +-- validates the checksum
-   +-- executes the operation against pDisk1
+   +-- selects D1:-D8: from Device ID and executes against that slot
    +-- queues a response for SERIN
           |
           v
@@ -108,7 +122,7 @@ Command -> ACK -> Complete + sector data + checksum
 A write transaction is represented as:
 
 ```text
-Command -> ACK -> sector data + checksum -> ACK + Complete
+Command -> ACK -> sector data + checksum -> ACK -> Complete/Error
 ```
 
 Write, Put, and Verify use a separate data-phase state. The command phase
@@ -126,7 +140,9 @@ The current native SIO dispatcher supports:
 - `$50`: Put Sector;
 - `$56`: Verify Sector;
 - `$57`: Write Sector;
-- `$21`: Format;
+- `$21`: Format. The operation clears the ATR data area and returns the
+  sector-sized bad-sector list required by the disk protocol. A successful
+  format returns an empty list terminated by `$FFFF`;
 - `$55`: Motor On.
 
 Unsupported commands are reported, but the implementation does not yet model
@@ -134,7 +150,8 @@ the full extended command and high-speed protocol set documented by the AHRM.
 
 ### ATR mapping
 
-The mounted image is currently held in `pIoData->pDisk1`. The SIO offset logic
+The selected mounted image is held in the addressed `IoData_t` D1:-D8: slot;
+slot 0 is mirrored by `pIoData->pDisk1` for compatibility. The SIO offset logic
 uses the ATR format as follows:
 
 - the first 16 bytes are the ATR header;
@@ -166,20 +183,22 @@ AHRM active-low SIO command-line behavior.
 
 ### Current SIO limitations
 
-The following limitations must be addressed before a full multi-drive Library
-can be implemented:
+The following limitations must be addressed before the native multi-drive
+Library is complete:
 
-- normal commands are effectively backed by the single `pDisk1` image;
-- there are no independent D2: through D8: disk states;
+- repository records and workspace maps are synchronized with mounted IoData
+  slots during the implemented mount/eject and write-protection changes;
+- dirty mounted working copies are flushed on eject and emulator exit;
 - SIO buffers, indexes, and pending-command state are static globals rather
   than per-emulator or per-drive state;
-- the Device ID is not yet used to select an independent drive backend for
-  normal commands;
-- `$3F` recognizes D1: through D8: for the high-speed query, but this does not
-  provide eight independent virtual drives;
-- writes modify the ATR buffer directly;
-- there is no integrated write-protection check;
-- there is no dirty flag or Library callback when a disk is modified;
+- the SDL Library window exposes repository, search, mount/eject, delete, and
+  runtime write-protection controls, package import/export, and blank ATR
+  creation; folder navigation/editing remains pending;
+- `$3F` recognizes D1: through D8: for the high-speed query, but the broader
+  high-speed protocol remains incomplete;
+- writes modify the selected ATR working copy directly and mark its slot dirty;
+- write-protection is enforced per mounted slot and persisted in the workspace
+  map;
 - motor and mechanical delays are simplified;
 - only a subset of the AHRM command set is implemented;
 - the existing SIO test coverage focuses primarily on timing contracts rather
@@ -393,6 +412,82 @@ and command timeout behavior. The command and timing documents define the
 supported command families and the variations required by high-speed and
 extended disk devices.
 
+### DOS 2.5 duplicate-disk timing case
+
+DOS 2.5 `DUPLICATE DISK` formats the destination disk and then copies it
+sector by sector. A blank or previously formatted ATR must therefore support
+both the `$21` FORMAT transaction and the subsequent `$52`/`$50`/`$57` disk
+traffic.
+
+The emulators must report a realistic format timeout in STATUS byte +2. A
+value such as `$01` is not a substitute for the normal command timeout: AHRM
+10.2 warns that DOS versions may reuse this value when formatting another
+drive, producing timeout and retry behavior. The jsA8E and native A8E disk
+devices now report `$E0` for this field on standard and enhanced-density
+media.
+
+The `$57` WRITE command must also verify its result by reading the sector back
+before returning Complete. Memory-backed media can perform that readback
+without a host-time delay, but it must still return Error if the verification
+does not match. This preserves the observable AHRM command contract while
+avoiding artificial wall-clock waits. The data-frame ACK and the final
+Complete/Error response are separate protocol phases; combining them causes
+DOS to wait for a response that has already been sent.
+
+The approximately 16-20 second pauses observed during DOS 2.5 duplication
+must be distinguished from a response-phase defect. Chrome tracing showed
+that successful writes use the expected `ACK -> data-frame ACK -> Complete`
+sequence, while the paused attempts receive a data-frame `NAK` for `$57` and
+then wait for the DOS retry timeout. AHRM 5.10 documents a race in older Atari
+OS SIO code: the first transmitted byte can be written before `CHKSUM` is
+initialized, and a SIO receive IRQ or VBI can corrupt that checksum. The drive
+must NAK that invalid data frame, and the older OS may then take the long retry
+path. The pause is therefore a documented guest timing/firmware behavior, not
+normal disk latency or an ATR geometry mismatch. The emulator must retain the
+checksum validation and NAK behavior; accepting the corrupted frame or
+shortening the timeout would not be AHRM-compliant. A remaining optional
+investigation is a cycle-level AHRM-08 comparison against Altirra and hardware
+to explain differences in how often the guest race is hit.
+
+#### Open investigation record
+
+This case remains intentionally pending while Full Library work is completed.
+The investigation established the following:
+
+- The original FORMAT failure (`DOS error 138`) was a real device-response
+  defect. The `$21` response now returns the sector-sized bad-sector list
+  terminated by `$FFFF`, as required by AHRM 10.4.
+- The STATUS format-timeout field was corrected to a realistic value (`$E0`)
+  instead of `$01`, so DOS does not inherit an invalid short timeout when it
+  formats another drive.
+- `$57` WRITE performs an in-memory readback verification before returning its
+  final result. This avoids introducing host wall-clock delays while retaining
+  the observable disk contract.
+- WRITE, PUT, and VERIFY now expose the data-frame ACK and the final
+  Complete/Error as separate phases. This was validated by the JavaScript SIO
+  regression and is required by AHRM 9.1.
+- The two ATRs used in the test had the same 720-sector, 128-byte geometry and
+  equal image size. The destination was ultimately bootable and usable, so the
+  pauses were not caused by incompatible ATR geometry or failed persistence.
+- After a Chrome reload, a new Worker, and a clean SIO activity trace, normal
+  writes showed `ACK -> valid data frame -> ACK -> Complete`. The paused
+  attempts showed a `$57` data-frame NAK and no Complete/Error, followed by a
+  DOS retry after roughly 16-20 seconds. This explains why the final copy can
+  still be correct.
+- AHRM 5.10 describes the matching Atari OS race: older SIO code can write
+  the first byte before initializing `CHKSUM`; a SIO receive IRQ or VBI can
+  then corrupt the checksum. The drive must NAK the bad data frame, while the
+  older OS may take the long retry path.
+
+The pending resolution is not to accept invalid checksums, suppress NAKs, or
+shorten protocol timeouts. Those changes would hide guest-visible AHRM
+behavior. The correct follow-up is an AHRM-08 cycle-level comparison of the
+first-byte SEROUT/CHKSUM window and the receive-IRQ/VBI arbitration against
+Altirra and hardware. If a timing discrepancy is found, the fix must be made
+in both jsA8E and native A8E with a shared regression. Until that work is
+resumed, the observed pauses are classified as a known guest timing/firmware
+case rather than a Full Library blocker.
+
 ## SIO implementation phases
 
 ### Phase 1: drive collection
@@ -482,8 +577,10 @@ state or keyboard events.
 
 ### Drive state
 
-Replace the single `pDisk1`/`lDiskSize` state with a drive collection, ideally
-for D1: through D8:. Each drive should track at least:
+The initial drive collection now exists for D1: through D8:, with slot 0 also
+mirrored through the legacy `pDisk1`/`lDiskSize` fields. The next integration
+step is to connect each drive to a stable repository entry. Each drive should
+track at least:
 
 ```text
 DriveState
@@ -531,6 +628,17 @@ The MVP window should provide:
 
 The UI should communicate with the media repository through commands or a
 small event interface. It must not directly manipulate SIO buffers.
+
+The native UI is implemented as a dependency-free SDL window opened with F9.
+It lists repository ATR/XEX entries, supports case-insensitive substring
+search, exposes D1:-D8: cells, restores the startup workspace map, and routes
+mount/eject clicks through the AtariIo media API. Delete is guarded while an
+entry is mounted, right-click toggles runtime write protection, and dirty
+working copies are saved on eject and emulator exit. Runtime workspace changes
+are persisted immediately. Native package import, upload, and folder editing
+are now covered by the dependency-free `I`/`E` package prompt and the `N`
+blank-ATR action; file upload still uses package import and folder editing
+remains pending.
 
 ## UI and dependency constraints
 

@@ -54,6 +54,7 @@ async function main() {
       created: Date.parse("2026-10-01T12:00:00Z"),
       modified: Date.parse("2026-10-08T14:45:12Z"),
       mountedSlot: 0,
+      folderId: "folder-projects",
     },
     {
       id: "docs-disk",
@@ -68,6 +69,10 @@ async function main() {
   const options = {
     libraryVersion: 7,
     createdAt: "2026-10-08T15:00:00Z",
+    folders: [
+      { id: "root", name: "Library", parentId: null, created: Date.parse("2026-10-01T00:00:00Z"), modified: Date.parse("2026-10-01T00:00:00Z") },
+      { id: "folder-projects", name: "Projects", parentId: "root", created: Date.parse("2026-10-01T00:00:00Z"), modified: Date.parse("2026-10-08T14:00:00Z") },
+    ],
     workspace: {
       devices: { D1: "writer-disk", D2: "docs-disk" },
       writeProtected: { D1: false, D2: false },
@@ -76,12 +81,34 @@ async function main() {
   const manifest = api.makeManifest(records, options);
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.libraryVersion, 7);
+  assert.equal(manifest.library[0].folderId, "folder-projects");
+  assert.equal(manifest.folders.length, 2);
 
   const exported = await api.exportPackage(records, options);
   const imported = await api.importPackage(exported.bytes);
   assert.equal(JSON.stringify(imported.manifest), JSON.stringify(manifest));
   assert.deepEqual(Array.from(imported.entries[0].bytes), [0x96, 0x02, 1, 2, 3]);
   assert.deepEqual(Array.from(imported.entries[1].bytes), [9, 8, 7]);
+  assert.equal(imported.entries[0].manifest.folderId, "folder-projects");
+
+  // Different library entries may share identical content. The manifest
+  // keeps both entries while the archive stores one content-addressed blob.
+  const sharedContentRecords = records.concat([{
+    id: "writer-copy",
+    name: "writer-copy.atr",
+    format: "atr",
+    bytes: records[0].bytes,
+    created: Date.parse("2026-10-08T15:00:00Z"),
+    modified: Date.parse("2026-10-08T15:00:00Z"),
+  }]);
+  const sharedContentPackage = await api.exportPackage(sharedContentRecords, options);
+  const sharedContentImport = await api.importPackage(sharedContentPackage.bytes);
+  assert.equal(sharedContentImport.manifest.library.length, 3);
+  assert.equal(sharedContentImport.entries.length, 3);
+  assert.equal(
+    sharedContentImport.manifest.library[0].path,
+    sharedContentImport.manifest.library[2].path,
+  );
 
   const conflictPlan = api.planImport([
     {
@@ -93,6 +120,8 @@ async function main() {
   ], imported);
   assert.equal(conflictPlan.summary.conflicts, 1);
   assert.equal(conflictPlan.summary.added, 2);
+  assert.equal(conflictPlan.summary.foldersAdded, 1);
+  assert.equal(conflictPlan.additions[0].folderId, "folder-projects");
 
   const malformedManifest = Object.assign({}, manifest, {
     library: manifest.library.map(function (entry, index) {

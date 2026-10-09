@@ -2138,6 +2138,7 @@
           sioInIndex: io.sioInIndex | 0,
           sioInSize: io.sioInSize | 0,
           sioPendingReadSize: io.sioPendingReadSize | 0,
+          sioPendingWriteResult: io.sioPendingWriteResult | 0,
           pokeyLfsr17: io.pokeyLfsr17 | 0,
           pokeyLfsr17LastCycle: io.pokeyLfsr17LastCycle,
           pokeyPotValues: new Uint8Array(io.pokeyPotValues || 0),
@@ -2263,6 +2264,7 @@
         io.sioInIndex = state.sioInIndex | 0;
         io.sioInSize = state.sioInSize | 0;
         io.sioPendingReadSize = state.sioPendingReadSize | 0;
+        io.sioPendingWriteResult = state.sioPendingWriteResult | 0;
         io.pokeyLfsr17 = state.pokeyLfsr17 | 0;
         io.pokeyLfsr17LastCycle = state.pokeyLfsr17LastCycle;
         copyBytesTo(io.pokeyPotValues, state.pokeyPotValues);

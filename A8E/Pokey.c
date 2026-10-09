@@ -2154,6 +2154,7 @@ static u16 cSioOutIndex = 0;
 static u16 sSioInIndex = 0;
 static u16 sSioInSize = 0;
 static u16 sSioPendingReadSize = 0;
+static u8 sSioPendingWriteResult = 0;
 
 /* SIO data phase state (for WRITE/PUT/VERIFY commands) */
 #define SIO_DATA_OFFSET 32
@@ -2162,6 +2163,18 @@ static u16 sSioDataIndex = 0;
 static u8 cSioPendingCmd = 0;
 static u16 sSioPendingSector = 0;
 static u16 sSioPendingBytes = 0;
+
+static u8 *Pokey_SioCurrentDisk(IoData_t *pIoData)
+{
+	if(!pIoData || pIoData->cSioDriveIndex >= 8u) return NULL;
+	return pIoData->apDisk[pIoData->cSioDriveIndex];
+}
+
+static u32 Pokey_SioCurrentDiskSize(IoData_t *pIoData)
+{
+	if(!pIoData || pIoData->cSioDriveIndex >= 8u) return 0u;
+	return pIoData->alDiskSize[pIoData->cSioDriveIndex];
+}
 
 /* AHRM 5.6: modes 010 and 100 use timer 4; modes 110-111 use timer 2.
  * Modes 000/001/011/101 do not provide a usable output clock here: the first
@@ -2333,6 +2346,17 @@ static void Pokey_SioQueuePendingReadData(_6502_Context_t *pContext)
 	AtariIoCycleTimedEventUpdate(pContext);
 }
 
+static void Pokey_SioQueuePendingWriteResult(_6502_Context_t *pContext)
+{
+	u8 cResult = sSioPendingWriteResult;
+
+	if(cResult == 0) return;
+
+	sSioPendingWriteResult = 0;
+	aSioBuffer[0] = cResult;
+	Pokey_SioQueueSerinResponse(pContext, 1);
+}
+
 static void Pokey_SioSectorBytesAndOffset(u16 sSectorIndex, u16 sSectorSize,
 										  u16 *pBytesToRead, u32 *pOffset)
 {
@@ -2428,7 +2452,9 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 			expected = sSioPendingBytes + 1; /* data + checksum */
 			if(sSioDataIndex == expected)
 			{
-				u16 sSectorSize = ((AtrHeader_t *)pIoData->pDisk1)->sSectorSize;
+				u8 *pDisk = Pokey_SioCurrentDisk(pIoData);
+				u32 lDiskSize = Pokey_SioCurrentDiskSize(pIoData);
+				u16 sSectorSize = pDisk ? ((AtrHeader_t *)pDisk)->sSectorSize : 128u;
 				u16 sBytesToRead;
 				u32 lOffset;
 				u8 provided = aSioBuffer[SIO_DATA_OFFSET + sSioPendingBytes];
@@ -2447,10 +2473,12 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 
 				Pokey_SioSectorBytesAndOffset(sSioPendingSector, sSectorSize, &sBytesToRead, &lOffset);
 
-				if(calculated != provided || !pIoData->pDisk1 ||
-				   sSioPendingSector == 0 || lOffset + 16 >= pIoData->lDiskSize ||
+				if(calculated != provided || !pDisk ||
+				   (cSioPendingCmd != 0x56 && !pIoData->abDiskWritable[pIoData->cSioDriveIndex]) ||
+				   sSioPendingSector == 0 || lOffset + 16 >= lDiskSize ||
 				   sBytesToRead != sSioPendingBytes)
 				{
+					sSioPendingWriteResult = 0;
 					aSioBuffer[0] = 'N';
 					Pokey_SioQueueSerinResponse(pContext, 1);
 				}
@@ -2461,23 +2489,39 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 
 					for(vi = 0; vi < sBytesToRead; vi++)
 					{
-						if(pIoData->pDisk1[16 + lOffset + vi] != aSioBuffer[SIO_DATA_OFFSET + vi])
+						if(pDisk[16 + lOffset + vi] != aSioBuffer[SIO_DATA_OFFSET + vi])
 						{
 							ok = 0;
 							break;
 						}
 					}
+					sSioPendingWriteResult = ok ? 'C' : 'E';
 					aSioBuffer[0] = 'A';
-					aSioBuffer[1] = ok ? 'C' : 'E';
-					Pokey_SioQueueSerinResponse(pContext, 2);
+					Pokey_SioQueueSerinResponse(pContext, 1);
 				}
 				else /* WRITE / PUT */
 				{
-					memcpy(pIoData->pDisk1 + 16 + lOffset,
+					u32 vi;
+					u8 cResult = 'C';
+
+					memcpy(pDisk + 16 + lOffset,
 						   &aSioBuffer[SIO_DATA_OFFSET], sBytesToRead);
+					if(cSioPendingCmd == 0x57) /* WRITE includes readback verify */
+					{
+						for(vi = 0; vi < sBytesToRead; vi++)
+						{
+							if(pDisk[16 + lOffset + vi] !=
+							   aSioBuffer[SIO_DATA_OFFSET + vi])
+							{
+								cResult = 'E';
+								break;
+							}
+						}
+					}
+					pIoData->abDiskDirty[pIoData->cSioDriveIndex] = 1u;
+					sSioPendingWriteResult = cResult;
 					aSioBuffer[0] = 'A';
-					aSioBuffer[1] = 'C';
-					Pokey_SioQueueSerinResponse(pContext, 2);
+					Pokey_SioQueueSerinResponse(pContext, 1);
 				}
 
 				/* Reset data phase state */
@@ -2508,7 +2552,11 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 				{
 					char aCaption[100];
 					u16 sSectorIndex;
-					u16 sSectorSize = ((AtrHeader_t *)pIoData->pDisk1)->sSectorSize;
+					pIoData->cSioDriveIndex = aSioBuffer[0] >= 0x31 && aSioBuffer[0] <= 0x38
+						? (u8)(aSioBuffer[0] - 0x31u) : 0xffu;
+					u8 *pDisk = Pokey_SioCurrentDisk(pIoData);
+					u32 lDiskSize = Pokey_SioCurrentDiskSize(pIoData);
+					u16 sSectorSize = pDisk ? ((AtrHeader_t *)pDisk)->sSectorSize : 128u;
 					u16 sBytesToRead;
 					u32 lOffset;
 #ifdef VERBOSE_SIO
@@ -2543,7 +2591,8 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						/* $3F is also the Type 1 Poll command. An absent
 						 * peripheral must remain silent. Only disk IDs D1-D8
 						 * use the high-speed query interpretation. */
-						if(aSioBuffer[0] >= 0x31 && aSioBuffer[0] <= 0x38)
+						if(aSioBuffer[0] >= 0x31 && aSioBuffer[0] <= 0x38 &&
+						   Pokey_SioCurrentDisk(pIoData))
 						{
 							/* AHRM 10.3: standard US Doubler divisor. */
 							aSioBuffer[0] = 'A';
@@ -2580,13 +2629,13 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 							Pokey_SioSectorBytesAndOffset(sSectorIndex, sSectorSize,
 														  &sBytesToRead, &lOffset);
 
-							if(lOffset + 16 >= pIoData->lDiskSize)
+							if(!pDisk || lOffset + 16 >= lDiskSize)
 							{
 								aSioBuffer[0] = 'N';
 								sSioInSize = 1;
 #ifdef VERBOSE_SIO
 								printf("Not accepted (sector %d, offset = %lu, disk size = %lu!\n",
-									   sSectorIndex, lOffset, pIoData->lDiskSize);
+									   sSectorIndex, lOffset, lDiskSize);
 #endif
 							}
 							else
@@ -2594,7 +2643,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 								aSioBuffer[0] = 'A';
 								aSioBuffer[1] = 'C';
 
-								memcpy(aSioBuffer + 2, pIoData->pDisk1 + 16 + lOffset, sBytesToRead);
+								memcpy(aSioBuffer + 2, pDisk + 16 + lOffset, sBytesToRead);
 
 								aSioBuffer[sBytesToRead + 2] = AtariIo_SioChecksum(aSioBuffer + 2, sBytesToRead);
 
@@ -2632,25 +2681,27 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 							aSioBuffer[0] = 'A';
 							aSioBuffer[1] = 'C';
 							aSioBuffer[2] = 0x10;
-							aSioBuffer[3] = 0x00;
-							aSioBuffer[4] = 0x01;
+							/* AHRM 10.2: inverted FDC status; FF means ready/no errors. */
+							aSioBuffer[3] = 0xFF;
+							/* AHRM 10.2: format timeout, not normal command timeout. */
+							aSioBuffer[4] = 0xE0;
 							aSioBuffer[5] = 0x00;
-							aSioBuffer[6] = 0x11;
+							aSioBuffer[6] = 0xF0;
 						}
 						else if(sSectorSize == 256)
 						{
 							aSioBuffer[0] = 'A';
 							aSioBuffer[1] = 'C';
 							aSioBuffer[2] = 0x30;
-							aSioBuffer[3] = 0x00;
-							aSioBuffer[4] = 0x01;
+							aSioBuffer[3] = 0xFF;
+							aSioBuffer[4] = 0xE0;
 							aSioBuffer[5] = 0x00;
-							aSioBuffer[6] = 0x31;
+							aSioBuffer[6] = 0x10;
 						}
 
 						sSioInSize = 7;
 
-						if(pIoData->pDisk1[0] != 0)
+						if(Pokey_SioCurrentDisk(pIoData) && Pokey_SioCurrentDisk(pIoData)[0] != 0)
 						{
 							pIoData->llSerialInputDataReadyCycle =
 								llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
@@ -2680,7 +2731,8 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 							Pokey_SioSectorBytesAndOffset(sSectorIndex, sSectorSize,
 														  &sBytesToRead, &lOffset);
 
-							if(lOffset + 16 >= pIoData->lDiskSize)
+							if(!Pokey_SioCurrentDisk(pIoData) ||
+							   lOffset + 16 >= Pokey_SioCurrentDiskSize(pIoData))
 							{
 								aSioBuffer[0] = 'N';
 								Pokey_SioQueueSerinResponse(pContext, 1);
@@ -2693,6 +2745,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 								cSioPendingCmd = aSioBuffer[1];
 								sSioPendingSector = sSectorIndex;
 								sSioPendingBytes = sBytesToRead;
+								sSioPendingWriteResult = 0;
 
 								aSioBuffer[0] = 'A';
 								Pokey_SioQueueSerinResponse(pContext, 1);
@@ -2705,17 +2758,29 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 #ifdef VERBOSE_SIO
 						printf("SIO format\n");
 #endif
-						if(!pIoData->pDisk1 || pIoData->lDiskSize <= 16)
+						if(!Pokey_SioCurrentDisk(pIoData) || Pokey_SioCurrentDiskSize(pIoData) <= 16 ||
+						   !pIoData->abDiskWritable[pIoData->cSioDriveIndex])
 						{
 							aSioBuffer[0] = 'N';
 							Pokey_SioQueueSerinResponse(pContext, 1);
 						}
 						else
 						{
-							memset(pIoData->pDisk1 + 16, 0, pIoData->lDiskSize - 16);
+							memset(Pokey_SioCurrentDisk(pIoData) + 16, 0,
+							       Pokey_SioCurrentDiskSize(pIoData) - 16);
+							pIoData->abDiskDirty[pIoData->cSioDriveIndex] = 1u;
+							/* AHRM 10.4: FORMAT returns a sector-sized bad-sector
+							 * list after the command ACK. A healthy disk returns an
+							 * empty list terminated by $FFFF. */
+							u16 sFormatBytes = sSectorSize;
+							memset(aSioBuffer + 2, 0, sFormatBytes);
+							aSioBuffer[2] = 0xFF;
+							aSioBuffer[3] = 0xFF;
+							aSioBuffer[sFormatBytes + 2] =
+								AtariIo_SioChecksum(aSioBuffer + 2, sFormatBytes);
+							sSioPendingReadSize = sFormatBytes;
 							aSioBuffer[0] = 'A';
-							aSioBuffer[1] = 'C';
-							Pokey_SioQueueSerinResponse(pContext, 2);
+							Pokey_SioQueueSerinResponse(pContext, 1);
 						}
 
 						break;
@@ -2776,7 +2841,14 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		else
 		{
 			sSioInIndex = 0;
-			Pokey_SioQueuePendingReadData(pContext);
+			if(sSioPendingReadSize != 0)
+			{
+				Pokey_SioQueuePendingReadData(pContext);
+			}
+			else
+			{
+				Pokey_SioQueuePendingWriteResult(pContext);
+			}
 		}
 	}
 
@@ -2887,6 +2959,7 @@ u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue)
 		if((cPreviousSkctl & 0x03) != 0 && (*pValue & 0x03) == 0)
 		{
 			Pokey_EnterInitialization(pContext);
+			sSioPendingWriteResult = 0;
 		}
 		if((cPreviousSkctl & 0x03) == 0 && (*pValue & 0x03) != 0)
 		{

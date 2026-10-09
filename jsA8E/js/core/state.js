@@ -61,6 +61,8 @@
         sioInSize: 0,
         // Read-sector ACK is followed by a separate Complete/data phase.
         sioPendingReadSize: 0,
+        // Write data ACK is followed by a separate Complete/Error phase.
+        sioPendingWriteResult: 0,
         // POKEY-ish randomness state (LFSR)
         pokeyLfsr17: 0x1ffff,
         pokeyLfsr17LastCycle: 0,

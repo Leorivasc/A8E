@@ -9,6 +9,12 @@
 extern "C" {
 #endif
 
+/* Computes the lowercase hexadecimal SHA-256 identity used by library.json. */
+void A8E_LibraryPackage_Sha256Hex(
+	const uint8_t *pBytes,
+	uint32_t lSize,
+	char aHex[65]);
+
 /* The package layer owns the library.json entry and delegates ZIP mechanics
  * to LibraryArchive. Payload names must be relative blob paths. */
 int A8E_LibraryPackage_ValidateManifest(

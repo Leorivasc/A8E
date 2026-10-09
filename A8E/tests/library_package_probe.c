@@ -12,11 +12,11 @@ int main(void)
 {
 	static const char aJson[] =
 		"{\"format\":\"a8e-library-export\",\"schemaVersion\":1,\"libraryVersion\":7,"
-		"\"createdAt\":\"2026-10-08T15:00:00Z\",\"library\":[{\"id\":\"disk-demo\","
+		"\"createdAt\":\"2026-10-08T15:00:00Z\",\"folders\":[{\"id\":\"root\",\"name\":\"Library\",\"parentId\":null,\"createdAt\":\"2026-10-01T00:00:00Z\",\"modifiedAt\":\"2026-10-01T00:00:00Z\"},{\"id\":\"folder-projects\",\"name\":\"Projects\",\"parentId\":\"root\",\"createdAt\":\"2026-10-01T00:00:00Z\",\"modifiedAt\":\"2026-10-08T14:00:00Z\"}],\"library\":[{\"id\":\"disk-demo\","
 		"\"name\":\"demo.atr\",\"type\":\"atr\",\"path\":\"blobs/"
 		"ff5d8507b6a72bee2debce2c0054798deaccdc5d8a1b945b6280ce8aa9cba52e.atr\","
 		"\"size\":5,\"sha256\":\"ff5d8507b6a72bee2debce2c0054798deaccdc5d8a1b945b6280ce8aa9cba52e\","
-		"\"createdAt\":\"2026-10-01T12:00:00Z\",\"modifiedAt\":\"2026-10-08T14:45:12Z\"}],"
+		"\"createdAt\":\"2026-10-01T12:00:00Z\",\"modifiedAt\":\"2026-10-08T14:45:12Z\",\"folderId\":\"folder-projects\"}],"
 		"\"workspace\":{\"devices\":{\"D1\":\"disk-demo\"},\"writeProtected\":{\"D1\":false}}}";
 	static const uint8_t aAtr[] = { 0, 1, 2, 3, 255 };
 	static const A8E_LibraryArchiveInput_t aPayloads[] = {

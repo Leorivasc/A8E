@@ -801,6 +801,14 @@
       return debugRuntime.getTraceTail(limit);
     }
 
+    function getSioTrace() {
+      const io = machine.ctx && machine.ctx.ioData;
+      const trace = io && Array.isArray(io.sioTrace)
+        ? io.sioTrace
+        : [];
+      return trace.map(function (record) { return Object.assign({}, record); });
+    }
+
     function runUntilPc(targetPc, opts) {
       return debugRuntime.runUntilPc(targetPc, opts);
     }
@@ -1495,6 +1503,7 @@
       getDebugState: getDebugState,
       getCounters: getCounters,
       getTraceTail: getTraceTail,
+      getSioTrace: getSioTrace,
       runUntilPc: runUntilPc,
       readMemory: readMemory,
       readRange: readRange,
