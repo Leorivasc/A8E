@@ -638,7 +638,7 @@ button:active:not(:disabled) {
 
 .layout[data-layout-scheme="work"],
 .layout[data-layout-scheme="development"] {
-  grid-template-columns: minmax(240px, 0.38fr) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 0.45fr) minmax(0, 1fr);
   grid-template-areas:
     "tools screen"
     "input input";

@@ -26,7 +26,8 @@
 
     const DISK_HEADER_SIZE = 16;
     const DISK_SECTOR_SIZE_SINGLE = 128;
-    const DISK_SECTOR_SIZE_ENHANCED = 256;
+    const DISK_SECTOR_SIZE_DOUBLE = 256;
+    const DISK_SECTOR_SIZE_LARGE = 512;
     const DISK_BOOT_SECTORS = 3;
 
     const CHAR_ACK = "A".charCodeAt(0);
@@ -172,7 +173,11 @@
       let s = DISK_SECTOR_SIZE_SINGLE;
       if (disk && disk.length >= 6) {
         s = (disk[4] & 0xff) | ((disk[5] & 0xff) << 8);
-        if (s !== DISK_SECTOR_SIZE_SINGLE && s !== DISK_SECTOR_SIZE_ENHANCED) {
+        if (
+          s !== DISK_SECTOR_SIZE_SINGLE &&
+          s !== DISK_SECTOR_SIZE_DOUBLE &&
+          s !== DISK_SECTOR_SIZE_LARGE
+        ) {
           s = DISK_SECTOR_SIZE_SINGLE;
         }
       }
@@ -181,13 +186,24 @@
 
     function sectorBytesAndOffset(sectorIndex, sectorSize) {
       if (sectorIndex <= 0) return null;
+      // AHRM 10.1/10.3: only 256-byte DD media exposes the first three
+      // logical sectors as 128-byte boot transfers. Larger-sector devices
+      // transfer their native size for every sector.
+      const shortBootSectors = sectorSize === DISK_SECTOR_SIZE_DOUBLE;
+      const bootBytes = shortBootSectors
+        ? DISK_SECTOR_SIZE_SINGLE
+        : sectorSize;
       const bytes =
-        sectorIndex <= DISK_BOOT_SECTORS ? DISK_SECTOR_SIZE_SINGLE : sectorSize;
+        shortBootSectors && sectorIndex <= DISK_BOOT_SECTORS
+          ? bootBytes
+          : sectorSize;
       const index =
-        sectorIndex <= DISK_BOOT_SECTORS
-          ? (sectorIndex - 1) * DISK_SECTOR_SIZE_SINGLE
-          : (sectorIndex - (DISK_BOOT_SECTORS + 1)) * sectorSize +
-            DISK_SECTOR_SIZE_SINGLE * DISK_BOOT_SECTORS;
+        shortBootSectors && sectorIndex <= DISK_BOOT_SECTORS
+          ? (sectorIndex - 1) * bootBytes
+          : shortBootSectors
+            ? (sectorIndex - (DISK_BOOT_SECTORS + 1)) * sectorSize +
+              DISK_BOOT_SECTORS * bootBytes
+            : (sectorIndex - 1) * sectorSize;
       const offset = DISK_HEADER_SIZE + index;
       return { bytes: bytes | 0, offset: offset | 0 };
     }
@@ -305,6 +321,21 @@
       return null;
     }
 
+    // AHRM 10.2: STATUS byte +1 normally reports the (inverted) FDC status
+    // from the last sector operation.  It is controller state, not a property
+    // of the ATR header or a constant "media ready" flag.  Keep it per drive
+    // so that a STATUS issued before the first sector command observes the
+    // reset latch, while a completed read can update the value independently.
+    function diskFdcStatus(io, deviceSlot) {
+      if (!io.sioDiskFdcStatus) io.sioDiskFdcStatus = new Uint8Array(DISK_DEVICE_COUNT);
+      return io.sioDiskFdcStatus[deviceSlot & 7] & 0xff;
+    }
+
+    function setDiskFdcStatus(io, deviceSlot, value) {
+      if (!io.sioDiskFdcStatus) io.sioDiskFdcStatus = new Uint8Array(DISK_DEVICE_COUNT);
+      io.sioDiskFdcStatus[deviceSlot & 7] = value & 0xff;
+    }
+
     // Application-layer observers may persist a disk image after a successful
     // mutation. This callback is deliberately outside the SIO response path:
     // it does not alter protocol bytes or timing.
@@ -354,6 +385,9 @@
             return;
           }
           buf.set(disk.subarray(si.offset, si.offset + si.bytes), 2);
+          // The virtual drive completed a data read without an FDC error.
+          // Report that result on a later STATUS request (AHRM 10.2).
+          setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
           queueAckData(ctx, now, 2, si.bytes);
           notifyDiskActivity(io, mounted, "read");
           return;
@@ -383,24 +417,22 @@
           writeAckComplete(buf);
           if (sectorSize === DISK_SECTOR_SIZE_SINGLE) {
             buf[2] = 0x10;
-            // AHRM 10.2: byte +1 is the inverted FDC status. FF means
-            // ready with no write-protect, media, or command errors.
-            buf[3] = 0xff;
+            buf[3] = diskFdcStatus(io, mounted.deviceSlot);
             // AHRM 10.2: this is the format timeout, not the normal
             // command timeout. Keep it in the range used by real drives so
             // DOS does not reuse an unrealistically short value for another
             // drive's FORMAT command.
             buf[4] = 0xe0;
             buf[5] = 0x00;
-            buf[6] = 0xf0;
           } else {
             buf[2] = 0x30;
-            // AHRM 10.2: byte +1 is the inverted FDC status.
-            buf[3] = 0xff;
+            buf[3] = diskFdcStatus(io, mounted.deviceSlot);
             buf[4] = 0xe0;
             buf[5] = 0x00;
-            buf[6] = 0x10;
           }
+          // This checksum belongs to the status payload, not to a density
+          // template.  The latched FDC status is allowed to vary by command.
+          buf[6] = sioChecksum(buf.subarray(2, 6), 4);
           queueSerinResponse(ctx, now, 7);
           notifyDiskActivity(io, mounted, "status");
           return;

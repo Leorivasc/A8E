@@ -84,6 +84,17 @@ function makeContext(observer, activityObserver) {
   };
 }
 
+function requestRead(api, ctx, sector) {
+  const command = [0x31, 0x52, sector & 0xff, (sector >>> 8) & 0xff];
+  command.push(checksum(command));
+  command.forEach(function (value) { api.seroutWrite(ctx, value); });
+  assert.equal(api.serinRead(ctx), "A".charCodeAt(0));
+  return {
+    bytes: ctx.ioData.sioInSize - 2,
+    firstByte: ctx.ioData.sioBuffer[1],
+  };
+}
+
 function main() {
   const observed = [];
   const activities = [];
@@ -161,11 +172,58 @@ function main() {
   const statusCommand = [0x31, 0x53, 0x00, 0x00];
   statusCommand.push(checksum(statusCommand));
   statusCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
-  // AHRM 10.2: STATUS byte +1 is inverted FDC status. A ready writable
-  // disk must not advertise not-ready, write-protect, or command errors.
-  assert.equal(ctx.ioData.sioBuffer[3], 0xff);
+  // AHRM 10.2: STATUS byte +1 is the per-drive inverted FDC result of the
+  // prior sector operation. Before the first operation it is the reset latch,
+  // not a fabricated all-clear result.
+  assert.equal(ctx.ioData.sioBuffer[3], 0x00);
   assert.equal(ctx.ioData.sioBuffer[4], 0xe0);
   assert.equal(ctx.ioData.sioBuffer[6], 0xf0);
+
+  while (ctx.ioData.sioInSize > 0) api.serinRead(ctx);
+  requestRead(api, ctx, 1);
+  while (ctx.ioData.sioInSize > 0) api.serinRead(ctx);
+  statusCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
+  assert.equal(ctx.ioData.sioBuffer[3], 0xff);
+  assert.equal(ctx.ioData.sioBuffer[6], 0xf0);
+
+  // AHRM 10.1/10.3: a 16MB DD ATR remains a logical SIO disk. Its first
+  // three sectors transfer as 128 bytes, then reads switch to 256 bytes all
+  // the way through sector 65535.
+  const originalDisk = ctx.ioData.diskImages[3];
+  const large = new Uint8Array(16 + 3 * 128 + (65535 - 3) * 256);
+  large[0] = 0x96;
+  large[1] = 0x02;
+  large[4] = 0x00;
+  large[5] = 0x01;
+  large[16] = 0x11;
+  large[16 + 3 * 128] = 0x44;
+  large[large.length - 256] = 0xff;
+  ctx.ioData.diskImages[3] = { bytes: large, size: large.length };
+  let read = requestRead(api, ctx, 1);
+  assert.equal(read.bytes, 128);
+  assert.equal(read.firstByte, 0x11);
+  read = requestRead(api, ctx, 4);
+  assert.equal(read.bytes, 256);
+  assert.equal(read.firstByte, 0x44);
+  read = requestRead(api, ctx, 65535);
+  assert.equal(read.bytes, 256);
+  assert.equal(read.firstByte, 0xff);
+
+  // 512-byte devices are valid logical SIO disks too, but AHRM reserves the
+  // 128-byte boot-sector exception for 256-byte DD media only.
+  const largeSector = new Uint8Array(16 + 4 * 512);
+  largeSector[0] = 0x96;
+  largeSector[1] = 0x02;
+  largeSector[4] = 0x00;
+  largeSector[5] = 0x02;
+  largeSector[16] = 0x51;
+  ctx.ioData.diskImages[3] = { bytes: largeSector, size: largeSector.length };
+  read = requestRead(api, ctx, 1);
+  assert.equal(read.bytes, 512);
+  assert.equal(read.firstByte, 0x51);
+
+  // The following FORMAT probe exercises the original 128-byte fixture.
+  ctx.ioData.diskImages[3] = originalDisk;
 
   // FORMAT must return the command ACK followed by the sector-sized empty
   // bad-sector list. Returning only ACK/Complete makes DOS report timeout

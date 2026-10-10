@@ -4,6 +4,12 @@
 
 Simple implementation notes for this repository.
 
+- 2026-10-09: generalized jsA8E's logical SIO sector geometry. DD ATR media
+  uses 128-byte transfers only for logical sectors 1-3 and 256-byte transfers
+  thereafter through sector 65535; 512-byte logical devices retain their
+  native transfer size even for sector 1. This follows AHRM 10.1/10.3 and is
+  covered by direct 16MB DD and 512-byte-sector regressions.
+
 - 2026-10-09: `jsA8E/js/core/pokey_sio.js` now records an opt-in
   `SIO_COMMAND_DROPPED` trace event whenever a command frame has an invalid
   checksum. The device remains electrically silent as required by AHRM 9.1;
@@ -19,12 +25,13 @@ Simple implementation notes for this repository.
   normal post-boot Type 3 poll from a disk protocol failure and identifies the
   SIOV caller even when output is serviced by an IRQ handler.
 
-- 2026-10-09: corrected the AHRM 10.2 STATUS response in both jsA8E and
-  native A8E. STATUS byte +1 is the inverted FDC status; the previous `$00`
-  advertised not-ready, write-protect, missing-record, and other errors even
-  for healthy mounted media. Ready media now reports `$FF`, allowing the OS
-  to continue from STATUS to boot-sector reads. Added a jsA8E regression for
-  the ready status while preserving the existing format-timeout byte.
+- 2026-10-09: corrected jsA8E STATUS handling per AHRM 10.2. Byte +1 is now
+  a per-drive, inverted FDC-status latch rather than a fixed media-ready
+  value: it begins in the reset state and changes after a completed sector
+  operation. The four-byte status payload checksum is calculated from that
+  live state. The format timeout remains `$E0`, as required for realistic
+  FORMAT behavior. This restores boot compatibility without misreporting a
+  successful FDC transfer before one has occurred.
 
 - 2026-10-08: started the Full Library implementation on branch `FullLibrary`.
   Added a dependency-free ZIP method-0 archive codec to both `jsA8E` and

@@ -63,6 +63,9 @@
         sioPendingReadSize: 0,
         // Write data ACK is followed by a separate Complete/Error phase.
         sioPendingWriteResult: 0,
+        // AHRM 10.2: per-drive inverted FDC status returned by STATUS.
+        // Reset state is zero until a sector operation establishes a result.
+        sioDiskFdcStatus: new Uint8Array(8),
         // POKEY-ish randomness state (LFSR)
         pokeyLfsr17: 0x1ffff,
         pokeyLfsr17LastCycle: 0,
