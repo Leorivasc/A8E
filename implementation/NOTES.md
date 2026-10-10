@@ -4,6 +4,57 @@
 
 Simple implementation notes for this repository.
 
+- 2026-10-10: kept jsA8E Disk Library mounted-device rows on one horizontal
+  grid row after adding separate activity, read/write, and unmount controls.
+  This is presentation-only and does not affect SIO behavior or the library
+  package contract.
+
+- 2026-10-10: corrected generic US Doubler response timing in native A8E and
+  jsA8E. AHRM 10.5 specifies drive-side transmit timing independently from
+  the computer's POKEY receive clock; high-speed response bytes now use the
+  approximately 220-cycle US Doubler byte interval instead of the POKEY
+  receive period. The `$0A` capability remains advertised only for the generic
+  divisor supported by both implementations.
+
+- 2026-10-10: constrained automatic high-speed SIO detection to the generic
+  protocol implemented by the virtual drives. AHRM 10 distinguishes the US
+  Doubler timing from device-specific Turbo, XF551, and other protocols; the
+  native and JavaScript implementations now answer only the standard divisor
+  `$28` and US Doubler divisor `$0A` when Timer 3+4 are linked. Unsupported
+  probe timings remain silent. This prevents MyPicoDOS from classifying a
+  standard drive as 1050 Turbo and using `DAUX2` bit 7 as a sector bit on
+  disks larger than 32,768 sectors.
+
+- 2026-10-10: corrected the remaining MyPicoDOS 4.05 detection path. AHRM
+  10.3 defines bit 7 of `DAUX2` as the 1050 Turbo high-speed marker, while
+  normal 16-bit sector numbers use that same bit only on sector commands.
+  Native A8E and jsA8E now NAK a Turbo-marked `STATUS` probe because the
+  generic virtual drive does not implement Turbo mode. This prevents the
+  detector from selecting Turbo and subsequently reading sector 360 as
+  sector 33128, without restricting valid standard reads above sector 32767.
+
+- 2026-10-10: aligned native and JavaScript SIO response timing for drives that
+  advertise US Doubler high speed. AHRM 5.6 defines a serial byte as twenty
+  half-bit clock periods; response bytes now use the active POKEY Timer 4
+  divisor instead of a fixed 900-cycle interval. Native A8E also flushes its
+  virtual SIO transaction state when SKCTL enters POKEY initialization, matching
+  jsA8E and preventing stale bytes from surviving a PicoDOS speed negotiation.
+
+- 2026-10-10: corrected native A8E handling of unsupported disk commands.
+  The `$48` Happy-drive extension is not part of the standard virtual disk
+  command set; AHRM 9.1 requires a recognized drive to return `NAK` for such
+  a command. A8E previously logged `Unsupported SIO command $48!` and stayed
+  silent, which made DOS wait for its timeout and report a disk error. Native
+  and JavaScript regressions now cover the immediate NAK behavior.
+
+- 2026-10-10: connected mounted-library activity indicators to real SIO
+  operations in both applications. jsA8E now shows a short green `*` for
+  reads and yellow `*` for writes/formats beside each mounted device. Native
+  A8E records the same operation state per D1:-D8: slot with a bounded visual
+  lifetime and colors the mounted drive marker accordingly. The activity
+  state is UI-only and does not alter SIO timing, dirty persistence, or the
+  library package contract.
+
 - 2026-10-09: generalized jsA8E's logical SIO sector geometry. DD ATR media
   uses 128-byte transfers only for logical sectors 1-3 and 256-byte transfers
   thereafter through sector 65535; 512-byte logical devices retain their

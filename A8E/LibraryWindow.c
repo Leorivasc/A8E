@@ -571,13 +571,24 @@ void A8E_LibraryWindow_Draw(A8E_LibraryWindow_t *pWindow)
 			SDL_Rect tCell = { A8E_LIBRARY_DRIVE_X + (int)lDrive * A8E_LIBRARY_DRIVE_WIDTH - 3,
 				lY - 3, A8E_LIBRARY_DRIVE_WIDTH - 6, A8E_LIBRARY_ROW_HEIGHT - 2 };
 			int bMounted = strcmp(pWindow->acMountedIds[lDrive], pRecord->pId) == 0;
+			u8 cActivity = bMounted
+				? AtariIoGetDiskActivity(pWindow->pContext, lDrive)
+				: ATARI_IO_DISK_ACTIVITY_NONE;
 			SDL_SetRenderDrawColor(pWindow->pRenderer,
 				bMounted ? (AtariIoIsDiskWritable(pWindow->pContext, lDrive) ? 42 : 120) : 48,
 				bMounted ? (AtariIoIsDiskWritable(pWindow->pContext, lDrive) ? 94 : 48) : 54,
 				bMounted ? 62 : 64, 255);
 			SDL_RenderDrawRect(pWindow->pRenderer, &tCell);
-			if(bMounted) A8E_LibraryWindow_Text(pWindow->pRenderer,
-				tCell.x + 5, lY, "*", tWhite);
+			if(bMounted)
+			{
+				SDL_Color tActivity = cActivity == ATARI_IO_DISK_ACTIVITY_WRITE
+					? (SDL_Color){ 242, 211, 94, 255 }
+					: cActivity == ATARI_IO_DISK_ACTIVITY_READ
+					? (SDL_Color){ 94, 229, 138, 255 }
+					: tWhite;
+				A8E_LibraryWindow_Text(pWindow->pRenderer,
+					tCell.x + 5, lY, "*", tActivity);
+			}
 		}
 	}
 	if(pWindow->pRepository->sRecordCount == 0)

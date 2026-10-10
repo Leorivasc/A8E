@@ -16,6 +16,8 @@
     const serialOutputClockAvailable = cfg.serialOutputClockAvailable;
     const serialOutputClockPeriod = cfg.serialOutputClockPeriod;
     const serialOutputClockNextCycle = cfg.serialOutputClockNextCycle;
+    const serialInputClockPeriod = cfg.serialInputClockPeriod;
+    const serialCommandSpeedSupported = cfg.serialCommandSpeedSupported;
     const traceSerialEvent = cfg.traceSerialEvent;
 
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
@@ -70,6 +72,17 @@
       if (typeof serialOutputClockAvailable === "function")
         return !!serialOutputClockAvailable(ctx);
       return true;
+    }
+
+    function serialInputByteDelay(ctx) {
+      if (typeof serialInputClockPeriod === "function") {
+        const period = serialInputClockPeriod(ctx) | 0;
+        // AHRM 10.5: drive-side transmit timing is independent from the
+        // computer's POKEY receive clock. Model the generic US Doubler byte
+        // interval explicitly while retaining the standard timing fallback.
+        if (period > 0 && period <= 20) return 220;
+      }
+      return SERIAL_INPUT_DATA_READY_CYCLES;
     }
 
     function scheduleSerialOutput(ctx, now, scheduleNeed, scheduleDone) {
@@ -394,9 +407,7 @@
         }
 
         if (cmd === CMD_HIGH_SPEED_INDEX) {
-          // AHRM 10.3: a disk drive may answer this command with the
-          // US Doubler divisor. Type 1 polls using $3F are filtered before
-          // reaching this disk handler and receive no response instead.
+          // AHRM 10.3: generic US Doubler divisor.
           buf[2] = 0x0a;
           queueAckData(ctx, now, 2, 1);
           return;
@@ -410,6 +421,15 @@
 
         if (cmd === CMD_STATUS) {
           // STATUS
+          // AHRM 10.3: 1050 Turbo marks high-speed commands with bit 7 of
+          // DAUX2. This generic drive does not implement Turbo mode. Reject
+          // its STATUS probe instead of treating the marker as a normal
+          // status request; otherwise MyPicoDOS can select Turbo mode and
+          // later reinterpret the marker as the high sector-number bit.
+          if (aux2 & 0x80) {
+            queueDeviceNack(ctx, now);
+            return;
+          }
           if (!disk || !disk.length || disk[0] === 0) {
             queueDeviceNack(ctx, now);
             return;
@@ -688,12 +708,27 @@
         return;
       }
 
-      scheduleSerialOutput(ctx, now, false, true);
-
       const dev = buf[0] & 0xff;
       const cmd2 = buf[1] & 0xff;
       const aux1 = buf[2] & 0xff;
       const aux2 = buf[3] & 0xff;
+
+      scheduleSerialOutput(ctx, now, false, true);
+
+      if (
+        typeof serialCommandSpeedSupported === "function" &&
+        !serialCommandSpeedSupported(ctx, dev)
+      ) {
+        traceSio(ctx, "SIO_COMMAND_DROPPED", {
+          device: dev,
+          command: cmd2,
+          aux1: aux1,
+          aux2: aux2,
+          reason: "unsupported-device-speed",
+        });
+        return;
+      }
+
       traceSio(ctx, "SIO_COMMAND_RECEIVED", {
         device: dev,
         command: cmd2,
@@ -733,7 +768,7 @@
         });
         if ((io.sioInSize | 0) > 0) {
           io.serialInputDataReadyCycle =
-            effectiveEventCycle(ctx) + SERIAL_INPUT_DATA_READY_CYCLES;
+            effectiveEventCycle(ctx) + serialInputByteDelay(ctx);
           cycleTimedEventUpdate(ctx);
         } else {
           io.sioInIndex = 0;

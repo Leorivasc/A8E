@@ -89,6 +89,8 @@
     let currentFolderId = "root";
     let searchQuery = "";
     let atrState = null;
+    const mountedActivity = new Map();
+    const mountedActivityTimers = new Map();
 
     function setStatus(message, kind) {
       if (!statusEl) return;
@@ -204,6 +206,16 @@
         path.textContent = mountedPath(info);
         path.title = path.textContent;
         row.appendChild(path);
+        const activity = document.createElement("span");
+        const activeActivity = mountedActivity.get(info.mountedSlot);
+        activity.className = "disklib-mounted-activity" +
+          (activeActivity ? " active " + activeActivity.className : "");
+        activity.textContent = activeActivity ? "*" : "";
+        activity.title = activeActivity
+          ? (activeActivity.write ? "Writing" : "Reading")
+          : "No active media operation";
+        activity.setAttribute("aria-label", activity.title);
+        row.appendChild(activity);
         const rw = document.createElement("span");
         rw.className = "disklib-mounted-rw disklib-rw-writable";
         rw.textContent = "*";
@@ -927,6 +939,26 @@
     }
 
     if (typeof library.onChange === "function") library.onChange(render);
+    if (typeof app.onDiskActivity === "function") {
+      app.onDiskActivity(function (activity) {
+        if (!activity || typeof activity !== "object") return;
+        const slot = activity.deviceSlot | 0;
+        if (slot < 0 || slot > 7) return;
+        const operation = String(activity.operation || "access").toLowerCase();
+        const write = operation === "write" || operation === "format";
+        mountedActivity.set(slot, {
+          write: write,
+          className: write ? "disklib-activity-write" : "disklib-activity-read",
+        });
+        if (mountedActivityTimers.has(slot)) clearTimeout(mountedActivityTimers.get(slot));
+        mountedActivityTimers.set(slot, setTimeout(function () {
+          mountedActivity.delete(slot);
+          mountedActivityTimers.delete(slot);
+          render();
+        }, 900));
+        render();
+      });
+    }
     render();
   }
 

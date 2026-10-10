@@ -194,8 +194,12 @@ Library is complete:
 - the SDL Library window exposes repository, search, mount/eject, delete, and
   runtime write-protection controls, package import/export, and blank ATR
   creation; folder navigation/editing remains pending;
-- `$3F` recognizes D1: through D8: for the high-speed query, but the broader
-  high-speed protocol remains incomplete;
+- `$3F` recognizes D1: through D8: and returns the generic US Doubler divisor
+  `$0A`. High-speed response bytes use the AHRM 10.5 drive-side timing model;
+  unsupported Turbo, XF551, Indus GT, and other device-specific protocols
+  remain unadvertised. A Turbo-marked `STATUS` probe (DAUX2 bit 7) is
+  explicitly NAKed, while bit 7 remains available as the high byte of a
+  standard 16-bit sector command;
 - writes modify the selected ATR working copy directly and mark its slot dirty;
 - write-protection is enforced per mounted slot and persisted in the workspace
   map;

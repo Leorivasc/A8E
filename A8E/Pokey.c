@@ -2164,6 +2164,48 @@ static u8 cSioPendingCmd = 0;
 static u16 sSioPendingSector = 0;
 static u16 sSioPendingBytes = 0;
 
+static void Pokey_ResetSioState(void)
+{
+	cSioOutIndex = 0;
+	sSioInIndex = 0;
+	sSioInSize = 0;
+	sSioPendingReadSize = 0;
+	sSioPendingWriteResult = 0;
+	cSioOutPhase = 0;
+	sSioDataIndex = 0;
+	cSioPendingCmd = 0;
+	sSioPendingSector = 0;
+	sSioPendingBytes = 0;
+}
+
+/* AHRM 10.5: drive transmit timing is independent from the computer's POKEY
+ * receive clock. Keep standard responses near the existing 900-cycle model;
+ * the US Doubler transmitter sends a high-speed byte in about 220 Atari-side
+ * cycles. */
+static u64 Pokey_SerialInputByteDelay(_6502_Context_t *pContext)
+{
+	u64 period = Pokey_TimerPeriodCpuCycles(pContext, 4);
+	return period > 0 && period <= 20 ? 220ull : SERIAL_INPUT_DATA_READY_CYCLES;
+}
+
+/* MyPicoDOS probes several incompatible high-speed protocols.  This virtual
+ * drive implements the generic US Doubler divisor $0A in addition to standard
+ * $28.  A linked Timer 3+4 configuration at any other divisor is a probe for
+ * another drive type and must not be answered. */
+static u8 Pokey_SioCommandSpeedSupported(_6502_Context_t *pContext)
+{
+	u8 cAudctl = SRAM[IO_AUDCTL_ALLPOT];
+
+	if((cAudctl & 0x28) == 0x28 && SRAM[IO_AUDF4_POT6] == 0)
+	{
+		u8 cDivisor = SRAM[IO_AUDF3_POT4];
+		return cDivisor == 0x28 || cDivisor == 0x0A;
+	}
+
+	/* Keep compatibility with standard non-linked POKEY configurations. */
+	return 1;
+}
+
 static u8 *Pokey_SioCurrentDisk(IoData_t *pIoData)
 {
 	if(!pIoData || pIoData->cSioDriveIndex >= 8u) return NULL;
@@ -2508,6 +2550,8 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						}
 					}
 					sSioPendingWriteResult = ok ? 'C' : 'E';
+					AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
+						ATARI_IO_DISK_ACTIVITY_READ);
 					aSioBuffer[0] = 'A';
 					Pokey_SioQueueSerinResponse(pContext, 1);
 				}
@@ -2531,6 +2575,8 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						}
 					}
 					pIoData->abDiskDirty[pIoData->cSioDriveIndex] = 1u;
+					AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
+						ATARI_IO_DISK_ACTIVITY_WRITE);
 					sSioPendingWriteResult = cResult;
 					aSioBuffer[0] = 'A';
 					Pokey_SioQueueSerinResponse(pContext, 1);
@@ -2597,16 +2643,15 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 
 					AtariIoCycleTimedEventUpdate(pContext);
 
+					if(pIoData->cSioDriveIndex >= 8u || !pDisk ||
+					   Pokey_SioCommandSpeedSupported(pContext))
 					switch(aSioBuffer[1])
 					{
 					case 0x3F: /* RETURN HIGH SPEED INDEX */
-						/* $3F is also the Type 1 Poll command. An absent
-						 * peripheral must remain silent. Only disk IDs D1-D8
-						 * use the high-speed query interpretation. */
+						/* AHRM 10.3: generic US Doubler divisor. */
 						if(aSioBuffer[0] >= 0x31 && aSioBuffer[0] <= 0x38 &&
 						   Pokey_SioCurrentDisk(pIoData))
 						{
-							/* AHRM 10.3: standard US Doubler divisor. */
 							aSioBuffer[0] = 'A';
 							aSioBuffer[1] = 'C';
 							aSioBuffer[2] = 0x0A;
@@ -2662,6 +2707,8 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 								/* AHRM 10.2: retain the inverted result of this completed
 								 * sector operation for a later STATUS command. */
 								Pokey_SioSetCurrentFdcStatus(pIoData, 0xFFu);
+								AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
+									ATARI_IO_DISK_ACTIVITY_READ);
 								sSioPendingReadSize = sBytesToRead;
 								Pokey_SioQueueSerinResponse(pContext, 1);
 #ifdef VERBOSE_SIO
@@ -2691,6 +2738,18 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 #ifdef VERBOSE_SIO
 						printf("SIO get status\n");
 #endif
+						/* AHRM 10.3: 1050 Turbo marks high-speed commands with
+						 * bit 7 of DAUX2. This generic drive does not implement
+						 * Turbo mode. Reject its STATUS probe instead of treating
+						 * the marker as an ordinary status request; otherwise
+						 * MyPicoDOS can select Turbo mode and later reinterpret
+						 * the marker as the high sector-number bit. */
+						if(aSioBuffer[3] & 0x80u)
+						{
+							aSioBuffer[0] = 'N';
+							Pokey_SioQueueSerinResponse(pContext, 1);
+							break;
+						}
 						if(sSectorSize == 128)
 						{
 							aSioBuffer[0] = 'A';
@@ -2784,6 +2843,8 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 							memset(Pokey_SioCurrentDisk(pIoData) + 16, 0,
 							       Pokey_SioCurrentDiskSize(pIoData) - 16);
 							pIoData->abDiskDirty[pIoData->cSioDriveIndex] = 1u;
+							AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
+								ATARI_IO_DISK_ACTIVITY_WRITE);
 							/* AHRM 10.4: FORMAT returns a sector-sized bad-sector
 							 * list after the command ACK. A healthy disk returns an
 							 * empty list terminated by $FFFF. */
@@ -2811,8 +2872,10 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						break;
 
 					default:
-						printf("Unsupported SIO command $%02X!\n", aSioBuffer[1]);
-
+						/* AHRM 9.1: a recognized device must NAK an unsupported
+						 * command instead of remaining silent and causing a timeout. */
+						aSioBuffer[0] = 'N';
+						Pokey_SioQueueSerinResponse(pContext, 1);
 						break;
 					}
 				}
@@ -2849,7 +2912,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		{
 			u64 llNow = PokeyMasterReferenceCycle(pContext);
 			pIoData->llSerialInputDataReadyCycle =
-				llNow + SERIAL_INPUT_DATA_READY_CYCLES;
+				llNow + Pokey_SerialInputByteDelay(pContext);
 
 			AtariIoCycleTimedEventUpdate(pContext);
 		}
@@ -2973,8 +3036,11 @@ u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue)
 		SRAM[IO_SKCTL_SKSTAT] = *pValue;
 		if((cPreviousSkctl & 0x03) != 0 && (*pValue & 0x03) == 0)
 		{
+			/* AHRM 5.6: initialization interrupts and flushes the serial
+			 * shift/holding registers.  Clear the virtual SIO transaction too,
+			 * so changing speed cannot expose stale response bytes. */
+			Pokey_ResetSioState();
 			Pokey_EnterInitialization(pContext);
-			sSioPendingWriteResult = 0;
 		}
 		if((cPreviousSkctl & 0x03) == 0 && (*pValue & 0x03) != 0)
 		{

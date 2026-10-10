@@ -6143,6 +6143,8 @@ int AtariIoMountDisk(
 	pIoData->alDiskSize[lDrive] = lMountSize;
 	pIoData->abDiskWritable[lDrive] = bWritable ? 1u : 0u;
 	pIoData->abDiskDirty[lDrive] = 0u;
+	pIoData->abDiskActivity[lDrive] = ATARI_IO_DISK_ACTIVITY_NONE;
+	pIoData->allDiskActivityUntil[lDrive] = 0;
 	pIoData->abSioDiskFdcStatus[lDrive] = 0u;
 	if(pName)
 	{
@@ -6167,6 +6169,8 @@ int AtariIoUnmountDisk(
 		pIoData->alDiskSize[0] = 0u;
 		pIoData->abDiskDirty[0] = 0u;
 		pIoData->abDiskWritable[0] = 1u;
+		pIoData->abDiskActivity[0] = ATARI_IO_DISK_ACTIVITY_NONE;
+		pIoData->allDiskActivityUntil[0] = 0;
 		pIoData->abSioDiskFdcStatus[0] = 0u;
 		pIoData->acDiskName[0][0] = '\0';
 		return 1;
@@ -6175,6 +6179,8 @@ int AtariIoUnmountDisk(
 	pIoData->apDisk[lDrive] = NULL;
 	pIoData->alDiskSize[lDrive] = 0u;
 	pIoData->abDiskDirty[lDrive] = 0u;
+	pIoData->abDiskActivity[lDrive] = ATARI_IO_DISK_ACTIVITY_NONE;
+	pIoData->allDiskActivityUntil[lDrive] = 0;
 	pIoData->abSioDiskFdcStatus[lDrive] = 0u;
 	pIoData->acDiskName[lDrive][0] = '\0';
 	return 1;
@@ -6222,6 +6228,39 @@ u8 AtariIoIsDiskWritable(
 	if(!pContext || lDrive >= 8u) return 0u;
 	pIoData = (IoData_t *)pContext->pIoData;
 	return pIoData->abDiskWritable[lDrive];
+}
+
+void AtariIoSetDiskActivity(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u8 cActivity)
+{
+	IoData_t *pIoData;
+	u64 lDuration;
+	if(!pContext || lDrive >= 8u) return;
+	pIoData = (IoData_t *)pContext->pIoData;
+	if(cActivity == ATARI_IO_DISK_ACTIVITY_NONE)
+	{
+		pIoData->abDiskActivity[lDrive] = ATARI_IO_DISK_ACTIVITY_NONE;
+		pIoData->allDiskActivityUntil[lDrive] = 0;
+		return;
+	}
+	lDuration = ((u64)(pIoData->lCpuHz ? pIoData->lCpuHz : ATARI_CPU_HZ_PAL) * 9u) / 10u;
+	pIoData->abDiskActivity[lDrive] = cActivity;
+	pIoData->allDiskActivityUntil[lDrive] = pContext->llCycleCounter + lDuration;
+}
+
+u8 AtariIoGetDiskActivity(
+	_6502_Context_t *pContext,
+	u32 lDrive)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return ATARI_IO_DISK_ACTIVITY_NONE;
+	pIoData = (IoData_t *)pContext->pIoData;
+	if(pIoData->abDiskActivity[lDrive] != ATARI_IO_DISK_ACTIVITY_NONE &&
+	   pContext->llCycleCounter >= pIoData->allDiskActivityUntil[lDrive])
+		pIoData->abDiskActivity[lDrive] = ATARI_IO_DISK_ACTIVITY_NONE;
+	return pIoData->abDiskActivity[lDrive];
 }
 
 void AtariIoClose(_6502_Context_t *pContext)

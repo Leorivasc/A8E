@@ -62,6 +62,11 @@ window exposes the repository mount view and package actions. The browser view n
 mounted-devices panel above the navigation list, showing occupied D1:-D8:
 slots, logical folder/file paths, and an `Unmount` action.
 
+The mounted-devices activity indicator is now connected to real SIO operations
+in both applications. A short green `*` identifies a read and a yellow `*`
+identifies a write or format; the indicator is transient and independent from
+the persistent dirty and write-protection state.
+
 The native repository phase has now started. Native A8E can load and save the
 same application-owned `library.json` and `blobs/` directory used by the
 shared schema. Loading stages the manifest and every referenced blob, then

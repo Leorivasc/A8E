@@ -59,6 +59,10 @@
 #define ATARI_CPU_HZ_NTSC 1789773u
 #define ATARI_CPU_HZ_PAL 1773447u
 
+#define ATARI_IO_DISK_ACTIVITY_NONE 0u
+#define ATARI_IO_DISK_ACTIVITY_READ 1u
+#define ATARI_IO_DISK_ACTIVITY_WRITE 2u
+
 typedef enum
 {
 	ATARI_VIDEO_PAL = 0,
@@ -259,6 +263,8 @@ typedef struct
 	u32 alDiskSize[8];
 	u8 abDiskWritable[8];
 	u8 abDiskDirty[8];
+	u8 abDiskActivity[8];
+	u64 allDiskActivityUntil[8];
 	/* AHRM 10.2: inverted FDC status reported by each virtual drive's
 	 * STATUS command. It is a controller latch, not ATR metadata. */
 	u8 abSioDiskFdcStatus[8];
@@ -346,6 +352,15 @@ void AtariIoSetDiskWritable(
 	u8 bWritable);
 
 u8 AtariIoIsDiskWritable(
+	_6502_Context_t *pContext,
+	u32 lDrive);
+
+void AtariIoSetDiskActivity(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u8 cActivity);
+
+u8 AtariIoGetDiskActivity(
 	_6502_Context_t *pContext,
 	u32 lDrive);
 

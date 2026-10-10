@@ -2539,10 +2539,11 @@ canvas.crtEnabled {
 }
 .disklib-mounted-row {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 20px max-content;
+  grid-template-columns: 42px minmax(0, 1fr) 18px 18px max-content;
   align-items: center;
   column-gap: 7px;
   min-width: 0;
+  white-space: nowrap;
   font-size: var(--fs-xs);
 }
 .disklib-mounted-unit {
@@ -2559,8 +2560,22 @@ canvas.crtEnabled {
   white-space: nowrap;
 }
 .disklib-mounted-rw {
+  min-width: 18px;
   text-align: center;
   font-weight: 700;
+}
+.disklib-mounted-activity {
+  min-width: 18px;
+  color: transparent;
+  font-weight: 700;
+  text-align: center;
+}
+.disklib-mounted-activity.active {
+  color: #5ee58a;
+  animation: disk-activity-blink 180ms steps(1, end) 4;
+}
+.disklib-mounted-activity.disklib-activity-write.active {
+  color: #f2d35e;
 }
 .disklib-mounted-empty {
   color: var(--sub-panel-dim);

@@ -150,6 +150,15 @@ function main() {
   assert.equal(ctx.ioData.sioInSize, 1);
   assert.equal(api.serinRead(ctx), "C".charCodeAt(0));
 
+  // AHRM 9.1 / 810: an unsupported command addressed to a recognized drive
+  // is rejected immediately. $48 is a Happy-drive extension, not a normal
+  // command for this virtual standard drive.
+  const unsupportedCommand = [0x31, 0x48, 0x00, 0x00];
+  unsupportedCommand.push(checksum(unsupportedCommand));
+  unsupportedCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
+  assert.equal(ctx.ioData.sioBuffer[0], "N".charCodeAt(0));
+  assert.equal(api.serinRead(ctx), "N".charCodeAt(0));
+
   // AHRM 9.1: a bad command checksum is ignored, not NAKed.
   const invalidCommand = [0x31, 0x53, 0x00, 0x00, 0x00];
   invalidCommand.forEach(function (value) { api.seroutWrite(ctx, value); });

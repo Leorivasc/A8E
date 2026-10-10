@@ -109,7 +109,10 @@ static int RunStatusLatchContract(_6502_Context_t *pContext)
 {
 	u8 aDisk[16 + 128 * 4];
 	const u8 aStatusFrame[5] = { 0x31, 0x53, 0x00, 0x00, 0x84 };
+	const u8 aHighSpeedFrame[5] = { 0x31, 0x3F, 0x00, 0x00, 0x70 };
+	const u8 aTurboStatusFrame[5] = { 0x31, 0x53, 0x00, 0x80, 0x05 };
 	const u8 aReadFrame[5] = { 0x31, 0x52, 0x01, 0x00, 0x84 };
+	const u8 aUnsupportedFrame[5] = { 0x31, 0x48, 0x00, 0x00, 0x79 };
 	u32 lIndex;
 
 	memset(aDisk, 0, sizeof(aDisk));
@@ -129,6 +132,24 @@ static int RunStatusLatchContract(_6502_Context_t *pContext)
 	REQUIRE(ReceiveSioByte(pContext) == 0xE0, "initial STATUS format timeout");
 	REQUIRE(ReceiveSioByte(pContext) == 0x00, "initial STATUS reserved byte");
 	REQUIRE(ReceiveSioByte(pContext) == 0xF0, "initial STATUS checksum");
+
+	/* AHRM 10.3: the generic US Doubler protocol reports divisor $0A. */
+	SendSioFrame(pContext, aHighSpeedFrame);
+	REQUIRE(ReceiveSioByte(pContext) == 'A', "speed query missing ACK");
+	REQUIRE(ReceiveSioByte(pContext) == 'C', "speed query missing Complete");
+	REQUIRE(ReceiveSioByte(pContext) == 0x0A, "speed query divisor");
+	REQUIRE(ReceiveSioByte(pContext) == 0x0A, "speed query checksum");
+
+	/* AHRM 10.3: the 1050 Turbo probe sets DAUX2 bit 7. A generic drive
+	 * must reject that STATUS request so high-speed software does not select
+	 * Turbo mode and later mistake the marker for a sector-number bit. */
+	SendSioFrame(pContext, aTurboStatusFrame);
+	REQUIRE(ReceiveSioByte(pContext) == 'N', "Turbo STATUS probe was accepted");
+
+	/* AHRM 9.1 / 10.9: $48 is a Happy-drive extension. A standard virtual
+	 * drive must NAK it rather than leave the computer waiting for timeout. */
+	SendSioFrame(pContext, aUnsupportedFrame);
+	REQUIRE(ReceiveSioByte(pContext) == 'N', "unsupported command missing NAK");
 
 	SendSioFrame(pContext, aReadFrame);
 	REQUIRE(ReceiveSioByte(pContext) == 'A', "READ missing ACK");
