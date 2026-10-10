@@ -33,6 +33,12 @@ Simple implementation notes for this repository.
   FORMAT behavior. This restores boot compatibility without misreporting a
   successful FDC transfer before one has occurred.
 
+- 2026-10-10: mirrored the AHRM 10.2 STATUS controller-state model in native
+  A8E. Its per-drive FDC latch resets when media is mounted or unmounted,
+  records a successful sector read, and is checksummed as part of the live
+  STATUS payload. This keeps native A8E aligned with jsA8E and restores the
+  same boot compatibility without lowering the `$E0` format timeout.
+
 - 2026-10-08: started the Full Library implementation on branch `FullLibrary`.
   Added a dependency-free ZIP method-0 archive codec to both `jsA8E` and
   native A8E for the frozen `library.json` v1 package contract. The codec

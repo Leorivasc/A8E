@@ -6143,6 +6143,7 @@ int AtariIoMountDisk(
 	pIoData->alDiskSize[lDrive] = lMountSize;
 	pIoData->abDiskWritable[lDrive] = bWritable ? 1u : 0u;
 	pIoData->abDiskDirty[lDrive] = 0u;
+	pIoData->abSioDiskFdcStatus[lDrive] = 0u;
 	if(pName)
 	{
 		strncpy(pIoData->acDiskName[lDrive], pName, sizeof(pIoData->acDiskName[lDrive]) - 1u);
@@ -6166,6 +6167,7 @@ int AtariIoUnmountDisk(
 		pIoData->alDiskSize[0] = 0u;
 		pIoData->abDiskDirty[0] = 0u;
 		pIoData->abDiskWritable[0] = 1u;
+		pIoData->abSioDiskFdcStatus[0] = 0u;
 		pIoData->acDiskName[0][0] = '\0';
 		return 1;
 	}
@@ -6173,6 +6175,7 @@ int AtariIoUnmountDisk(
 	pIoData->apDisk[lDrive] = NULL;
 	pIoData->alDiskSize[lDrive] = 0u;
 	pIoData->abDiskDirty[lDrive] = 0u;
+	pIoData->abSioDiskFdcStatus[lDrive] = 0u;
 	pIoData->acDiskName[lDrive][0] = '\0';
 	return 1;
 }

@@ -259,6 +259,9 @@ typedef struct
 	u32 alDiskSize[8];
 	u8 abDiskWritable[8];
 	u8 abDiskDirty[8];
+	/* AHRM 10.2: inverted FDC status reported by each virtual drive's
+	 * STATUS command. It is a controller latch, not ATR metadata. */
+	u8 abSioDiskFdcStatus[8];
 	u8 cSioDriveIndex;
 	char acDiskName[8][128];
 	u8 *pDisk1;

@@ -2176,6 +2176,18 @@ static u32 Pokey_SioCurrentDiskSize(IoData_t *pIoData)
 	return pIoData->alDiskSize[pIoData->cSioDriveIndex];
 }
 
+static u8 Pokey_SioCurrentFdcStatus(IoData_t *pIoData)
+{
+	if(!pIoData || pIoData->cSioDriveIndex >= 8u) return 0u;
+	return pIoData->abSioDiskFdcStatus[pIoData->cSioDriveIndex];
+}
+
+static void Pokey_SioSetCurrentFdcStatus(IoData_t *pIoData, u8 cStatus)
+{
+	if(!pIoData || pIoData->cSioDriveIndex >= 8u) return;
+	pIoData->abSioDiskFdcStatus[pIoData->cSioDriveIndex] = cStatus;
+}
+
 /* AHRM 5.6: modes 010 and 100 use timer 4; modes 110-111 use timer 2.
  * Modes 000/001/011/101 do not provide a usable output clock here: the first
  * two are externally clocked and the latter two hold timers 3+4 in reset for
@@ -2647,6 +2659,9 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 
 								aSioBuffer[sBytesToRead + 2] = AtariIo_SioChecksum(aSioBuffer + 2, sBytesToRead);
 
+								/* AHRM 10.2: retain the inverted result of this completed
+								 * sector operation for a later STATUS command. */
+								Pokey_SioSetCurrentFdcStatus(pIoData, 0xFFu);
 								sSioPendingReadSize = sBytesToRead;
 								Pokey_SioQueueSerinResponse(pContext, 1);
 #ifdef VERBOSE_SIO
@@ -2681,23 +2696,23 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 							aSioBuffer[0] = 'A';
 							aSioBuffer[1] = 'C';
 							aSioBuffer[2] = 0x10;
-							/* AHRM 10.2: inverted FDC status; FF means ready/no errors. */
-							aSioBuffer[3] = 0xFF;
+							aSioBuffer[3] = Pokey_SioCurrentFdcStatus(pIoData);
 							/* AHRM 10.2: format timeout, not normal command timeout. */
 							aSioBuffer[4] = 0xE0;
 							aSioBuffer[5] = 0x00;
-							aSioBuffer[6] = 0xF0;
 						}
 						else if(sSectorSize == 256)
 						{
 							aSioBuffer[0] = 'A';
 							aSioBuffer[1] = 'C';
 							aSioBuffer[2] = 0x30;
-							aSioBuffer[3] = 0xFF;
+							aSioBuffer[3] = Pokey_SioCurrentFdcStatus(pIoData);
 							aSioBuffer[4] = 0xE0;
 							aSioBuffer[5] = 0x00;
-							aSioBuffer[6] = 0x10;
 						}
+						/* The FDC latch is dynamic, so checksum the actual four-byte
+						 * STATUS payload instead of using a density template. */
+						aSioBuffer[6] = AtariIo_SioChecksum(aSioBuffer + 2, 4);
 
 						sSioInSize = 7;
 

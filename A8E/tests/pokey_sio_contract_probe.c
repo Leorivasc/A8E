@@ -87,7 +87,62 @@ static int RunTrace(_6502_Context_t *pContext, FILE *pFixture)
     }
 
     REQUIRE(uEvent > 0, "SIO fixture is empty");
-    return 1;
+	return 1;
+}
+
+static void SendSioFrame(_6502_Context_t *pContext, const u8 *pFrame)
+{
+	u32 lIndex;
+	for(lIndex = 0; lIndex < 5u; lIndex++)
+	{
+		u8 cValue = pFrame[lIndex];
+		Pokey_SEROUT_SERIN(pContext, &cValue);
+	}
+}
+
+static u8 ReceiveSioByte(_6502_Context_t *pContext)
+{
+	return *Pokey_SEROUT_SERIN(pContext, NULL);
+}
+
+static int RunStatusLatchContract(_6502_Context_t *pContext)
+{
+	u8 aDisk[16 + 128 * 4];
+	const u8 aStatusFrame[5] = { 0x31, 0x53, 0x00, 0x00, 0x84 };
+	const u8 aReadFrame[5] = { 0x31, 0x52, 0x01, 0x00, 0x84 };
+	u32 lIndex;
+
+	memset(aDisk, 0, sizeof(aDisk));
+	aDisk[0] = 0x96;
+	aDisk[1] = 0x02;
+	aDisk[4] = 128;
+	REQUIRE(AtariIoMountDisk(pContext, 0u, aDisk, sizeof(aDisk),
+		"status-contract.atr", 1u), "cannot mount status contract disk");
+
+	/* AHRM 10.2: prior to a sector operation, STATUS reflects the reset
+	 * FDC latch rather than a fabricated all-clear state. */
+	SendSioFrame(pContext, aStatusFrame);
+	REQUIRE(ReceiveSioByte(pContext) == 'A', "initial STATUS missing ACK");
+	REQUIRE(ReceiveSioByte(pContext) == 'C', "initial STATUS missing Complete");
+	REQUIRE(ReceiveSioByte(pContext) == 0x10, "initial STATUS drive flags");
+	REQUIRE(ReceiveSioByte(pContext) == 0x00, "initial STATUS FDC latch");
+	REQUIRE(ReceiveSioByte(pContext) == 0xE0, "initial STATUS format timeout");
+	REQUIRE(ReceiveSioByte(pContext) == 0x00, "initial STATUS reserved byte");
+	REQUIRE(ReceiveSioByte(pContext) == 0xF0, "initial STATUS checksum");
+
+	SendSioFrame(pContext, aReadFrame);
+	REQUIRE(ReceiveSioByte(pContext) == 'A', "READ missing ACK");
+	for(lIndex = 0; lIndex < 130u; lIndex++) ReceiveSioByte(pContext);
+
+	SendSioFrame(pContext, aStatusFrame);
+	REQUIRE(ReceiveSioByte(pContext) == 'A', "post-read STATUS missing ACK");
+	REQUIRE(ReceiveSioByte(pContext) == 'C', "post-read STATUS missing Complete");
+	REQUIRE(ReceiveSioByte(pContext) == 0x10, "post-read STATUS drive flags");
+	REQUIRE(ReceiveSioByte(pContext) == 0xFF, "post-read STATUS FDC latch");
+	REQUIRE(ReceiveSioByte(pContext) == 0xE0, "post-read STATUS format timeout");
+	REQUIRE(ReceiveSioByte(pContext) == 0x00, "post-read STATUS reserved byte");
+	REQUIRE(ReceiveSioByte(pContext) == 0xF0, "post-read STATUS checksum");
+	return 1;
 }
 
 int main(void)
@@ -109,8 +164,9 @@ int main(void)
         return 1;
     }
 
-    bPassed = RunTrace(pContext, pFixture);
-    fclose(pFixture);
+	bPassed = RunTrace(pContext, pFixture);
+	fclose(pFixture);
+	if(bPassed) bPassed = RunStatusLatchContract(pContext);
     CloseMachine(pContext);
     if(!bPassed)
     {
