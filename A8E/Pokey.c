@@ -2665,13 +2665,11 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						   Pokey_SioCurrentDisk(pIoData))
 						{
 							aSioBuffer[0] = 'A';
-							aSioBuffer[1] = 'C';
 							aSioBuffer[2] = 0x0A;
-							aSioBuffer[3] = AtariIo_SioChecksum(aSioBuffer + 2, 1);
-							sSioInSize = 4;
-							pIoData->llSerialInputDataReadyCycle =
-								llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
-							AtariIoCycleTimedEventUpdate(pContext);
+							/* AHRM 9.1: a read command returns the command ACK
+							 * separately from the Complete/data/checksum phase. */
+							sSioPendingReadSize = 1;
+							Pokey_SioQueueSerinResponse(pContext, 1);
 						}
 						break;
 
@@ -2785,14 +2783,11 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						 * STATUS payload instead of using a density template. */
 						aSioBuffer[6] = AtariIo_SioChecksum(aSioBuffer + 2, 4);
 
-						sSioInSize = 7;
-
 						if(Pokey_SioCurrentDisk(pIoData) && Pokey_SioCurrentDisk(pIoData)[0] != 0)
 						{
-							pIoData->llSerialInputDataReadyCycle =
-								llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
-
-							AtariIoCycleTimedEventUpdate(pContext);
+							/* Keep STATUS response framing identical to jsA8E: reset the
+							 * response index and schedule the first byte as one transaction. */
+							Pokey_SioQueueSerinResponse(pContext, 7);
 						}
 
 						break;

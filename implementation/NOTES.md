@@ -4,6 +4,23 @@
 
 Simple implementation notes for this repository.
 
+- 2026-10-11: aligned native A8E STATUS response queuing with jsA8E. The
+  native virtual drive now resets the SERIN response index and schedules the
+  complete seven-byte STATUS frame through the common response helper. This
+  preserves the same response-phase behavior used by PicoDOS while keeping
+  the AHRM 9.1/10.2 drive contract unchanged.
+
+- 2026-10-11: aligned native A8E's `$3F` high-speed index response with AHRM
+  9.1 and jsA8E. The disk read command now returns `ACK` first and queues the
+  separate `Complete + divisor + checksum` data phase, instead of exposing all
+  four bytes as one response. This preserves the SIO phase boundary used by
+  MyPicoDOS during automatic high-speed negotiation.
+
+- 2026-10-11: fixed native A8E window shutdown. SDL reports the operating
+  system close-button action as `SDL_WINDOWEVENT_CLOSE`, not necessarily as
+  `SDL_QUIT`; the main window now exits through the normal cleanup path while
+  the separate Library window continues to close without terminating A8E.
+
 - 2026-10-10: aligned the native and JavaScript virtual drives with AHRM
   10.1/10.2 for non-DD geometries and controller status. 512-byte-sector
   media now uses native-size transfers from sector 1 in both implementations,

@@ -323,7 +323,10 @@ int main(int argc, char *argv[])
 		while(SDL_PollEvent(&tEvent))
 		{
 			if(A8E_LibraryWindow_HandleEvent(&tLibraryWindow, &tEvent)) continue;
-			if(tEvent.type == SDL_QUIT)
+			if(tEvent.type == SDL_QUIT ||
+			   (tEvent.type == SDL_WINDOWEVENT &&
+				tEvent.window.event == SDL_WINDOWEVENT_CLOSE &&
+				tEvent.window.windowID == SDL_GetWindowID(pWindow)))
 			{
 				goto Exit;
 			}

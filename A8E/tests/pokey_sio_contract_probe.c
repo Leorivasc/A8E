@@ -149,8 +149,15 @@ static int RunStatusLatchContract(_6502_Context_t *pContext)
 	REQUIRE(ReceiveSioByte(pContext) == 0xF0, "initial STATUS checksum");
 
 	/* AHRM 10.3: the generic US Doubler protocol reports divisor $0A. */
-	SendSioFrame(pContext, aHighSpeedFrame);
-	REQUIRE(ReceiveSioByte(pContext) == 'A', "speed query missing ACK");
+	{
+		IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+		u64 llExpectedDataPhase = pContext->llCycleCounter +
+			SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+		SendSioFrame(pContext, aHighSpeedFrame);
+		REQUIRE(ReceiveSioByte(pContext) == 'A', "speed query missing ACK");
+		REQUIRE(pIoData->llSerialInputDataReadyCycle == llExpectedDataPhase,
+			"speed query data phase was not queued separately");
+	}
 	REQUIRE(ReceiveSioByte(pContext) == 'C', "speed query missing Complete");
 	REQUIRE(ReceiveSioByte(pContext) == 0x0A, "speed query divisor");
 	REQUIRE(ReceiveSioByte(pContext) == 0x0A, "speed query checksum");
