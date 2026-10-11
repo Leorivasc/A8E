@@ -444,6 +444,13 @@
             // drive's FORMAT command.
             buf[4] = 0xe0;
             buf[5] = 0x00;
+          } else if (sectorSize === DISK_SECTOR_SIZE_LARGE) {
+            // AHRM 10.1: 512-byte media does not use the DD boot-sector
+            // exception. Use the TOMS-compatible 512-byte status marker.
+            buf[2] = 0x50;
+            buf[3] = diskFdcStatus(io, mounted.deviceSlot);
+            buf[4] = 0xe0;
+            buf[5] = 0x00;
           } else {
             buf[2] = 0x30;
             buf[3] = diskFdcStatus(io, mounted.deviceSlot);
@@ -500,6 +507,7 @@
             buf.subarray(2, sectorSize + 2),
             sectorSize,
           );
+          setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
           notifyDiskMediaChanged(io, mounted);
           notifyDiskActivity(io, mounted, "format");
           queueAckData(ctx, now, 2, sectorSize);
@@ -559,6 +567,7 @@
               break;
             }
           }
+          setDiskFdcStatus(io, mounted.deviceSlot, ok ? 0xff : 0x00);
           io.sioPendingWriteResult = ok ? CHAR_COMPLETE : CHAR_ERROR;
           traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
             command: cmd,
@@ -590,6 +599,7 @@
               break;
             }
           }
+          setDiskFdcStatus(io, mounted.deviceSlot, verified ? 0xff : 0x00);
           io.sioPendingWriteResult = verified ? CHAR_COMPLETE : CHAR_ERROR;
           traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
             command: cmd,
@@ -599,6 +609,7 @@
           });
           queueSingleByteResponse(ctx, now, CHAR_ACK);
         } else {
+          setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
           io.sioPendingWriteResult = CHAR_COMPLETE;
           traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
             command: cmd,

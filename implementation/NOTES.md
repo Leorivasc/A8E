@@ -4,6 +4,13 @@
 
 Simple implementation notes for this repository.
 
+- 2026-10-10: aligned the native and JavaScript virtual drives with AHRM
+  10.1/10.2 for non-DD geometries and controller status. 512-byte-sector
+  media now uses native-size transfers from sector 1 in both implementations,
+  with the matching status marker; successful PUT, WRITE, VERIFY, and FORMAT
+  operations update the per-drive inverted FDC status latch. Added native and
+  JavaScript regressions for the geometry and post-write STATUS behavior.
+
 - 2026-10-10: kept jsA8E Disk Library mounted-device rows on one horizontal
   grid row after adding separate activity, read/write, and unmount controls.
   This is presentation-only and does not affect SIO behavior or the library

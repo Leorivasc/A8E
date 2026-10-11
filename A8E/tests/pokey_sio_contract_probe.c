@@ -100,6 +100,19 @@ static void SendSioFrame(_6502_Context_t *pContext, const u8 *pFrame)
 	}
 }
 
+static u8 TestSioChecksum(const u8 *pBuffer, u32 lSize)
+{
+	u32 lIndex;
+	u16 sSum = 0;
+	u16 sNext;
+	for(lIndex = 0; lIndex < lSize; lIndex++)
+	{
+		sNext = (u16)(sSum + pBuffer[lIndex]);
+		sSum = (u8)(sNext + (sNext >> 8));
+	}
+	return (u8)sSum;
+}
+
 static u8 ReceiveSioByte(_6502_Context_t *pContext)
 {
 	return *Pokey_SEROUT_SERIN(pContext, NULL);
@@ -108,6 +121,8 @@ static u8 ReceiveSioByte(_6502_Context_t *pContext)
 static int RunStatusLatchContract(_6502_Context_t *pContext)
 {
 	u8 aDisk[16 + 128 * 4];
+	u8 aLargeSectorDisk[16 + 4 * 512];
+	u8 aWriteData[128];
 	const u8 aStatusFrame[5] = { 0x31, 0x53, 0x00, 0x00, 0x84 };
 	const u8 aHighSpeedFrame[5] = { 0x31, 0x3F, 0x00, 0x00, 0x70 };
 	const u8 aTurboStatusFrame[5] = { 0x31, 0x53, 0x00, 0x80, 0x05 };
@@ -163,6 +178,82 @@ static int RunStatusLatchContract(_6502_Context_t *pContext)
 	REQUIRE(ReceiveSioByte(pContext) == 0xE0, "post-read STATUS format timeout");
 	REQUIRE(ReceiveSioByte(pContext) == 0x00, "post-read STATUS reserved byte");
 	REQUIRE(ReceiveSioByte(pContext) == 0xF0, "post-read STATUS checksum");
+
+	/* AHRM 10.2: successful writes also leave a clean FDC status. */
+	memset(aWriteData, 0xA5, sizeof(aWriteData));
+	{
+		const u8 aPutFrame[5] = { 0x31, 0x50, 0x01, 0x00, 0x82 };
+		u8 cValue;
+		SendSioFrame(pContext, aPutFrame);
+		REQUIRE(ReceiveSioByte(pContext) == 'A', "PUT missing command ACK");
+		for(lIndex = 0; lIndex < sizeof(aWriteData); lIndex++)
+		{
+			cValue = aWriteData[lIndex];
+			Pokey_SEROUT_SERIN(pContext, &cValue);
+		}
+		cValue = TestSioChecksum(aWriteData, sizeof(aWriteData));
+		Pokey_SEROUT_SERIN(pContext, &cValue);
+		REQUIRE(ReceiveSioByte(pContext) == 'A', "PUT missing data ACK");
+		REQUIRE(ReceiveSioByte(pContext) == 'C', "PUT missing Complete");
+	}
+	SendSioFrame(pContext, aStatusFrame);
+	REQUIRE(ReceiveSioByte(pContext) == 'A', "post-write STATUS missing ACK");
+	REQUIRE(ReceiveSioByte(pContext) == 'C', "post-write STATUS missing Complete");
+	REQUIRE(ReceiveSioByte(pContext) == 0x10, "post-write STATUS drive flags");
+	REQUIRE(ReceiveSioByte(pContext) == 0xFF, "post-write STATUS FDC latch");
+	REQUIRE(ReceiveSioByte(pContext) == 0xE0, "post-write STATUS format timeout");
+	REQUIRE(ReceiveSioByte(pContext) == 0x00, "post-write STATUS reserved byte");
+	REQUIRE(ReceiveSioByte(pContext) == 0xF0, "post-write STATUS checksum");
+
+	/* AHRM 10.1: 512-byte media transfers every sector at its native size. */
+	memset(aLargeSectorDisk, 0, sizeof(aLargeSectorDisk));
+	aLargeSectorDisk[0] = 0x96;
+	aLargeSectorDisk[1] = 0x02;
+	aLargeSectorDisk[4] = 0x00;
+	aLargeSectorDisk[5] = 0x02;
+	aLargeSectorDisk[16] = 0x51;
+	REQUIRE(AtariIoMountDisk(pContext, 0u, aLargeSectorDisk,
+		sizeof(aLargeSectorDisk), "large-sector.atr", 1u),
+		"cannot mount 512-byte sector disk");
+	{
+		const u8 aLargeReadFrame[5] = { 0x31, 0x52, 0x01, 0x00, 0x84 };
+		SendSioFrame(pContext, aLargeReadFrame);
+		REQUIRE(ReceiveSioByte(pContext) == 'A', "512-byte READ missing ACK");
+		REQUIRE(ReceiveSioByte(pContext) == 'C', "512-byte READ missing Complete");
+		REQUIRE(ReceiveSioByte(pContext) == 0x51, "512-byte READ data");
+		for(lIndex = 1; lIndex < 512u; lIndex++)
+			REQUIRE(ReceiveSioByte(pContext) == 0x00, "512-byte READ payload");
+		REQUIRE(ReceiveSioByte(pContext) == 0x51, "512-byte READ checksum");
+	}
+	SendSioFrame(pContext, aStatusFrame);
+	REQUIRE(ReceiveSioByte(pContext) == 'A', "512-byte STATUS missing ACK");
+	REQUIRE(ReceiveSioByte(pContext) == 'C', "512-byte STATUS missing Complete");
+	REQUIRE(ReceiveSioByte(pContext) == 0x50, "512-byte STATUS drive flags");
+	REQUIRE(ReceiveSioByte(pContext) == 0xFF, "512-byte STATUS FDC latch");
+	REQUIRE(ReceiveSioByte(pContext) == 0xE0, "512-byte STATUS format timeout");
+	REQUIRE(ReceiveSioByte(pContext) == 0x00, "512-byte STATUS reserved byte");
+	REQUIRE(ReceiveSioByte(pContext) == 0x31, "512-byte STATUS checksum");
+
+	/* AHRM 10.3: 256-byte DD media retains the mixed 128/256 mapping. */
+	memset(aLargeSectorDisk, 0, sizeof(aLargeSectorDisk));
+	aLargeSectorDisk[0] = 0x96;
+	aLargeSectorDisk[1] = 0x02;
+	aLargeSectorDisk[4] = 0x00;
+	aLargeSectorDisk[5] = 0x01;
+	aLargeSectorDisk[16 + 3 * 128] = 0x44;
+	REQUIRE(AtariIoMountDisk(pContext, 0u, aLargeSectorDisk,
+		sizeof(aLargeSectorDisk), "double-sector.atr", 1u),
+		"cannot mount 256-byte sector disk");
+	{
+		const u8 aDoubleReadFrame[5] = { 0x31, 0x52, 0x04, 0x00, 0x87 };
+		SendSioFrame(pContext, aDoubleReadFrame);
+		REQUIRE(ReceiveSioByte(pContext) == 'A', "256-byte READ missing ACK");
+		REQUIRE(ReceiveSioByte(pContext) == 'C', "256-byte READ missing Complete");
+		REQUIRE(ReceiveSioByte(pContext) == 0x44, "256-byte READ data");
+		for(lIndex = 1; lIndex < 256u; lIndex++)
+			REQUIRE(ReceiveSioByte(pContext) == 0x00, "256-byte READ payload");
+		REQUIRE(ReceiveSioByte(pContext) == 0x44, "256-byte READ checksum");
+	}
 	return 1;
 }
 

@@ -182,11 +182,11 @@ function main() {
   statusCommand.push(checksum(statusCommand));
   statusCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
   // AHRM 10.2: STATUS byte +1 is the per-drive inverted FDC result of the
-  // prior sector operation. Before the first operation it is the reset latch,
-  // not a fabricated all-clear result.
-  assert.equal(ctx.ioData.sioBuffer[3], 0x00);
+  // prior sector operation. The preceding WRITE completed successfully.
+  assert.equal(ctx.ioData.sioBuffer[3], 0xff);
   assert.equal(ctx.ioData.sioBuffer[4], 0xe0);
   assert.equal(ctx.ioData.sioBuffer[6], 0xf0);
+  while (ctx.ioData.sioInSize > 0) api.serinRead(ctx);
 
   while (ctx.ioData.sioInSize > 0) api.serinRead(ctx);
   requestRead(api, ctx, 1);
@@ -230,6 +230,10 @@ function main() {
   read = requestRead(api, ctx, 1);
   assert.equal(read.bytes, 512);
   assert.equal(read.firstByte, 0x51);
+  while (ctx.ioData.sioInSize > 0) api.serinRead(ctx);
+  statusCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
+  assert.equal(ctx.ioData.sioBuffer[2], 0x50);
+  assert.equal(ctx.ioData.sioBuffer[3], 0xff);
 
   // The following FORMAT probe exercises the original 128-byte fixture.
   ctx.ioData.diskImages[3] = originalDisk;

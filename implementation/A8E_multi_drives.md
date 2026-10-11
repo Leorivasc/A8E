@@ -155,8 +155,10 @@ slot 0 is mirrored by `pIoData->pDisk1` for compatibility. The SIO offset logic
 uses the ATR format as follows:
 
 - the first 16 bytes are the ATR header;
-- sectors 1 through 3 are always transferred as 128-byte boot sectors;
-- subsequent sectors use the sector size from the ATR header;
+- for 256-byte media, sectors 1 through 3 use 128-byte boot transfers;
+- 512-byte-sector media transfers every sector at its native 512-byte size;
+- subsequent sectors on 128- and 256-byte media use the sector size from the
+  ATR header;
 - sector data starts after the ATR header and boot-sector area.
 
 The mapping is implemented by `Pokey_SioSectorBytesAndOffset()`.

@@ -2414,15 +2414,25 @@ static void Pokey_SioQueuePendingWriteResult(_6502_Context_t *pContext)
 static void Pokey_SioSectorBytesAndOffset(u16 sSectorIndex, u16 sSectorSize,
 										  u16 *pBytesToRead, u32 *pOffset)
 {
-	if(sSectorIndex < 4)
+	if(sSectorIndex == 0)
+	{
+		*pBytesToRead = 0;
+		*pOffset = 0;
+	}
+	else if(sSectorSize == 256 && sSectorIndex < 4)
 	{
 		*pBytesToRead = 128;
 		*pOffset = (u32)(sSectorIndex - 1) * 128;
 	}
-	else
+	else if(sSectorSize == 256)
 	{
 		*pBytesToRead = sSectorSize;
 		*pOffset = (u32)(sSectorIndex - 4) * sSectorSize + 128 * 3;
+	}
+	else
+	{
+		*pBytesToRead = sSectorSize;
+		*pOffset = (u32)(sSectorIndex - 1) * sSectorSize;
 	}
 }
 
@@ -2550,6 +2560,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						}
 					}
 					sSioPendingWriteResult = ok ? 'C' : 'E';
+					Pokey_SioSetCurrentFdcStatus(pIoData, ok ? 0xFFu : 0x00u);
 					AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
 						ATARI_IO_DISK_ACTIVITY_READ);
 					aSioBuffer[0] = 'A';
@@ -2574,6 +2585,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 							}
 						}
 					}
+					Pokey_SioSetCurrentFdcStatus(pIoData, cResult == 'C' ? 0xFFu : 0x00u);
 					pIoData->abDiskDirty[pIoData->cSioDriveIndex] = 1u;
 					AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
 						ATARI_IO_DISK_ACTIVITY_WRITE);
@@ -2760,11 +2772,11 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 							aSioBuffer[4] = 0xE0;
 							aSioBuffer[5] = 0x00;
 						}
-						else if(sSectorSize == 256)
+						else if(sSectorSize == 256 || sSectorSize == 512)
 						{
 							aSioBuffer[0] = 'A';
 							aSioBuffer[1] = 'C';
-							aSioBuffer[2] = 0x30;
+							aSioBuffer[2] = sSectorSize == 512 ? 0x50 : 0x30;
 							aSioBuffer[3] = Pokey_SioCurrentFdcStatus(pIoData);
 							aSioBuffer[4] = 0xE0;
 							aSioBuffer[5] = 0x00;
@@ -2842,6 +2854,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						{
 							memset(Pokey_SioCurrentDisk(pIoData) + 16, 0,
 							       Pokey_SioCurrentDiskSize(pIoData) - 16);
+							Pokey_SioSetCurrentFdcStatus(pIoData, 0xFFu);
 							pIoData->abDiskDirty[pIoData->cSioDriveIndex] = 1u;
 							AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
 								ATARI_IO_DISK_ACTIVITY_WRITE);
