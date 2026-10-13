@@ -53,6 +53,10 @@ u8 *Pokey_STIMER_KBCODE(_6502_Context_t *pContext, u8 *pValue);
 u8 *Pokey_SKREST_RANDOM(_6502_Context_t *pContext, u8 *pValue);
 u8 *Pokey_POTGO(_6502_Context_t *pContext, u8 *pValue);
 u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue);
+void Pokey_SerialInputReady(_6502_Context_t *pContext);
+void Pokey_SerialOutputDataNeeded(_6502_Context_t *pContext);
+u8 Pokey_SerialOutputTransmissionDone(_6502_Context_t *pContext,
+                                      u64 llEventCycle);
 u8 *Pokey_IRQEN_IRQST(_6502_Context_t *pContext, u8 *pValue);
 u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue);
 

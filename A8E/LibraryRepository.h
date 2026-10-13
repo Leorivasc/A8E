@@ -97,8 +97,8 @@ int A8E_LibraryRepository_RemoveEntry(
 	uint32_t lErrorSize);
 
 /* Persists the current D1:-D8: assignment and write-protection map. The
- * caller supplies NULL for an empty drive. The update is staged and the live
- * repository is reloaded only after the directory save succeeds. */
+ * caller supplies NULL for an empty drive. Only library.json is rewritten;
+ * existing ATR/XEX blobs are left untouched. */
 int A8E_LibraryRepository_SaveWorkspace(
 	A8E_LibraryRepository_t *pRepository,
 	const char *pRootPath,

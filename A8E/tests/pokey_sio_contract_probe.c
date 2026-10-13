@@ -90,13 +90,22 @@ static int RunTrace(_6502_Context_t *pContext, FILE *pFixture)
 	return 1;
 }
 
+static void SendSioByte(_6502_Context_t *pContext, u8 cValue)
+{
+	Pokey_SEROUT_SERIN(pContext, &cValue);
+	/* The contract probe has no CPU event loop.  Advance one byte through
+	 * POKEY's holding and shift registers explicitly, preserving the same
+	 * bus boundary used by the emulator's timed callbacks. */
+	Pokey_SerialOutputDataNeeded(pContext);
+	Pokey_SerialOutputTransmissionDone(pContext, pContext->llCycleCounter);
+}
+
 static void SendSioFrame(_6502_Context_t *pContext, const u8 *pFrame)
 {
 	u32 lIndex;
 	for(lIndex = 0; lIndex < 5u; lIndex++)
 	{
-		u8 cValue = pFrame[lIndex];
-		Pokey_SEROUT_SERIN(pContext, &cValue);
+		SendSioByte(pContext, pFrame[lIndex]);
 	}
 }
 
@@ -196,10 +205,10 @@ static int RunStatusLatchContract(_6502_Context_t *pContext)
 		for(lIndex = 0; lIndex < sizeof(aWriteData); lIndex++)
 		{
 			cValue = aWriteData[lIndex];
-			Pokey_SEROUT_SERIN(pContext, &cValue);
+			SendSioByte(pContext, cValue);
 		}
 		cValue = TestSioChecksum(aWriteData, sizeof(aWriteData));
-		Pokey_SEROUT_SERIN(pContext, &cValue);
+		SendSioByte(pContext, cValue);
 		REQUIRE(ReceiveSioByte(pContext) == 'A', "PUT missing data ACK");
 		REQUIRE(ReceiveSioByte(pContext) == 'C', "PUT missing Complete");
 	}

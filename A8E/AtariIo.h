@@ -42,7 +42,7 @@
 #define A8E_BUILD_VERSION "dev"
 #endif
 
-#define APPLICATION_CAPTION "A8E " A8E_BUILD_VERSION " (c) Sascha Springer"
+#define APPLICATION_CAPTION "A8E " A8E_BUILD_VERSION " (c) Sascha Springer/Leo Rivas"
 
 #define PIXELS_PER_LINE 456
 #define LINES_PER_SCREEN_NTSC 262
@@ -115,13 +115,13 @@ typedef struct
 	u32 lCurrentDisplayLine;
 
 	SDL_Surface *pSdlAtariSurface;
-	u8 *pPriorityData;
+	u16 *pPriorityData;
 } VideoData_t;
 
 typedef struct
 {
 	u8 *pDestination;
-	u8 *pPriorityData;
+	u16 *pPriorityData;
 	u16 sDisplayMemoryAddress;
 	u32 lBytesPerLine;
 	u8 cPlayfieldDmaStealCount;
@@ -165,6 +165,10 @@ typedef struct
 	u64 llPokeyTimerResetCycle;
 	u64 llPokeySlowClockOriginCycle;
 	u8 cSerialOutputClockHigh;
+	u8 bSerialOutputBytePending;
+	u8 bSerialOutputShiftActive;
+	u8 cSerialOutputRegisterValue;
+	u8 cSerialOutputShiftValue;
 	u8 bInDrawLine;
 	u8 cNmienEnabledByCycle7;
 	u8 cNmienEnabledByCycle8;

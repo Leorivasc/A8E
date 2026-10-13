@@ -19,14 +19,21 @@ typedef struct
 	uint32_t lWindowId;
 	uint32_t lScroll;
 	uint16_t sSelectedRow;
+	uint16_t sAtrSelectedRow;
+	uint16_t sAtrScroll;
 	uint16_t sSearchLength;
 	uint16_t sPathLength;
 	uint8_t bVisible;
 	uint8_t bPathInput;
+	uint8_t bIgnorePathActivation;
+	uint8_t bAtrView;
+	uint8_t bAtrPreview;
 	char cPathOperation;
 	char acMountedIds[8][257];
+	char acAtrEntryId[257];
 	char acSearch[257];
 	char acPath[1024];
+	char acAtrPreview[4096];
 	char acStatus[160];
 } A8E_LibraryWindow_t;
 

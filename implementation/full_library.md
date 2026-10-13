@@ -1,8 +1,9 @@
 # Full Library Management
 
 Status: implementation in progress; the portable package baseline, browser
-navigation view, and native SDL Library MVP are implemented. Native folder
-navigation/editing and ATR contents preview remain follow-up work.
+navigation view, native SDL Library MVP, and native read-only ATR contents
+viewer are implemented. Native folder navigation/editing remains follow-up
+work.
 
 Date: 2026-10-09
 
@@ -635,10 +636,11 @@ The first ATR viewer is intentionally limited to a read-only inspection path:
 The cross-application inspection core for this scope is now in place. It
 validates ATR geometry and recognizes the shared DOS 2.x/MyDOS VTOC and
 directory layout in both jsA8E and native A8E, while keeping image inspection
-read-only. jsA8E now integrates the contents view, internal-file download,
+read-only. jsA8E integrates the contents view, internal-file download,
 ATASCII preview, and hexadecimal fallback in the existing panel. The native
-floating Library window now has the same initial platform-specific mount view;
-its ATR contents view remains pending.
+floating Library window now provides the corresponding initial contents view,
+including directory selection, ATASCII/hexadecimal preview, and typed-path
+internal-file download.
 
 The first viewer will not edit, import, delete, repair, or reallocate files
 inside an ATR. Those operations remain later projects because they require

@@ -80,6 +80,9 @@ surface; BIOS/flash, RTC, and PBI device images are not bundled with A8E yet.
 A8E [options] [disk.atr|program.xex]
 ```
 
+Run `A8E -h` to print the complete command-line, function-key, and Library
+window reference without starting SDL or the emulator.
+
 **Options & Arguments:**
 * `disk.atr` / `program.xex`: Pass an ATR image or Atari executable as the first argument. `.xex` files are converted to a temporary ATR layout at load time. If no argument is passed, the emulator defaults to looking for `d1.atr`.
 * `-f` / `-F`: Launch in fullscreen mode. Uses desktop-resolution fullscreen (`SDL_WINDOW_FULLSCREEN_DESKTOP`) — the display mode is never changed, so the aspect ratio is correct on widescreen monitors and the desktop is never left in a degraded state if the app crashes. The window can be toggled at runtime with **Alt+Enter**.
@@ -116,6 +119,17 @@ For standard keyboard, joystick, and console mappings, please see the [main READ
 | **Alt+F4** | Quit the emulator (standard OS close shortcut). |
 | **F11** | Turbo mode (hold) + attempts to reload `D1.ATR` from the current directory (case-sensitive on UNIX-like systems). |
 | **F12** | Start live CPU disassembly. *Note: This is a one-way latch and requires the `ENABLE_VERBOSE_DEBUGGING` compile flag. Restart the emulator to stop.* |
+
+**Library Window (F9):**
+
+- Click an ATR name to inspect its read-only directory and geometry.
+- Press **Enter** to preview the selected ATR file as ATASCII or hexadecimal.
+- Press **D** to download the selected ATR file to a typed path.
+- Press **I** / **E** / **N** to import, export, or create a blank ATR.
+- Click a `D1:` through `D8:` cell to mount or unmount an entry.
+- Right-click a mounted drive cell to toggle write protection.
+- Type to filter entries; **Delete** removes an unmounted entry; **Esc** returns
+  from the ATR view or closes the Library window.
 
 ---
 

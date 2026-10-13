@@ -536,7 +536,7 @@ static int A8E_LibraryRepository_ReadFile(
 	pFile = fopen(pPath, "rb");
 	if(!pFile)
 	{
-		A8E_LibraryRepository_SetError(pError, lErrorSize, "cannot open library file");
+		snprintf(pError, lErrorSize, "cannot open library file: %s", pPath);
 		return 0;
 	}
 	if(fseek(pFile, 0, SEEK_END) != 0 || (lFileSize = ftell(pFile)) < 0 ||
@@ -592,6 +592,41 @@ static int A8E_LibraryRepository_WriteFile(
 	if(fclose(pFile) != 0)
 	{
 		A8E_LibraryRepository_SetError(pError, lErrorSize, "cannot close library file");
+		return 0;
+	}
+	return 1;
+}
+
+static int A8E_LibraryRepository_SaveManifest(
+	const A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	char *pError,
+	uint32_t lErrorSize)
+{
+	char sPath[A8E_REPOSITORY_MAX_PATH];
+	char sTempPath[A8E_REPOSITORY_MAX_PATH];
+	if(!pRepository || !pRootPath || !pRepository->pManifest)
+	{
+		A8E_LibraryRepository_SetError(pError, lErrorSize, "repository is incomplete");
+		return 0;
+	}
+	if(!A8E_LibraryRepository_MakeDirectory(pRootPath, pError, lErrorSize) ||
+		!A8E_LibraryRepository_JoinPath(
+			sTempPath, sizeof(sTempPath), pRootPath, "library.json.tmp") ||
+		!A8E_LibraryRepository_WriteFile(
+			sTempPath, pRepository->pManifest, pRepository->lManifestSize,
+			pError, lErrorSize) ||
+		!A8E_LibraryRepository_JoinPath(
+			sPath, sizeof(sPath), pRootPath, "library.json"))
+	{
+		return 0;
+	}
+	remove(sPath);
+	if(rename(sTempPath, sPath) != 0)
+	{
+		remove(sTempPath);
+		A8E_LibraryRepository_SetError(
+			pError, lErrorSize, "cannot install library manifest");
 		return 0;
 	}
 	return 1;
@@ -1346,8 +1381,10 @@ int A8E_LibraryRepository_SaveWorkspace(
 	char *pError,
 	uint32_t lErrorSize)
 {
-	A8E_LibraryRepository_t tStaged;
 	char *pWorkspaceJson = NULL;
+	uint8_t *pOriginalManifest = NULL;
+	uint32_t lOriginalManifestSize;
+	uint32_t lOriginalVersion;
 	uint32_t lWorkspaceJsonSize = 0;
 	uint32_t lDrive;
 	uint16_t sIndex;
@@ -1384,25 +1421,52 @@ int A8E_LibraryRepository_SaveWorkspace(
 		A8E_LibraryRepository_SetError(pError, lErrorSize, "cannot build workspace");
 		return 0;
 	}
-	A8E_LibraryRepository_Init(&tStaged);
-	if(!A8E_LibraryRepository_LoadDirectory(
-		&tStaged, pRootPath, pError, lErrorSize) ||
-		!A8E_LibraryRepository_ReplaceWorkspace(
-			&tStaged, pWorkspaceJson, lWorkspaceJsonSize) ||
-		!A8E_LibraryRepository_IncrementVersion(&tStaged) ||
-		!A8E_LibraryRepository_SaveDirectory(
-			&tStaged, pRootPath, pError, lErrorSize) ||
-		!A8E_LibraryRepository_LoadDirectory(
-			pRepository, pRootPath, pError, lErrorSize))
+	if(!pRepository->pManifest || pRepository->lManifestSize == 0u)
 	{
 		free(pWorkspaceJson);
-		A8E_LibraryRepository_Free(&tStaged);
+		A8E_LibraryRepository_SetError(pError, lErrorSize, "repository is incomplete");
+		return 0;
+	}
+	lOriginalManifestSize = pRepository->lManifestSize;
+	lOriginalVersion = pRepository->lLibraryVersion;
+	pOriginalManifest = (uint8_t *)malloc(lOriginalManifestSize);
+	if(!pOriginalManifest)
+	{
+		free(pWorkspaceJson);
+		A8E_LibraryRepository_SetError(pError, lErrorSize, "out of memory");
+		return 0;
+	}
+	memcpy(pOriginalManifest, pRepository->pManifest, lOriginalManifestSize);
+	if(!A8E_LibraryRepository_ReplaceWorkspace(
+		pRepository, pWorkspaceJson, lWorkspaceJsonSize) ||
+		!A8E_LibraryRepository_IncrementVersion(pRepository) ||
+		!A8E_LibraryRepository_SaveManifest(
+			pRepository, pRootPath, pError, lErrorSize))
+	{
+		free(pRepository->pManifest);
+		pRepository->pManifest = pOriginalManifest;
+		pRepository->lManifestSize = lOriginalManifestSize;
+		pRepository->lLibraryVersion = lOriginalVersion;
+		free(pWorkspaceJson);
 		if(!pError || !pError[0]) A8E_LibraryRepository_SetError(
 			pError, lErrorSize, "cannot save workspace");
 		return 0;
 	}
+	free(pOriginalManifest);
 	free(pWorkspaceJson);
-	A8E_LibraryRepository_Free(&tStaged);
+	for(lDrive = 0; lDrive < 8u; lDrive++)
+	{
+		pRepository->acDeviceEntryId[lDrive][0] = '\0';
+		if(apEntryIds[lDrive] && apEntryIds[lDrive][0])
+		{
+			strncpy(pRepository->acDeviceEntryId[lDrive], apEntryIds[lDrive],
+				sizeof(pRepository->acDeviceEntryId[lDrive]) - 1u);
+			pRepository->acDeviceEntryId[lDrive][
+				sizeof(pRepository->acDeviceEntryId[lDrive]) - 1u] = '\0';
+		}
+		pRepository->abDeviceWriteProtected[lDrive] = abWriteProtected
+			? abWriteProtected[lDrive] : 0u;
+	}
 	return 1;
 }
 

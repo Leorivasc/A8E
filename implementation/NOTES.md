@@ -4,6 +4,112 @@
 
 Simple implementation notes for this repository.
 
+- 2026-10-12: corrected native A8E SIO command-phase sequencing. The host
+  now raises the active-low CB2 command line immediately after the fifth
+  command byte and before checksum/parameter handling, matching AHRM 9.1 and
+  the already aligned jsA8E bus model. This is a generic SIO electrical-state
+  correction used by all addressed devices, not a Last Squadron-specific
+  workaround. A native diagnostic run with Last Squadron also completed the
+  previously failing sector-657 read and continued issuing valid reads
+  without a Disk Error or unsupported-command response.
+
+- 2026-10-12: command-line ATR/XEX boot media now take precedence over the
+  persisted library workspace. When a positional image is supplied, the
+  library no longer restores its D1: assignment over that image; D2:-D8:
+  continue to restore normally, and the explicit medium is kept outside the
+  library panel's mounted-entry bookkeeping.
+
+- 2026-10-12: aligned native GTIA mode 10 playfield/PMG composition with
+  jsA8E and the AHRM priority model. The native per-pixel priority buffer is
+  now 16-bit, mode 10 colors retain their PM0/PM1/PM2/PM3 pseudo-priority
+  bits, and player/missile masks include those bits when PRIOR selects a
+  mode-10 interaction. Background and clipped-border rendering preserve
+  mode-10 PMG pixels instead of treating them as ordinary background. This
+  is a generic GTIA representation change, not a Last Squadron-specific
+  condition.
+
+- 2026-10-12: aligned native A8E CHBASE raster timing with jsA8E and AHRM
+  4.4. The pending character-base latch now starts two color clocks after
+  the final 6502 bus cycle of the write, rather than from the beginning of
+  the instruction. This preserves rasterized character-set changes used by
+  programs such as Last Squadron.
+
+- 2026-10-12: aligned native A8E and jsA8E SIO transmission with the AHRM
+  5.6 POKEY output holding/shift-register model. SEROUT writes now queue one
+  byte, DATA NEEDED loads the shift register, and the virtual SIO device sees
+  the byte only when its ten-bit transmission completes. This preserves the
+  one-byte replacement behavior and resets the pending output state when
+  POKEY enters initialization. Also handled the XL/XE first-byte checksum
+  race documented in AHRM 5.10: an invalid command addressed to a mounted
+  virtual disk receives NAK so the OS can retry, while invalid frames for
+  absent device IDs remain silent as required by AHRM 9.1. Last Squadron was
+  exercised for 120 million jsA8E cycles without a dropped command; native
+  compilation remains pending because the local MSBuild FileTracker fails
+  with Access denied before compilation.
+
+- 2026-10-12: native Library package import now resolves a relative input
+  path from the process working directory first and then from the executable
+  directory. This lets `library.a8e` be imported when it is beside A8E even
+  when Windows starts the executable with a different working directory.
+
+- 2026-10-12: native Library package open failures now include the exact path
+  passed to `fopen`, and also log that path to stderr. This distinguishes a
+  missing package/path-resolution problem from a later package validation
+  error during desktop import.
+
+- 2026-10-12: native Library path commands now discard the command key's
+  queued SDL text-input event. Pressing `I`, `E`, `N`, or ATR-view `D` no
+  longer prefixes the user-provided path or filename with that command letter.
+
+- 2026-10-12: expanded the native Library window's 5x5 glyph table with a
+  real blank-space glyph and common filename punctuation. Previously every
+  unsupported character, including spaces, was rendered as `?`, which made
+  imported library names and status text appear corrupted.
+
+- 2026-10-12: widened the native Library filename column by compacting and
+  moving the drive columns, and added ellipsis truncation at the filename
+  boundary. Long names no longer draw over the type or drive cells.
+
+- 2026-10-12: optimized native workspace persistence. Mount, unmount, and
+  write-protection changes now atomically rewrite only `library.json`; they no
+  longer reload or rewrite every ATR/XEX blob in the repository.
+
+- 2026-10-12: extended native `A8E -h` output with the Atari console-key
+  mappings: F1 HELP, F2 OPTION, F3 SELECT, F4 START, and F5 RESET.
+
+- 2026-10-12: aligned the native ATR directory headers and values by using
+  shared explicit positions for SECT, START, and STATE instead of relying on
+  manual spaces in one header string.
+
+- 2026-10-12: added a three-pixel gap before the ATR SECT column and shifted
+  the following directory columns together, keeping their headers and values
+  aligned while separating them from filenames.
+
+- 2026-10-12: increased the ATR directory-column offset by another three
+  pixels after visual verification, preserving the shared header/value spacing.
+
+- 2026-10-12: corrected the native Library 5x5 `A` glyph's second row from
+  `0x05` to `0x11`, restoring the symmetric `#...#` diagonal pattern.
+
+- 2026-10-12: added a native `A8E -h`/`A8E --help` path that exits before
+  SDL or emulator initialization. The help output documents all command-line
+  arguments, function/system keys, and the native Library window controls.
+
+- 2026-10-12: connected the native A8E floating Library window to the shared
+  ATR inspection core. Clicking an ATR opens a read-only directory/geometry
+  view; Enter previews a selected DOS 2.x/MyDOS file as ATASCII or hexadecimal,
+  D downloads it to a typed path, and unrecognized filesystems expose a raw
+  hexadecimal view. No ATR bytes are modified by this UI path.
+
+- 2026-10-11: completed the jsA8E Assembler Editor icon-only toolbar update by
+  removing the dynamic Pause/Continue text from the shared debug button while
+  retaining its state-specific tooltip and ARIA label.
+
+- 2026-10-11: compacted the jsA8E HostFS, Assembler Editor, and Snapshots
+  toolbar buttons to icon-only controls, matching the Disk Library treatment.
+  Existing hover titles remain the visible function help and explicit ARIA
+  labels preserve accessible names without changing any action handlers.
+
 - 2026-10-11: aligned native A8E STATUS response queuing with jsA8E. The
   native virtual drive now resets the SERIN response index and schedules the
   complete seven-byte STATUS frame through the common response helper. This
