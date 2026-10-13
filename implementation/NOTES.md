@@ -1,5 +1,17 @@
 # NOTES.md
 
+- 2026-10-13: opened `ATR/prince_of_persia.md` for a reproducible Prince of
+  Persia intro graphics regression. The presentation with music was observed
+  as distorted after rebuilding from `main` on Windows and again after
+  compiling A8E on openSUSE 16. Windows inspection found the expected static
+  SDL2 `2.32.10#1` package from vcpkg, and the generated `main` project did not
+  link the stale Full Library object files that remained in the shared build
+  directory. The cross-platform reproduction therefore makes an external
+  Windows library/backend mismatch unlikely and moves the investigation to a
+  common ANTIC/GTIA/CHBASE/CPU timing regression. A clean isolated build,
+  exact platform/profile capture, and title-level raster comparison remain
+  pending; no fix or title-specific workaround was added.
+
 > Hardware emulation reference: Before implementing any Atari 800 XL PAL/NTSC hardware emulation, use the [AHRM](/AHRM/index.md) as reference.
 
 Simple implementation notes for this repository.
