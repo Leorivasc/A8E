@@ -518,11 +518,11 @@
         <!-- Toolbar -->
         <div class="hostfs-toolbar">
           <label class="hostfs-label">Add</label>
-          <button class="hostfs-btn hostfs-upload-btn" title="Upload files to H:">
-            <i class="fa-solid fa-upload"></i> Upload
+          <button class="hostfs-btn hostfs-upload-btn" title="Upload files to H:" aria-label="Upload files to H:">
+            <i class="fa-solid fa-upload" aria-hidden="true"></i>
           </button>
-          <button class="hostfs-btn hostfs-folder-btn" title="Upload a folder to H:">
-            <i class="fa-solid fa-folder-open"></i> Folder
+          <button class="hostfs-btn hostfs-folder-btn" title="Upload a folder to H:" aria-label="Upload a folder to H:">
+            <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
           </button>
           <input type="file" class="hostfs-upload-input" multiple hidden />
           <input type="file" class="hostfs-folder-input" webkitdirectory multiple hidden />
@@ -530,18 +530,18 @@
           <span class="hostfs-toolbar-sep"></span>
 
           <label class="hostfs-label">Select</label>
-          <button class="hostfs-btn hostfs-sel-all-btn" title="Select all files">
-            <i class="fa-solid fa-check-double"></i> All
+          <button class="hostfs-btn hostfs-sel-all-btn" title="Select all files" aria-label="Select all files">
+            <i class="fa-solid fa-check-double" aria-hidden="true"></i>
           </button>
-          <button class="hostfs-btn hostfs-sel-none-btn" title="Deselect all">
-            <i class="fa-regular fa-square"></i> None
+          <button class="hostfs-btn hostfs-sel-none-btn" title="Deselect all" aria-label="Deselect all">
+            <i class="fa-regular fa-square" aria-hidden="true"></i>
           </button>
           <span class="hostfs-toolbar-sep"></span>
-          <button class="hostfs-btn hostfs-dl-sel-btn" title="Download selected files" disabled>
-            <i class="fa-solid fa-download"></i> Download
+          <button class="hostfs-btn hostfs-dl-sel-btn" title="Download selected files" aria-label="Download selected files" disabled>
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
           </button>
-          <button class="hostfs-btn hostfs-btn-danger hostfs-del-sel-btn" title="Delete selected files" disabled>
-            <i class="fa-solid fa-trash"></i> Delete
+          <button class="hostfs-btn hostfs-btn-danger hostfs-del-sel-btn" title="Delete selected files" aria-label="Delete selected files" disabled>
+            <i class="fa-solid fa-trash" aria-hidden="true"></i>
           </button>
         </div>
         <!-- File list / drop zone -->
@@ -585,31 +585,31 @@
         <div class="asm-toolbar">
           <label class="asm-label">File</label>
           <select id="asmSourceSelect" class="asm-select asm-source-select" aria-label="HostFS source file list"></select>
-          <button class="asm-btn asm-load-btn" title="Load selected source from HostFS">
-            <i class="fa-solid fa-download"></i> Load
+          <button class="asm-btn asm-load-btn" title="Load selected source from HostFS" aria-label="Load selected source from HostFS">
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
           </button>
           <input id="asmSourceName" class="asm-input asm-source-name" type="text" value="PROGRAM.ASM" maxlength="32" spellcheck="false" />
-          <button class="asm-btn asm-save-btn" title="Save source to HostFS (Ctrl+S)">
-            <i class="fa-solid fa-floppy-disk"></i> Save
+          <button class="asm-btn asm-save-btn" title="Save source to HostFS (Ctrl+S)" aria-label="Save source to HostFS (Ctrl+S)">
+            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
           </button>
 
           <span class="asm-toolbar-sep"></span>
 
           <label class="asm-label">Build</label>
-          <button class="asm-btn asm-build-btn" title="Assemble and write .XEX to HostFS (Ctrl+Shift+B)">
-            <i class="fa-solid fa-gears"></i> Assemble
+          <button class="asm-btn asm-build-btn" title="Assemble and write .XEX to HostFS (Ctrl+Shift+B)" aria-label="Assemble and write .XEX to HostFS (Ctrl+Shift+B)">
+            <i class="fa-solid fa-gears" aria-hidden="true"></i>
           </button>
-          <button class="asm-btn asm-run-btn" title="Save, assemble, load into D1: and start (Ctrl+Enter)">
-            <i class="fa-solid fa-play"></i> Run
+          <button class="asm-btn asm-run-btn" title="Save, assemble, load into D1: and start (Ctrl+Enter)" aria-label="Save, assemble, load into D1: and start (Ctrl+Enter)">
+            <i class="fa-solid fa-play" aria-hidden="true"></i>
           </button>
-          <button class="asm-btn asm-step-btn" title="Execute the next instruction and pause again" hidden>
-            <i class="fa-solid fa-forward-step"></i> Step
+          <button class="asm-btn asm-step-btn" title="Execute the next instruction and pause again" aria-label="Execute the next instruction and pause again" hidden>
+            <i class="fa-solid fa-forward-step" aria-hidden="true"></i>
           </button>
-          <button class="asm-btn asm-step-over-btn" title="Execute subroutine calls without entering them" hidden>
-            <i class="fa-solid fa-share-from-square"></i> Step Over
+          <button class="asm-btn asm-step-over-btn" title="Execute subroutine calls without entering them" aria-label="Execute subroutine calls without entering them" hidden>
+            <i class="fa-solid fa-share-from-square" aria-hidden="true"></i>
           </button>
-          <button class="asm-btn asm-continue-btn" title="Continue execution until the next breakpoint" hidden>
-            <i class="fa-solid fa-play"></i> Continue
+          <button class="asm-btn asm-continue-btn" title="Continue execution until the next breakpoint" aria-label="Continue execution until the next breakpoint" hidden>
+            <i class="fa-solid fa-play" aria-hidden="true"></i>
           </button>
         </div>
         <div class="asm-editor-wrap">
@@ -633,19 +633,19 @@
         </div>
         <div class="snapshot-toolbar">
           <label class="snapshot-label">Quick Slot</label>
-          <button class="snapshot-btn snapshot-save-btn" title="Save a full emulator snapshot into the browser quick-save slot. If the emulator is running it will be paused first.">
-            <i class="fa-solid fa-floppy-disk"></i> Save
+          <button class="snapshot-btn snapshot-save-btn" title="Save a full emulator snapshot into the browser quick-save slot. If the emulator is running it will be paused first." aria-label="Save a full emulator snapshot into the browser quick-save slot">
+            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
           </button>
-          <button class="snapshot-btn snapshot-load-btn" title="Load the browser quick-save slot and restore the saved emulator state." disabled>
-            <i class="fa-solid fa-rotate-left"></i> Load
+          <button class="snapshot-btn snapshot-load-btn" title="Load the browser quick-save slot and restore the saved emulator state." aria-label="Load the browser quick-save slot and restore the saved emulator state" disabled>
+            <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
           </button>
           <span class="snapshot-toolbar-sep"></span>
           <label class="snapshot-label">File</label>
-          <button class="snapshot-btn snapshot-export-btn" title="Export the current emulator snapshot as a downloadable file.">
-            <i class="fa-solid fa-download"></i> Export
+          <button class="snapshot-btn snapshot-export-btn" title="Export the current emulator snapshot as a downloadable file." aria-label="Export the current emulator snapshot as a downloadable file">
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
           </button>
-          <button class="snapshot-btn snapshot-import-btn" title="Import a previously exported snapshot file and restore it.">
-            <i class="fa-solid fa-upload"></i> Import
+          <button class="snapshot-btn snapshot-import-btn" title="Import a previously exported snapshot file and restore it." aria-label="Import a previously exported snapshot file and restore it">
+            <i class="fa-solid fa-upload" aria-hidden="true"></i>
           </button>
           <input type="file" class="snapshot-import-input" accept=".a8esnap,application/x-a8e-snapshot,application/octet-stream" hidden />
         </div>

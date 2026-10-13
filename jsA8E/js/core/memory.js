@@ -2124,6 +2124,10 @@
           pokeyTimerResetCycle: io.pokeyTimerResetCycle,
           pokeySlowClockOriginCycle: io.pokeySlowClockOriginCycle,
           serialOutputClockHigh: !!io.serialOutputClockHigh,
+          serialOutputBytePending: !!io.serialOutputBytePending,
+          serialOutputShiftActive: !!io.serialOutputShiftActive,
+          serialOutputRegisterValue: io.serialOutputRegisterValue | 0,
+          serialOutputShiftValue: io.serialOutputShiftValue | 0,
           valuePortA: io.valuePortA | 0,
           valuePortB: io.valuePortB | 0,
           outputPortB: io.outputPortB | 0,
@@ -2137,6 +2141,7 @@
           sioPendingBytes: io.sioPendingBytes | 0,
           sioInIndex: io.sioInIndex | 0,
           sioInSize: io.sioInSize | 0,
+          sioInReady: !!io.sioInReady,
           sioPendingReadSize: io.sioPendingReadSize | 0,
           sioPendingWriteResult: io.sioPendingWriteResult | 0,
           pokeyLfsr17: io.pokeyLfsr17 | 0,
@@ -2249,6 +2254,14 @@
           io.pokeySlowClockOriginCycle = state.pokeySlowClockOriginCycle;
         if (state.serialOutputClockHigh !== undefined)
           io.serialOutputClockHigh = !!state.serialOutputClockHigh;
+        if (state.serialOutputBytePending !== undefined)
+          io.serialOutputBytePending = !!state.serialOutputBytePending;
+        if (state.serialOutputShiftActive !== undefined)
+          io.serialOutputShiftActive = !!state.serialOutputShiftActive;
+        if (state.serialOutputRegisterValue !== undefined)
+          io.serialOutputRegisterValue = state.serialOutputRegisterValue & 0xff;
+        if (state.serialOutputShiftValue !== undefined)
+          io.serialOutputShiftValue = state.serialOutputShiftValue & 0xff;
         io.valuePortA = state.valuePortA | 0;
         io.valuePortB = state.valuePortB | 0;
         io.outputPortB =
@@ -2263,6 +2276,7 @@
         io.sioPendingBytes = state.sioPendingBytes | 0;
         io.sioInIndex = state.sioInIndex | 0;
         io.sioInSize = state.sioInSize | 0;
+        io.sioInReady = !!state.sioInReady;
         io.sioPendingReadSize = state.sioPendingReadSize | 0;
         io.sioPendingWriteResult = state.sioPendingWriteResult | 0;
         io.pokeyLfsr17 = state.pokeyLfsr17 | 0;

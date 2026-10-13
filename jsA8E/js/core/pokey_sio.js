@@ -124,6 +124,67 @@
       return true;
     }
 
+    function queueSerialOutput(ctx, now) {
+      const io = ctx.ioData;
+      if (!serialOutputIsAvailable(ctx)) {
+        io.serialOutputBytePending = false;
+        io.serialOutputNeedDataCycle = CYCLE_NEVER;
+        io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
+        if (ctx.ram && IO_IRQEN_IRQST !== undefined)
+          ctx.ram[IO_IRQEN_IRQST] &= ~0x08;
+        cycleTimedEventUpdate(ctx);
+        return false;
+      }
+
+      io.serialOutputBytePending = true;
+      // The first byte waits for the next output-clock load edge.  Once the
+      // shift register is active, a write only replaces the one-byte holding
+      // register; it cannot create an earlier DATA NEEDED event.
+      if (!io.serialOutputShiftActive &&
+          (io.serialOutputNeedDataCycle === CYCLE_NEVER ||
+           io.serialOutputNeedDataCycle <= now)) {
+        scheduleSerialOutput(ctx, now, true, true);
+      }
+      return true;
+    }
+
+    function serialOutputDataNeeded(ctx) {
+      const io = ctx.ioData;
+      if (!io.serialOutputBytePending) return false;
+      io.serialOutputShiftValue = io.serialOutputRegisterValue & 0xff;
+      io.serialOutputBytePending = false;
+      io.serialOutputShiftActive = true;
+      return true;
+    }
+
+    function serialOutputTransmissionDone(ctx, eventCycle) {
+      const io = ctx.ioData;
+      if (!io.serialOutputShiftActive) return false;
+
+      transmitSioByte(ctx, io.serialOutputShiftValue & 0xff);
+      if (!io.serialOutputBytePending) {
+        io.serialOutputShiftActive = false;
+        return false;
+      }
+
+      io.serialOutputShiftValue = io.serialOutputRegisterValue & 0xff;
+      io.serialOutputBytePending = false;
+      io.serialOutputShiftActive = true;
+      const period = serialOutputDelay(ctx, SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES);
+      io.serialOutputTransmissionDoneCycle =
+        (eventCycle | 0) + period * 20;
+      cycleTimedEventUpdate(ctx);
+      return true;
+    }
+
+    function serialOutputTransmitNow(ctx) {
+      const io = ctx.ioData;
+      if (!io.serialOutputShiftActive) serialOutputDataNeeded(ctx);
+      io.serialOutputNeedDataCycle = CYCLE_NEVER;
+      io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
+      return serialOutputTransmissionDone(ctx, effectiveEventCycle(ctx));
+    }
+
     function setSioCommandLine(ctx, level) {
       const io = ctx.ioData;
       if (io && typeof io.piaSetControlLine === "function")
@@ -138,6 +199,7 @@
       io.sioInSize = 0;
       io.sioPendingReadSize = 0;
       io.sioPendingWriteResult = 0;
+      io.sioInReady = false;
     }
 
     function traceSio(ctx, event, fields) {
@@ -172,6 +234,7 @@
       const io = ctx.ioData;
       io.sioInSize = size | 0;
       io.sioInIndex = 0;
+      io.sioInReady = false;
       io.serialInputDataReadyCycle = now + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
       traceSio(ctx, "SIO_RESPONSE_QUEUED", {
         size: io.sioInSize,
@@ -180,6 +243,20 @@
         pendingWriteResult: io.sioPendingWriteResult | 0,
       });
       cycleTimedEventUpdate(ctx);
+    }
+
+    function serialInputReady(ctx) {
+      const io = ctx.ioData;
+      if ((io.sioInSize | 0) <= 0 || io.sioInReady) return false;
+
+      // A completed serial byte is copied into SERIN before POKEY asserts
+      // the serial-input IRQ. The CPU reads this holding register afterward.
+      ctx.ram[IO_SEROUT_SERIN] =
+        io.sioBuffer[io.sioInIndex & 0xffff] & 0xff;
+      io.sioInIndex = (io.sioInIndex + 1) & 0xffff;
+      io.sioInSize = (io.sioInSize - 1) | 0;
+      io.sioInReady = true;
+      return true;
     }
 
     function diskSectorSize(disk) {
@@ -639,11 +716,16 @@
       const io = ctx.ioData;
       const now = effectiveEventCycle(ctx);
 
-      // CB2 is the active-low SIO command line. This electrical transition is
-      // intentionally independent of the response-byte state machine.
+      // SEROUT writes fill POKEY's one-byte holding register.  The SIO bus
+      // sees the byte only when the output shift register completes it.
       setSioCommandLine(ctx, 0);
+      io.serialOutputRegisterValue = value & 0xff;
+      queueSerialOutput(ctx, now);
+    }
 
-      scheduleSerialOutput(ctx, now, true, true);
+    function transmitSioByte(ctx, value) {
+      const io = ctx.ioData;
+      const now = effectiveEventCycle(ctx);
 
       const buf = io.sioBuffer;
 
@@ -656,8 +738,6 @@
 
         const expected = (io.sioPendingBytes | 0) + 1; // data + checksum
         if (dataIndex !== expected) return;
-
-        scheduleSerialOutput(ctx, now, false, true);
 
         const dataBytes = io.sioPendingBytes | 0;
         const provided = buf[SIO_DATA_OFFSET + dataBytes] & 0xff;
@@ -702,18 +782,32 @@
       setSioCommandLine(ctx, 1);
 
       if (sioChecksum(buf, 4) !== (buf[4] & 0xff)) {
-        // AHRM 9.1: invalid command frames are ignored silently so that
-        // unrelated devices on the bus cannot interfere with one another.
-        // Keep this observable in the opt-in POKEY trace. This is diagnostic
-        // only: emitting a trace record must not turn an invalid frame into a
-        // NAK or otherwise alter the bus-visible result.
+        // AHRM 9.1 normally keeps checksum errors silent so devices cannot
+        // interfere with one another. AHRM 5.10 also documents the XL/XE OS
+        // first-byte race, where real disk drives answer an addressed,
+        // mounted disk with NAK so the OS can retry the command. Apply that
+        // compatibility rule only to an addressed virtual disk; absent IDs
+        // remain electrically silent.
+        const invalidDevice = buf[0] & 0xff;
+        const invalidCommand = buf[1] & 0xff;
+        const invalidAux1 = buf[2] & 0xff;
+        const invalidAux2 = buf[3] & 0xff;
+        const calculatedChecksum = sioChecksum(buf, 4);
+        const providedChecksum = buf[4] & 0xff;
+        if (
+          invalidDevice >= DISK_DEVICE_ID_BASE &&
+          invalidDevice < DISK_DEVICE_ID_BASE + DISK_DEVICE_COUNT &&
+          getMountedDiskForDevice(io, invalidDevice)
+        ) {
+          queueDeviceNack(ctx, now);
+        }
         traceSio(ctx, "SIO_COMMAND_DROPPED", {
-          device: buf[0] & 0xff,
-          command: buf[1] & 0xff,
-          aux1: buf[2] & 0xff,
-          aux2: buf[3] & 0xff,
-          calculatedChecksum: sioChecksum(buf, 4),
-          providedChecksum: buf[4] & 0xff,
+          device: invalidDevice,
+          command: invalidCommand,
+          aux1: invalidAux1,
+          aux2: invalidAux2,
+          calculatedChecksum: calculatedChecksum,
+          providedChecksum: providedChecksum,
           reason: "invalid-command-checksum",
         });
         return;
@@ -723,8 +817,6 @@
       const cmd2 = buf[1] & 0xff;
       const aux1 = buf[2] & 0xff;
       const aux2 = buf[3] & 0xff;
-
-      scheduleSerialOutput(ctx, now, false, true);
 
       if (
         typeof serialCommandSpeedSupported === "function" &&
@@ -766,11 +858,9 @@
 
     function serinRead(ctx) {
       const io = ctx.ioData;
-      if ((io.sioInSize | 0) > 0) {
-        const b = io.sioBuffer[io.sioInIndex & 0xffff] & 0xff;
-        io.sioInIndex = (io.sioInIndex + 1) & 0xffff;
-        io.sioInSize = (io.sioInSize - 1) | 0;
-        ctx.ram[IO_SEROUT_SERIN] = b;
+      if (io.sioInReady) {
+        io.sioInReady = false;
+        const b = ctx.ram[IO_SEROUT_SERIN] & 0xff;
         traceSio(ctx, "SIO_RESPONSE_READ", {
           value: b,
           remaining: io.sioInSize | 0,
@@ -799,6 +889,10 @@
 
     return {
       seroutWrite: seroutWrite,
+      serialOutputTransmitNow: serialOutputTransmitNow,
+      serialOutputDataNeeded: serialOutputDataNeeded,
+      serialOutputTransmissionDone: serialOutputTransmissionDone,
+      serialInputReady: serialInputReady,
       serinRead: serinRead,
     };
   }

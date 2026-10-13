@@ -352,6 +352,10 @@
   const pokeyApplyTimerReset = pokeyAudioApi.applyTimerReset;
   const pokeyArmInactiveTimers = pokeyAudioApi.armInactiveTimers;
   const pokeySeroutWrite = pokeyAudioApi.seroutWrite;
+  const pokeySerialOutputDataNeeded = pokeyAudioApi.serialOutputDataNeeded;
+  const pokeySerialOutputTransmissionDone =
+    pokeyAudioApi.serialOutputTransmissionDone;
+  const pokeySerialInputReady = pokeyAudioApi.serialInputReady;
   const pokeySerinRead = pokeyAudioApi.serinRead;
 
   const ioApi =
@@ -444,6 +448,9 @@
           pokeyArmInactiveTimers: pokeyArmInactiveTimers,
           pokeySyncLfsr17: pokeySyncLfsr17,
           pokeySeroutWrite: pokeySeroutWrite,
+          pokeySerialOutputDataNeeded: pokeySerialOutputDataNeeded,
+          pokeySerialOutputTransmissionDone: pokeySerialOutputTransmissionDone,
+          pokeySerialInputReady: pokeySerialInputReady,
           pokeySerinRead: pokeySerinRead,
           pokeyPotUpdate: pokeyPotUpdate,
           pokeyPotReadValue: pokeyPotReadValue,
@@ -526,6 +533,9 @@
             IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE,
           IRQ_SERIAL_OUTPUT_DATA_NEEDED: IRQ_SERIAL_OUTPUT_DATA_NEEDED,
           IRQ_SERIAL_INPUT_DATA_READY: IRQ_SERIAL_INPUT_DATA_READY,
+          pokeySerialOutputDataNeeded: pokeySerialOutputDataNeeded,
+          pokeySerialOutputTransmissionDone: pokeySerialOutputTransmissionDone,
+          pokeySerialInputReady: pokeySerialInputReady,
           IO_VCOUNT: IO_VCOUNT,
           IO_NMIEN: IO_NMIEN,
           IO_NMIRES_NMIST: IO_NMIRES_NMIST,

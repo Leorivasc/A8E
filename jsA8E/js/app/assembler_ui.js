@@ -400,9 +400,15 @@
       continueBtn.title = pause
         ? "Pause execution and keep current state for debugging"
         : "Continue execution until the next breakpoint";
+      continueBtn.setAttribute(
+        "aria-label",
+        pause
+          ? "Pause execution and keep current state for debugging"
+          : "Continue execution until the next breakpoint"
+      );
       continueBtn.innerHTML = pause
-        ? "<i class=\"fa-solid fa-pause\"></i> Pause"
-        : "<i class=\"fa-solid fa-play\"></i> Continue";
+        ? "<i class=\"fa-solid fa-pause\" aria-hidden=\"true\"></i>"
+        : "<i class=\"fa-solid fa-play\" aria-hidden=\"true\"></i>";
     }
 
     function setDebugControlsMode(mode) {

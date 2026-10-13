@@ -1392,6 +1392,12 @@
       io.timer4Cycle = CYCLE_NEVER;
       io.pokeyTimerResetCycle = CYCLE_NEVER;
       io.serialOutputClockHigh = false;
+      io.serialOutputBytePending = false;
+      io.serialOutputShiftActive = false;
+      io.serialOutputRegisterValue = 0;
+      io.serialOutputShiftValue = 0;
+      io.serialOutputNeedDataCycle = CYCLE_NEVER;
+      io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
       cycleTimedEventUpdate(ctx);
     }
 
@@ -1470,6 +1476,9 @@
       applyTimerReset: pokeyApplyTimerReset,
       armInactiveTimers: pokeyArmInactiveTimers,
       seroutWrite: pokeySioApi.seroutWrite,
+      serialOutputDataNeeded: pokeySioApi.serialOutputDataNeeded,
+      serialOutputTransmissionDone: pokeySioApi.serialOutputTransmissionDone,
+      serialInputReady: pokeySioApi.serialInputReady,
       serinRead: pokeySioApi.serinRead,
     };
   }

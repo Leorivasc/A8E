@@ -67,10 +67,11 @@ function makeContext(observer, activityObserver) {
     sioPendingBytes: 0,
     sioInIndex: 0,
     sioInSize: 0,
+    sioInReady: false,
     sioPendingReadSize: 0,
     sioPendingWriteResult: 0,
-    serialOutputNeedDataCycle: 0,
-    serialOutputTransmissionDoneCycle: 0,
+    serialOutputNeedDataCycle: Number.POSITIVE_INFINITY,
+    serialOutputTransmissionDoneCycle: Number.POSITIVE_INFINITY,
     serialInputDataReadyCycle: 0,
     deviceSlots: new Int16Array([3, -1, -1, -1, -1, -1, -1, -1]),
     diskImages: [{ bytes: new Uint8Array(1) }, { bytes: new Uint8Array(1) }, { bytes: new Uint8Array(1) }, { bytes: bytes, size: bytes.length }],
@@ -84,11 +85,20 @@ function makeContext(observer, activityObserver) {
   };
 }
 
+function readSerin(api, ctx) {
+  api.serialInputReady(ctx);
+  return api.serinRead(ctx);
+}
+
+function drainSerin(api, ctx) {
+  while (ctx.ioData.sioInSize > 0) readSerin(api, ctx);
+}
+
 function requestRead(api, ctx, sector) {
   const command = [0x31, 0x52, sector & 0xff, (sector >>> 8) & 0xff];
   command.push(checksum(command));
   command.forEach(function (value) { api.seroutWrite(ctx, value); });
-  assert.equal(api.serinRead(ctx), "A".charCodeAt(0));
+  assert.equal(readSerin(api, ctx), "A".charCodeAt(0));
   return {
     bytes: ctx.ioData.sioInSize - 2,
     firstByte: ctx.ioData.sioBuffer[1],
@@ -102,6 +112,11 @@ function main() {
   const api = loadApi(undefined, undefined, undefined, function (ctx, event, fields) {
     serialTrace.push(JSON.parse(JSON.stringify({ event: event, fields: fields })));
   });
+  const rawSeroutWrite = api.seroutWrite;
+  api.seroutWrite = function (ctx, value) {
+    rawSeroutWrite(ctx, value);
+    api.serialOutputTransmitNow(ctx);
+  };
   const ctx = makeContext(
     function (imageIndex) { observed.push(imageIndex); },
     function (activity) { activities.push(activity); },
@@ -123,9 +138,9 @@ function main() {
   assert.equal(activities[0].operation, "write");
   assert.equal(ctx.ioData.sioBuffer[0], "A".charCodeAt(0));
   assert.equal(ctx.ioData.sioInSize, 1);
-  assert.equal(api.serinRead(ctx), "A".charCodeAt(0));
+  assert.equal(readSerin(api, ctx), "A".charCodeAt(0));
   assert.equal(ctx.ioData.sioInSize, 1);
-  assert.equal(api.serinRead(ctx), "C".charCodeAt(0));
+  assert.equal(readSerin(api, ctx), "C".charCodeAt(0));
 
   // PUT has the same data-frame ACK phase but no readback verification.
   const putCommand = [0x31, 0x50, 0x02, 0x00];
@@ -135,9 +150,9 @@ function main() {
   for (let i = 0; i < payload.length; i++) api.seroutWrite(ctx, payload[i]);
   api.seroutWrite(ctx, checksum(payload));
   assert.equal(ctx.ioData.sioInSize, 1);
-  assert.equal(api.serinRead(ctx), "A".charCodeAt(0));
+  assert.equal(readSerin(api, ctx), "A".charCodeAt(0));
   assert.equal(ctx.ioData.sioInSize, 1);
-  assert.equal(api.serinRead(ctx), "C".charCodeAt(0));
+  assert.equal(readSerin(api, ctx), "C".charCodeAt(0));
 
   // VERIFY also separates the data-frame ACK from its completion result.
   const verifyCommand = [0x31, 0x56, 0x02, 0x00];
@@ -146,9 +161,9 @@ function main() {
   for (let i = 0; i < payload.length; i++) api.seroutWrite(ctx, payload[i]);
   api.seroutWrite(ctx, checksum(payload));
   assert.equal(ctx.ioData.sioInSize, 1);
-  assert.equal(api.serinRead(ctx), "A".charCodeAt(0));
+  assert.equal(readSerin(api, ctx), "A".charCodeAt(0));
   assert.equal(ctx.ioData.sioInSize, 1);
-  assert.equal(api.serinRead(ctx), "C".charCodeAt(0));
+  assert.equal(readSerin(api, ctx), "C".charCodeAt(0));
 
   // AHRM 9.1 / 810: an unsupported command addressed to a recognized drive
   // is rejected immediately. $48 is a Happy-drive extension, not a normal
@@ -157,13 +172,17 @@ function main() {
   unsupportedCommand.push(checksum(unsupportedCommand));
   unsupportedCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
   assert.equal(ctx.ioData.sioBuffer[0], "N".charCodeAt(0));
-  assert.equal(api.serinRead(ctx), "N".charCodeAt(0));
+  assert.equal(readSerin(api, ctx), "N".charCodeAt(0));
 
-  // AHRM 9.1: a bad command checksum is ignored, not NAKed.
+  // AHRM 5.10: the XL/XE first-byte race can produce a bad command checksum.
+  // A mounted disk answers that addressed frame with NAK so the OS can retry;
+  // invalid frames for absent devices remain silent per AHRM 9.1.
   const invalidCommand = [0x31, 0x53, 0x00, 0x00, 0x00];
   invalidCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
-  assert.equal(ctx.ioData.sioInSize, 0);
-  assert.deepEqual(serialTrace.pop(), {
+  assert.equal(ctx.ioData.sioInSize, 1);
+  const invalidTrace = serialTrace.pop();
+  assert.equal(readSerin(api, ctx), "N".charCodeAt(0));
+  assert.deepEqual(invalidTrace, {
     event: "SIO_COMMAND_DROPPED",
     fields: {
       device: 0x31,
@@ -171,6 +190,24 @@ function main() {
       aux1: 0x00,
       aux2: 0x00,
       calculatedChecksum: checksum(invalidCommand.slice(0, 4)),
+      providedChecksum: 0x00,
+      reason: "invalid-command-checksum",
+    },
+  });
+
+  // A checksum error addressed to an absent drive must remain silent so it
+  // cannot interfere with another peripheral on the shared SIO bus.
+  const absentInvalidCommand = [0x32, 0x53, 0x00, 0x00, 0x00];
+  absentInvalidCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
+  assert.equal(ctx.ioData.sioInSize, 0);
+  assert.deepEqual(serialTrace.pop(), {
+    event: "SIO_COMMAND_DROPPED",
+    fields: {
+      device: 0x32,
+      command: 0x53,
+      aux1: 0x00,
+      aux2: 0x00,
+      calculatedChecksum: checksum(absentInvalidCommand.slice(0, 4)),
       providedChecksum: 0x00,
       reason: "invalid-command-checksum",
     },
@@ -186,11 +223,11 @@ function main() {
   assert.equal(ctx.ioData.sioBuffer[3], 0xff);
   assert.equal(ctx.ioData.sioBuffer[4], 0xe0);
   assert.equal(ctx.ioData.sioBuffer[6], 0xf0);
-  while (ctx.ioData.sioInSize > 0) api.serinRead(ctx);
+  drainSerin(api, ctx);
 
-  while (ctx.ioData.sioInSize > 0) api.serinRead(ctx);
+  drainSerin(api, ctx);
   requestRead(api, ctx, 1);
-  while (ctx.ioData.sioInSize > 0) api.serinRead(ctx);
+  drainSerin(api, ctx);
   statusCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
   assert.equal(ctx.ioData.sioBuffer[3], 0xff);
   assert.equal(ctx.ioData.sioBuffer[6], 0xf0);
@@ -230,7 +267,7 @@ function main() {
   read = requestRead(api, ctx, 1);
   assert.equal(read.bytes, 512);
   assert.equal(read.firstByte, 0x51);
-  while (ctx.ioData.sioInSize > 0) api.serinRead(ctx);
+  drainSerin(api, ctx);
   statusCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
   assert.equal(ctx.ioData.sioBuffer[2], 0x50);
   assert.equal(ctx.ioData.sioBuffer[3], 0xff);
@@ -246,9 +283,9 @@ function main() {
   ctx.ioData.diskImages[3].bytes.fill(0xa5, 16);
   formatCommand.forEach(function (value) { api.seroutWrite(ctx, value); });
   assert.equal(ctx.ioData.sioInSize, 1);
-  assert.equal(api.serinRead(ctx), "A".charCodeAt(0));
+  assert.equal(readSerin(api, ctx), "A".charCodeAt(0));
   assert.equal(ctx.ioData.sioInSize, 130);
-  assert.equal(api.serinRead(ctx), "C".charCodeAt(0));
+  assert.equal(readSerin(api, ctx), "C".charCodeAt(0));
   assert.equal(ctx.ioData.sioBuffer[1], 0xff);
   assert.equal(ctx.ioData.sioBuffer[2], 0xff);
   assert.equal(ctx.ioData.diskImages[3].bytes[16], 0);
@@ -263,7 +300,7 @@ function main() {
   ctx.ioData.sioInIndex = 0;
   ctx.ioData.sioInSize = 1;
   ctx.ram[0xd20e] = 0xdf;
-  assert.equal(api.serinRead(ctx), 0x43);
+  assert.equal(readSerin(api, ctx), 0x43);
   assert.equal(ctx.ram[0xd20e] & 0x20, 0x00);
 
   // AHRM 5.6: standard SIO output deadlines follow the configured timer-4
@@ -295,6 +332,8 @@ function main() {
 
   phaseCtx.ioData.serialOutputNeedDataCycle = 0;
   phaseCtx.ioData.serialOutputTransmissionDoneCycle = 0;
+  phaseCtx.ioData.serialOutputBytePending = false;
+  phaseCtx.ioData.serialOutputShiftActive = false;
   phaseCtx.ioData.serialOutputClockHigh = true;
   phaseApi.seroutWrite(phaseCtx, 0x55);
   assert.equal(phaseCtx.ioData.serialOutputNeedDataCycle, 196);
