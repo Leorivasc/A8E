@@ -1,5 +1,13 @@
 # NOTES.md
 
+- 2026-10-17: fixed `publish-tauri.yml` so the rolling `tauri-latest` release
+  no longer force-moves a shared Git tag. The release action now updates the
+  existing prerelease assets in place with `overwrite_files: true`; the tag is
+  created only on first release creation and remains immutable. The release
+  body continues to record the exact `GITHUB_SHA` used to build the packages.
+  This prevents local clones from receiving conflicting `tauri-latest` tag
+  updates during normal synchronization.
+
 - 2026-10-16: opened the separate real-hardware validation project in
   `implementation/REAL_HARDWARE_VALIDATION.md`. It is a session handoff for
   PAL/NTSC Atari 800 XL measurements covering POKEY/SIO, ANTIC/GTIA, raster
