@@ -1,10 +1,94 @@
 # Compiler and Debugger Review
 
-Review status: 2026-09-20.
+Review status: 2026-10-17.
 
 The browser assembler and source debugger are functional for the current
 single-source 6502/XEX workflow. The existing automated test suite passes, but
 the following findings should remain visible for future work.
+
+## Overall assessment
+
+The tool is suitable for developing small Atari 8-bit programs, demos, and
+utilities in a single source file. It is not yet a complete assembler IDE or a
+multi-module assembler/linker toolchain.
+
+Current capability levels:
+
+- The official NMOS 6502 instruction set and the main addressing modes are
+  implemented in the CPU and assembler tables.
+- The assembler supports XEX generation, labels, expressions, macros,
+  includes, repetition, conditional preprocessing, source mapping, and the
+  common data/origin directives.
+- The debugger supports source/PC breakpoints, single-step, step-over,
+  continue/pause, bounded `runUntilPc`, CPU state, memory access, trace
+  inspection, disassembly, symbols, snapshots, and failure artifacts.
+- The UI remains intentionally small: memory, stack, call-stack, watch,
+  conditional-breakpoint, and integrated disassembly/trace views are not yet
+  provided as first-class debugger panels.
+
+For the exact runtime API surface, see the `debug.*` section in
+[`jsA8E/README.md`](../../jsA8E/README.md).
+
+## 6502 instruction coverage
+
+The shared opcode table contains 256 opcode entries:
+
+- 151 official NMOS 6502 opcodes.
+- 92 undocumented or non-standard opcode encodings implemented by the CPU.
+- 13 unsupported encodings: `$02`, `$12`, `$22`, `$32`, `$42`, `$52`, `$62`,
+  `$72`, `$92`, `$B2`, `$D2`, `$EB`, and `$F2`.
+
+The unsupported entries are primarily JAM/KIL-style instructions, plus the
+undocumented `$EB` SBC-immediate alias. In the normal Atari runtime, the
+debugger's illegal-opcode hook reports these as deterministic faults instead
+of silently treating them as valid instructions.
+
+The CPU also implements decimal ADC/SBC, interrupt entry and return, branch
+page-crossing timing, the NMOS `JMP ($xxxx)` page-wrap behavior, and a broad
+set of undocumented operations such as `LAX`, `SLO`, `DCP`, `ISC`, `RRA`,
+`RLA`, `SRE`, `LAS`, `SHA`, `SHX`, `SHY`, and `TAS`. Unstable undocumented
+semantics should not be treated as portable 6502 programming contracts.
+
+The assembler exposes 71 mnemonic names from the shared opcode map, but does
+not expose every undocumented CPU operation as a mnemonic. `LAS`, `SHA`,
+`SHX`, `SHY`, and `TAS` currently require explicit `.BYTE` encoding. Some
+unstable variants also use alternate names (`ATX`/`LXA` and `XAA`/`ANE`).
+The official 151-opcode set is the supported programming target; exact
+selection of duplicate undocumented encodings may require `.BYTE`.
+
+The table is defined in
+[`jsA8E/js/core/cpu_tables.js`](../../jsA8E/js/core/cpu_tables.js), the assembler
+mapping is built in
+[`jsA8E/js/core/assembler/shared.js`](../../jsA8E/js/core/assembler/shared.js), and
+execution is dispatched by
+[`jsA8E/js/core/cpu.js`](../../jsA8E/js/core/cpu.js).
+
+The current tests cover representative official, interrupt, decimal, and
+undocumented-opcode behavior, but they are not yet an exhaustive matrix of
+all 151 official opcodes across every addressing mode, flag combination, and
+cycle edge case.
+
+## Assembler completeness
+
+Implemented source features include:
+
+- `.ORG`, `.RUN`, `.DS`, `.RES`, `.BYTE`/`.DB`, `.WORD`/`.DW`/`.ADDR`.
+- `.TEXT`, `.LOBYTES`, `.HIBYTES`, `.ASSERT`, `.ERROR`, and `.END`.
+- `.EQU`, `.SET`, labels, local labels, expressions, and branch validation.
+- `.include`, `.define`, `.undef`, `.macro`, `.rept`, `.local`, and
+  conditional assembly.
+- HostFS source editing and XEX output.
+
+The following are deliberately incomplete or limited:
+
+- `.SEGMENT`, `.IMPORT`, and `.GLOBAL` are metadata in the current XEX path;
+  there is no relocation pass or linker for combining object modules.
+- `.SET` cannot redefine an existing symbol with traditional mutable-SET
+  semantics.
+- Macro, `.rept`, and `.include` expansion can weaken original source-line to
+  CPU-address mapping.
+- Worker-mode Run can race disk loading, and the UI's fire-and-forget stepping
+  methods can report before Worker execution is acknowledged.
 
 ## Findings
 

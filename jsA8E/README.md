@@ -249,6 +249,14 @@ The assembler panel includes a source-level debugger:
 - **Step Over** — execute a subroutine call without stepping into it.
 - **Continue** — resume execution until the next breakpoint.
 
+The current debugger is intended for single-source 6502/XEX development. It
+does not yet provide conditional breakpoints, memory watchpoints, direct
+register editing, call-stack/watch windows, or integrated memory and
+disassembly panels. The CPU implements all 151 official NMOS 6502 opcodes and
+a broad set of undocumented opcodes; the full coverage and the unsupported
+unstable encodings are documented in
+[`implementation/jsA8E/COMPILER_DEBUGGER.md`](../implementation/jsA8E/COMPILER_DEBUGGER.md).
+
 ## Automation API
 
 jsA8E now exposes a stable automation surface through `window.A8EAutomation` in the browser and `createHeadlessAutomation(...)` in Node.
