@@ -3334,7 +3334,7 @@ void AtariKeyboardEvent(_6502_Context_t *pContext, SDL_KeyboardEvent *pKeyboardE
 
 			break;	
 
-    	case SDLK_LALT: // Joystick trigger
+	case SDLK_LCTRL: // Joystick trigger
     		RAM[IO_GRAFP3_TRIG0] = 0;
     		
     		break;
@@ -3444,7 +3444,7 @@ void AtariKeyboardEvent(_6502_Context_t *pContext, SDL_KeyboardEvent *pKeyboardE
 
 			break;	
 
-    	case SDLK_LALT: // Joystick trigger
+	case SDLK_LCTRL: // Joystick trigger
     		RAM[IO_GRAFP3_TRIG0] = 1;
     		
     		break;

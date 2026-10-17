@@ -277,7 +277,7 @@ Type normally on the emulated Atari keyboard. **Ctrl** and **Shift** work as mod
 |-----|----------|
 | Arrow Keys | Joystick direction |
 | **Shift** + Arrow Keys | Atari cursor keys (↑ ↓ ← →) |
-| Left Alt | Fire button |
+| Left Control | Fire button |
 
 Shift + Arrow is a convenience shortcut — it sends the same key codes as **Ctrl + − / = / + / \*** on the Atari keyboard (the original cursor controls).
 

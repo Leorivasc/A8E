@@ -180,8 +180,8 @@
       // Prefer code/location for side-specific modifiers first.
       if (e.code === "ShiftRight") return 303;
       if (e.code === "ShiftLeft") return 304;
-      if (e.code === "AltRight") return 307;
-      if (e.code === "AltLeft") return 308;
+      if (e.code === "ControlRight") return 307;
+      if (e.code === "ControlLeft") return 306;
 
       if (shouldPreferPrintableMapping(e)) {
         const printable = printableKeyToSdlSym(e);
@@ -250,7 +250,7 @@
         case "Alt":
           return 308;
         case "Control":
-          return 306; // SDLK_LCTRL (approx; unused for table)
+          return 306; // SDLK_LCTRL
         default:
           break;
       }
