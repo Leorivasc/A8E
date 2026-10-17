@@ -67,17 +67,35 @@ async function main() {
   assert.equal(result.filesystem.name, "DOS 2.x / MyDOS");
   assert.equal(result.entries.length, 1);
   assert.equal(result.entries[0].name, "HELLO   TXT");
+  const integrity = inspector.verify(atr);
+  assert.equal(integrity.valid, true);
+  assert.equal(integrity.filesystemKnown, true);
+  assert.equal(integrity.checkedFiles, 1);
+  assert.equal(integrity.checkedSectors, 1);
   assert.deepEqual(
     Array.from(inspector.extractFile(atr, result, result.entries[0])),
     Array.from(new Uint8Array([72, 101, 108, 108, 111, 10])),
   );
   assert.equal(inspector.decodeAtascii(new Uint8Array([65, 0x9b, 66])), "A\nB");
 
+  const brokenChain = new Uint8Array(atr);
+  sector(brokenChain, 4)[126] = 1;
+  sector(brokenChain, 4)[127] = 6;
+  const brokenResult = inspector.verify(brokenChain);
+  assert.equal(brokenResult.valid, false);
+  assert.ok(brokenResult.errors.some(function (message) {
+    return message.indexOf("more sectors") >= 0;
+  }));
+
   const unknownBytes = new Uint8Array(atr);
   unknownBytes[16 + (360 - 1) * 128] = 0;
   const unknown = inspector.inspect(unknownBytes);
   assert.equal(unknown.valid, true);
   assert.equal(unknown.filesystem, null);
+  const unknownIntegrity = inspector.verify(unknownBytes);
+  assert.equal(unknownIntegrity.valid, true);
+  assert.equal(unknownIntegrity.filesystemKnown, false);
+  assert.ok(unknownIntegrity.warnings.length > 0);
   assert.equal(inspector.inspect(new Uint8Array([0, 1])).valid, false);
   console.log("atr_inspector.test.js passed");
 }

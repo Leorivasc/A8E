@@ -445,12 +445,30 @@
           <button class="disklib-btn disklib-btn-danger disklib-del-sel-btn" title="Delete selected images" aria-label="Delete selected images" disabled>
             <i class="fa-solid fa-trash" aria-hidden="true"></i>
           </button>
+          <button class="disklib-btn disklib-trash-btn" title="Open recoverable trash" aria-label="Open recoverable trash">
+            <i class="fa-solid fa-trash-can-arrow-up" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-btn-danger disklib-purge-trash-btn" title="Purge all trash" aria-label="Purge all trash">
+            <i class="fa-solid fa-fire" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-btn-danger disklib-purge-old-trash-btn" title="Purge trash older than..." aria-label="Purge trash older than...">
+            <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
+          </button>
           <span class="disklib-toolbar-sep"></span>
           <button class="disklib-btn disklib-export-btn" title="Export the complete library" aria-label="Export the complete library">
             <i class="fa-solid fa-box-archive" aria-hidden="true"></i>
           </button>
+          <button class="disklib-btn disklib-workspace-export-btn" title="Export mounted workspace" aria-label="Export mounted workspace">
+            <i class="fa-solid fa-hard-drive"></i>
+          </button>
+          <button class="disklib-btn disklib-storage-btn" title="Show browser storage capacity" aria-label="Show browser storage capacity">
+            <i class="fa-solid fa-database" aria-hidden="true"></i>
+          </button>
           <button class="disklib-btn disklib-import-btn" title="Import a complete library package" aria-label="Import a complete library package">
             <i class="fa-solid fa-file-import" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-cancel-btn" title="Cancel the active library operation" aria-label="Cancel the active library operation" disabled>
+            <i class="fa-solid fa-stop" aria-hidden="true"></i>
           </button>
           <input type="file" class="disklib-import-input" accept=".a8e,.zip,application/zip,application/octet-stream" hidden />
         </div>
@@ -500,11 +518,29 @@
         <div class="disklib-searchbar">
           <i class="fa-solid fa-magnifying-glass"></i>
           <input class="disklib-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search library..." aria-label="Search library" />
+          <select class="disklib-filter-type" aria-label="Filter by type" title="Filter by type">
+            <option value="all">All types</option>
+            <option value="atr">ATR</option>
+            <option value="xex">XEX</option>
+          </select>
+          <select class="disklib-filter-status" aria-label="Filter by status" title="Filter by status">
+            <option value="all">All status</option>
+            <option value="mounted">Mounted</option>
+            <option value="dirty">Dirty</option>
+            <option value="clean">Clean</option>
+          </select>
+          <select class="disklib-sort" aria-label="Sort library" title="Sort library">
+            <option value="name">Name</option>
+            <option value="type">Type</option>
+            <option value="size">Size</option>
+            <option value="modified">Modified</option>
+          </select>
         </div>
         <div class="disklib-statusbar">
           <span class="disklib-stat-count">0 files</span>
           <span class="disklib-stat-sep">|</span>
           <span class="disklib-stat-sel" hidden></span>
+          <span class="disklib-stat-info" aria-live="polite"></span>
           <span class="disklib-flex"></span>
           <span class="disklib-stat-total"></span>
         </div>

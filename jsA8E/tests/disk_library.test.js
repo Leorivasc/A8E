@@ -32,7 +32,7 @@ function loadApi() {
   context.window = context;
   context.self = context;
   vm.createContext(context);
-  ["library_archive.js", "library_package.js", "disk_library.js"].forEach(function (file) {
+  ["library_archive.js", "library_package.js", "atr_inspector.js", "disk_library.js"].forEach(function (file) {
     const fileSource = file === "disk_library.js"
       ? source
       : fs.readFileSync(path.join(__dirname, "..", "js", "core", file), "utf8");
@@ -66,12 +66,16 @@ async function main() {
 
   await library.init();
   assert.equal(library.isReady(), true);
+  const storage = await library.getStorageEstimate();
+  assert.equal(storage.supported, false);
   assert.equal(library.isRestored(), false);
   await library.restoreMounts();
   assert.equal(library.isRestored(), true);
   const atr = await library.addFile("GAME.ATR", new Uint8Array([1, 2, 3]));
   assert.equal(atr.name, "GAME.ATR");
   assert.equal(library.listFiles()[0].mountedSlot, -1);
+  const invalidReport = await library.verifyFile(atr.id);
+  assert.equal(invalidReport.valid, false);
 
   await library.mountFile(atr.id, 0);
   assert.equal(library.listFiles()[0].mountedSlot, 0);
@@ -83,6 +87,14 @@ async function main() {
   assert.equal(downloaded.name, "GAME.ATR");
   assert.deepEqual(Array.from(new Uint8Array(downloaded.buffer)), [1, 9, 3]);
   assert.equal(library.listFiles()[0].dirty, false);
+  const changedHistory = await library.exportPackage({ fileName: "history.a8e" });
+  const changedManifest = await library.inspectPackage(changedHistory.buffer);
+  assert.ok(changedManifest.manifest.library[0].revisions.length >= 2);
+  const revisions = library.listRevisions(atr.id);
+  assert.ok(revisions.length >= 2);
+  await library.selectRevision(atr.id, revisions[0].id);
+  const restoredRevision = await library.downloadFile(atr.id);
+  assert.deepEqual(Array.from(new Uint8Array(restoredRevision.buffer)), [1, 2, 3]);
 
   const second = await library.addFile("SECOND.ATR", new Uint8Array([4]));
   await library.mountFile(second.id, 0);
@@ -101,9 +113,22 @@ async function main() {
   assert.equal(inspected.manifest.libraryVersion, 3);
   assert.equal(inspected.manifest.library.length, 2);
   assert.equal(inspected.manifest.workspace.devices.D1, second.id);
+  const workspaceExport = await library.exportWorkspacePackage();
+  const workspacePackage = await library.inspectPackage(workspaceExport.buffer);
+  assert.equal(workspacePackage.manifest.scope, "workspace");
+  assert.equal(workspacePackage.manifest.library.length, 1);
+  assert.equal(workspacePackage.manifest.library[0].id, second.id);
+  assert.equal(workspacePackage.manifest.workspace.devices.D1, second.id);
 
   await library.deleteFile(second.id);
   assert.equal(library.listFiles().length, 1);
+  assert.equal(library.listTrash().length, 1);
+  assert.equal(library.listTrash()[0].id, second.id);
+  await library.restoreTrash(second.id);
+  assert.equal(library.listFiles().length, 2);
+  await library.deleteFile(second.id);
+  await library.purgeTrash(second.id);
+  assert.equal(library.listTrash().length, 0);
   const imported = await library.importPackage(exported.buffer);
   assert.equal(imported.summary.added, 1);
   assert.equal(imported.summary.duplicates, 1);
@@ -113,6 +138,8 @@ async function main() {
   assert.equal(library.listFiles().length, 2);
   const folder = await library.createFolder("Projects");
   const folderFile = await library.addFile("FOLDER.ATR", new Uint8Array([5]), folder.id);
+  const rootSameName = await library.addFile("FOLDER.ATR", new Uint8Array([6]), "root");
+  assert.equal(rootSameName.name, "FOLDER.ATR");
   const blank = await library.createBlankAtr("EMPTY.ATR", folder.id);
   assert.equal(blank.format, "atr");
   assert.equal(blank.size, 16 + 720 * 128);
@@ -121,13 +148,20 @@ async function main() {
   assert.equal(blankBytes[0], 0x96);
   assert.equal(blankBytes[1], 0x02);
   assert.equal(blankBytes[4], 0x80);
+  const blankReport = await library.verifyFile(blank.id);
+  assert.equal(blankReport.valid, true);
+  assert.equal(blankReport.filesystemKnown, false);
   assert.equal(library.listFiles(folder.id).length, 2);
   assert.ok(library.listFiles(folder.id).some(function (file) { return file.id === folderFile.id; }));
   assert.ok(library.listFiles(folder.id).some(function (file) { return file.id === blank.id; }));
+  await library.deleteFile(rootSameName.id);
   await library.moveFile(folderFile.id, "root");
   assert.equal(library.listFiles(folder.id).length, 1);
   await library.deleteFile(blank.id);
   assert.equal(library.listFiles(folder.id).length, 0);
+  const purgedOld = await library.purgeTrashBefore(Date.now() + 1);
+  assert.equal(purgedOld, 2);
+  assert.equal(library.listTrash().length, 0);
   await library.deleteFolder(folder.id);
   console.log("disk_library.test.js passed");
 }

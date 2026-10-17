@@ -2794,6 +2794,24 @@ canvas.crtEnabled {
 .disklib-search-input:focus {
   border-color: var(--accent);
 }
+.disklib-filter-type,
+.disklib-filter-status,
+.disklib-sort {
+  flex: 0 0 auto;
+  min-width: 88px;
+  background: var(--sub-panel-toolbar-bg);
+  border: 1px solid var(--sub-panel-inner-border);
+  border-radius: var(--sub-panel-btn-radius);
+  color: var(--text);
+  font: inherit;
+  padding: 3px 5px;
+  outline: none;
+}
+.disklib-filter-type:focus,
+.disklib-filter-status:focus,
+.disklib-sort:focus {
+  border-color: var(--accent);
+}
 .disklib-statusbar {
   padding: 4px 10px;
   background: var(--sub-panel-statusbar-bg);
@@ -2804,6 +2822,13 @@ canvas.crtEnabled {
 .disklib-stat-sel {
   color: var(--accent);
   font-weight: 600;
+}
+.disklib-stat-info {
+  min-width: 0;
+  max-width: 52%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .disklib-flex {
   flex: 1;

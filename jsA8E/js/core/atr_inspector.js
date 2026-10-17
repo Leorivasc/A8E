@@ -192,6 +192,124 @@
     return new Uint8Array(output);
   }
 
+  function verify(data) {
+    const bytes = toBytes(data);
+    const inspection = inspect(bytes);
+    const result = {
+      valid: inspection.valid,
+      filesystemKnown: !!inspection.filesystem,
+      errors: [],
+      warnings: [],
+      checkedFiles: 0,
+      checkedSectors: 0,
+      inspection: inspection,
+    };
+    const addError = function (message) {
+      result.errors.push(String(message));
+      result.valid = false;
+    };
+    const addWarning = function (message) {
+      result.warnings.push(String(message));
+    };
+
+    if (!inspection.valid) {
+      addError(inspection.error || "Invalid ATR image");
+      return result;
+    }
+
+    const info = inspection.header;
+    if (info.totalSectors < DIRECTORY_START_SECTOR + DIRECTORY_SECTOR_COUNT - 1) {
+      addWarning("ATR is too small for a DOS 2.x/MyDOS directory");
+      return result;
+    }
+    const vtoc = readSector(bytes, VTOC_SECTOR, info.sectorSize);
+    if (!vtoc || vtoc[0] !== 2) {
+      addWarning("DOS 2.x/MyDOS filesystem was not detected");
+      return result;
+    }
+    result.filesystemKnown = true;
+    const initialFree = readWord(vtoc, 1);
+    const currentFree = readWord(vtoc, 3);
+    const dataCapacity = Math.max(0, info.totalSectors - 3 - 1 - DIRECTORY_SECTOR_COUNT);
+    if (initialFree > info.totalSectors || currentFree > info.totalSectors) {
+      addError("VTOC free-sector count exceeds the ATR geometry");
+    } else if (initialFree > dataCapacity || currentFree > dataCapacity) {
+      addWarning("VTOC free-sector count includes reserved or unavailable sectors");
+    }
+
+    const owners = new Map();
+    const names = new Set();
+    for (let sectorIndex = 0; sectorIndex < DIRECTORY_SECTOR_COUNT; sectorIndex++) {
+      const directory = readSector(bytes, DIRECTORY_START_SECTOR + sectorIndex, info.sectorSize);
+      if (!directory || directory.length < DIRECTORY_ENTRIES_PER_SECTOR * DIRECTORY_ENTRY_SIZE) {
+        addError("DOS directory sector is outside the ATR image");
+        continue;
+      }
+      for (let slot = 0; slot < DIRECTORY_ENTRIES_PER_SECTOR; slot++) {
+        const offset = slot * DIRECTORY_ENTRY_SIZE;
+        const status = directory[offset];
+        if (!((status & 0x40) !== 0 && (status & 0x80) === 0)) continue;
+        const entry = {
+          name: cleanName(directory, offset + 5),
+          sectors: readWord(directory, offset + 1),
+          startSector: readWord(directory, offset + 3),
+        };
+        const label = "directory entry " + (sectorIndex * DIRECTORY_ENTRIES_PER_SECTOR + slot);
+        result.checkedFiles++;
+        if (!entry.name || !entry.sectors || entry.startSector < 1 || entry.startSector > info.totalSectors) {
+          addError(label + " has invalid name, length, or start sector");
+          continue;
+        }
+        const nameKey = entry.name.toUpperCase();
+        if (names.has(nameKey)) addError("DOS directory contains duplicate file names");
+        names.add(nameKey);
+
+        const visited = new Set();
+        let sectorNumber = entry.startSector;
+        for (let count = 0; count < entry.sectors; count++) {
+          if (sectorNumber < 4 || sectorNumber > info.totalSectors ||
+              sectorNumber === VTOC_SECTOR ||
+              (sectorNumber >= DIRECTORY_START_SECTOR &&
+               sectorNumber < DIRECTORY_START_SECTOR + DIRECTORY_SECTOR_COUNT)) {
+            addError(label + " references a reserved or out-of-range sector");
+            break;
+          }
+          if (visited.has(sectorNumber)) {
+            addError(label + " contains a cyclic sector chain");
+            break;
+          }
+          visited.add(sectorNumber);
+          const owner = owners.get(sectorNumber);
+          if (owner && owner !== label) addError("DOS files share an allocated sector");
+          owners.set(sectorNumber, label);
+          result.checkedSectors++;
+          const sector = readSector(bytes, sectorNumber, info.sectorSize);
+          if (!sector || sector.length < info.sectorSize) {
+            addError(label + " references a sector outside the ATR image");
+            break;
+          }
+          const next = (((sector[info.sectorSize - 3] & 0x03) << 8) |
+            sector[info.sectorSize - 2]) >>> 0;
+          const used = sector[info.sectorSize - 1];
+          if (used > info.sectorSize - 3) addError(label + " has an invalid used-byte count");
+          if (count + 1 < entry.sectors && next === 0) {
+            addError(label + " terminates before its directory sector count");
+            break;
+          }
+          if (count + 1 === entry.sectors && next !== 0) {
+            addError(label + " contains more sectors than its directory count");
+            break;
+          }
+          sectorNumber = next;
+        }
+      }
+    }
+    if (result.checkedFiles === 0 && currentFree < dataCapacity) {
+      addWarning("VTOC reports allocated sectors but the directory is empty");
+    }
+    return result;
+  }
+
   function decodeAtascii(data) {
     const bytes = toBytes(data);
     let text = "";
@@ -208,6 +326,7 @@
 
   root.A8EAtrInspector = {
     inspect: inspect,
+    verify: verify,
     extractFile: extractFile,
     decodeAtascii: decodeAtascii,
     sectorOffset: sectorOffset,
