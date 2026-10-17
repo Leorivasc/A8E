@@ -413,7 +413,7 @@
   function postDiskLibrarySnapshot() {
     const diskLibrary = getDiskLibrary();
     if (!diskLibrary || typeof diskLibrary.listFiles !== "function") {
-      self.postMessage({ type: "diskLibrarySnapshot", ready: false, files: [] });
+      self.postMessage({ type: "diskLibrarySnapshot", ready: false, files: [], trash: [] });
       return;
     }
     self.postMessage({
@@ -422,6 +422,7 @@
       restored: typeof diskLibrary.isRestored === "function" ? diskLibrary.isRestored() : true,
       files: diskLibrary.listFiles(),
       folders: typeof diskLibrary.listAllFolders === "function" ? diskLibrary.listAllFolders() : [],
+      trash: typeof diskLibrary.listTrash === "function" ? diskLibrary.listTrash() : [],
     });
   }
 
@@ -1050,6 +1051,30 @@
       case "diskLibraryMove": {
         const library = requireDiskLibrary();
         const result = await library.moveFile(data.id || "", data.folderId || "root");
+        postDiskLibrarySnapshot();
+        return result;
+      }
+      case "diskLibraryRestoreTrash": {
+        const library = requireDiskLibrary();
+        const result = await library.restoreTrash(data.id || "");
+        postDiskLibrarySnapshot();
+        return result;
+      }
+      case "diskLibraryPurgeTrash": {
+        const library = requireDiskLibrary();
+        const result = await library.purgeTrash(data.id || "");
+        postDiskLibrarySnapshot();
+        return result;
+      }
+      case "diskLibraryPurgeAllTrash": {
+        const library = requireDiskLibrary();
+        const result = await library.purgeAllTrash();
+        postDiskLibrarySnapshot();
+        return result;
+      }
+      case "diskLibraryPurgeTrashBefore": {
+        const library = requireDiskLibrary();
+        const result = await library.purgeTrashBefore(Number(data.cutoff));
         postDiskLibrarySnapshot();
         return result;
       }

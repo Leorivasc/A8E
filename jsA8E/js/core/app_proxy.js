@@ -58,6 +58,10 @@
     diskLibraryFolderCreate: 15000,
     diskLibraryFolderDelete: 15000,
     diskLibraryMove: 15000,
+    diskLibraryRestoreTrash: 15000,
+    diskLibraryPurgeTrash: 15000,
+    diskLibraryPurgeAllTrash: 15000,
+    diskLibraryPurgeTrashBefore: 15000,
   };
 
   function resolveAudioWorkletUrl() {
@@ -244,6 +248,19 @@
     }
     if (Array.isArray(data)) return new Uint8Array(data).buffer;
     return new ArrayBuffer(0);
+  }
+
+  function cloneLibraryExportOptions(options) {
+    const source = options && typeof options === "object" ? options : {};
+    const payload = {};
+    Object.keys(source).forEach(function (key) {
+      // Callbacks and AbortSignals belong to the caller's thread. They cannot
+      // cross the Worker structured-clone boundary.
+      if (key === "onProgress" || key === "isCanceled" || key === "signal") return;
+      if (typeof source[key] === "function") return;
+      payload[key] = source[key];
+    });
+    return payload;
   }
 
   function toUint8(data) {
@@ -879,9 +896,12 @@
 
     folders.set("root", { id: "root", name: "Library", parentId: null });
 
-    function snapshotFromWire(items, isReady, isRestored, folderItems) {
+    const trash = new Map();
+
+    function snapshotFromWire(items, isReady, isRestored, folderItems, trashItems) {
       files.clear();
       folders.clear();
+      trash.clear();
       folders.set("root", { id: "root", name: "Library", parentId: null });
       if (Array.isArray(folderItems)) {
         for (let i = 0; i < folderItems.length; i++) {
@@ -895,6 +915,13 @@
           const item = items[i];
           if (!item || !item.id) continue;
           files.set(String(item.id), Object.assign({}, item));
+        }
+      }
+      if (Array.isArray(trashItems)) {
+        for (let i = 0; i < trashItems.length; i++) {
+          const item = trashItems[i];
+          if (!item || !item.id) continue;
+          trash.set(String(item.id), Object.assign({}, item));
         }
       }
       if (typeof isReady === "boolean") ready = isReady;
@@ -943,6 +970,18 @@
     function getFileInfo(id) {
       const entry = files.get(String(id || ""));
       return entry ? Object.assign({}, entry) : null;
+    }
+
+    function listTrash() {
+      const result = [];
+      trash.forEach(function (entry) {
+        result.push(Object.assign({}, entry));
+      });
+      result.sort(function (a, b) {
+        return (b.deletedAt || 0) - (a.deletedAt || 0) ||
+          String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+      });
+      return result;
     }
 
     function onChange(listener) {
@@ -1034,10 +1073,27 @@
       });
     }
 
+    function restoreTrash(id) {
+      return sendRequest("diskLibraryRestoreTrash", { id: String(id || "") });
+    }
+
+    function purgeTrash(id) {
+      return sendRequest("diskLibraryPurgeTrash", { id: String(id || "") });
+    }
+
+    function purgeAllTrash() {
+      return sendRequest("diskLibraryPurgeAllTrash");
+    }
+
+    function purgeTrashBefore(cutoff) {
+      return sendRequest("diskLibraryPurgeTrashBefore", { cutoff: Number(cutoff) });
+    }
+
     function exportPackage(options) {
+      const config = options && typeof options === "object" ? options : {};
       return sendRequest(
         "diskLibraryExport",
-        options && typeof options === "object" ? options : {},
+        cloneLibraryExportOptions(config),
         null,
         { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryExport },
       ).then(function (result) {
@@ -1123,6 +1179,11 @@
         createFolder: createFolder,
         deleteFolder: deleteFolder,
         moveFile: moveFile,
+        listTrash: listTrash,
+        restoreTrash: restoreTrash,
+        purgeTrash: purgeTrash,
+        purgeAllTrash: purgeAllTrash,
+        purgeTrashBefore: purgeTrashBefore,
         exportPackage: exportPackage,
         inspectPackage: inspectPackage,
         previewImport: previewImport,
@@ -1466,6 +1527,7 @@
           !!data.ready,
           typeof data.restored === "boolean" ? data.restored : !!data.ready,
           data.folders || [],
+          data.trash || [],
         );
         return;
       }
