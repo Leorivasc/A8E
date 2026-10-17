@@ -107,6 +107,23 @@
               const period = timer ? pokeyTimerPeriodCpuCycles(ctx, timer) : 0;
               return period;
             },
+            serialInputClockPeriod: function (ctx) {
+              return pokeyTimerPeriodCpuCycles(ctx, 4);
+            },
+            serialCommandSpeedSupported: function (ctx, dev) {
+              if (dev < 0x31 || dev > 0x38) return true;
+              const mounted = ctx.ioData && ctx.ioData.deviceSlots
+                ? ctx.ioData.deviceSlots[dev - 0x31]
+                : -1;
+              if (mounted === undefined || mounted < 0) return true;
+              const audctl = ctx.sram[IO_AUDCTL_ALLPOT] & 0xff;
+              if ((audctl & 0x28) === 0x28 &&
+                  (ctx.sram[IO_AUDF4_POT6] & 0xff) === 0) {
+                const divisor = ctx.sram[IO_AUDF3_POT4] & 0xff;
+                return divisor === 0x28 || divisor === 0x0a;
+              }
+              return true;
+            },
             serialOutputClockNextCycle: function (ctx, now) {
               return pokeySerialOutputClockNextCycle(ctx, now);
             },
@@ -1375,6 +1392,12 @@
       io.timer4Cycle = CYCLE_NEVER;
       io.pokeyTimerResetCycle = CYCLE_NEVER;
       io.serialOutputClockHigh = false;
+      io.serialOutputBytePending = false;
+      io.serialOutputShiftActive = false;
+      io.serialOutputRegisterValue = 0;
+      io.serialOutputShiftValue = 0;
+      io.serialOutputNeedDataCycle = CYCLE_NEVER;
+      io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
       cycleTimedEventUpdate(ctx);
     }
 
@@ -1453,6 +1476,9 @@
       applyTimerReset: pokeyApplyTimerReset,
       armInactiveTimers: pokeyArmInactiveTimers,
       seroutWrite: pokeySioApi.seroutWrite,
+      serialOutputDataNeeded: pokeySioApi.serialOutputDataNeeded,
+      serialOutputTransmissionDone: pokeySioApi.serialOutputTransmissionDone,
+      serialInputReady: pokeySioApi.serialInputReady,
       serinRead: pokeySioApi.serinRead,
     };
   }

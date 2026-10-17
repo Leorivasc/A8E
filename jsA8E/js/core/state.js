@@ -28,6 +28,13 @@
         pokeyTimerResetCycle: CYCLE_NEVER,
         pokeySlowClockOriginCycle: 0,
         serialOutputClockHigh: false,
+        // POKEY has one output holding register behind the active shift
+        // register.  A later SEROUT write must not restart DATA NEEDED while
+        // the active byte is still being transmitted.
+        serialOutputBytePending: false,
+        serialOutputShiftActive: false,
+        serialOutputRegisterValue: 0,
+        serialOutputShiftValue: 0,
         // PIA data-direction registers and port B output latch. PIA reset
         // leaves both DDRs at zero; external pull-ups determine PORTB's
         // effective MMU value until the OS enables its outputs.
@@ -59,8 +66,15 @@
         sioPendingBytes: 0,
         sioInIndex: 0,
         sioInSize: 0,
+        // POKEY loads SERIN before asserting the serial-input IRQ.
+        sioInReady: false,
         // Read-sector ACK is followed by a separate Complete/data phase.
         sioPendingReadSize: 0,
+        // Write data ACK is followed by a separate Complete/Error phase.
+        sioPendingWriteResult: 0,
+        // AHRM 10.2: per-drive inverted FDC status returned by STATUS.
+        // Reset state is zero until a sector operation establishes a result.
+        sioDiskFdcStatus: new Uint8Array(8),
         // POKEY-ish randomness state (LFSR)
         pokeyLfsr17: 0x1ffff,
         pokeyLfsr17LastCycle: 0,

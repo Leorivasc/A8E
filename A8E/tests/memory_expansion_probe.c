@@ -147,6 +147,31 @@ static int TestPortBDirectionLatch(void)
 	return 1;
 }
 
+static int TestSelfTestRequiresOs(void)
+{
+	_6502_Context_t *pContext = _6502_Open();
+	IoData_t *pIoData;
+
+	REQUIRE(pContext != NULL, "6502 open failed");
+	AtariIoOpenWithMemory(pContext, 0, NULL, ATARI_VIDEO_PAL, ATARI_MEMORY_NONE);
+	pIoData = (IoData_t *)pContext->pIoData;
+	ConfigurePortBOutputs(pContext);
+
+	/* PB7 selects Self-test only while PB0 keeps OS ROM enabled. */
+	WritePortB(pContext, 0x7f);
+	REQUIRE(pIoData->bSelfTestRomEnabled,
+			"Self-test did not enable with OS ROM active");
+
+	/* AHRM 2.6: clearing PB0 disables Self-test regardless of PB7. */
+	WritePortB(pContext, 0x7e);
+	REQUIRE(!pIoData->bSelfTestRomEnabled,
+			"Self-test remained enabled with OS ROM disabled");
+
+	AtariIoClose(pContext);
+	_6502_Close(pContext);
+	return 1;
+}
+
 static int TestMemoryProfile(const MemoryProfileTest_t *pTest)
 {
 	_6502_Context_t *pContext = _6502_Open();
@@ -257,6 +282,8 @@ int main(int argc, char *argv[])
 	(void)argv;
 
 	if(!TestPortBDirectionLatch())
+		return 1;
+	if(!TestSelfTestRequiresOs())
 		return 1;
 	for(lIndex = 0; lIndex < sizeof(aTests) / sizeof(aTests[0]); lIndex++)
 		if(!TestMemoryProfile(&aTests[lIndex]))

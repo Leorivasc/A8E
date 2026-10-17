@@ -19,10 +19,116 @@
 
 #include "6502.h"
 #include "AtariIo.h"
+#include "LibraryRepository.h"
+#include "LibraryWindow.h"
 #include "Pokey.h"
 
 /* Global window handle — used by Pokey.c to update the title bar. */
 SDL_Window *g_pSdlWindow = NULL;
+
+static void A8E_LoadLibraryWorkspace(
+	_6502_Context_t *pContext,
+	const A8E_LibraryRepository_t *pRepository,
+	u8 bCommandLineDisk)
+{
+	uint32_t lDrive;
+	for(lDrive = 0; lDrive < 8u; lDrive++)
+	{
+		/* A positional ATR/XEX is an explicit D1: boot medium. Do not let
+		 * the persisted D1: assignment replace it during workspace restore. */
+		if(bCommandLineDisk && lDrive == 0u) continue;
+		const char *pEntryId = A8E_LibraryRepository_GetDeviceEntryId(
+			pRepository, lDrive);
+		uint16_t sIndex;
+		if(!pEntryId) continue;
+		for(sIndex = 0; sIndex < pRepository->sRecordCount; sIndex++)
+		{
+			const A8E_LibraryRepositoryRecord_t *pRecord =
+				A8E_LibraryRepository_GetRecord(pRepository, sIndex);
+			const uint8_t *pBytes;
+			uint32_t lSize;
+			if(!pRecord || strcmp(pRecord->pId, pEntryId) != 0) continue;
+			pBytes = A8E_LibraryRepository_GetPayload(pRepository, pRecord->pPath, &lSize);
+			if(!pBytes || !AtariIoMountDisk(
+				pContext, lDrive, pBytes, lSize, pRecord->pName,
+				(uint8_t)!A8E_LibraryRepository_IsDeviceWriteProtected(
+					pRepository, lDrive)))
+			{
+				fprintf(stderr, "A8E: failed to mount library entry %s in D%u:\n",
+					pEntryId, lDrive + 1u);
+			}
+			break;
+		}
+	}
+}
+
+static int A8E_HelpRequested(int argc, char *argv[])
+{
+	int lIndex;
+	for(lIndex = 1; lIndex < argc; lIndex++)
+		if(strcmp(argv[lIndex], "-h") == 0 || strcmp(argv[lIndex], "--help") == 0)
+			return 1;
+	return 0;
+}
+
+static void A8E_PrintHelp(void)
+{
+	printf(
+		"A8E Atari 800 XL emulator\n"
+		"\n"
+		"Usage:\n"
+		"  A8E [options] [disk.atr|program.xex]\n"
+		"\n"
+		"Arguments and options:\n"
+		"  disk.atr / program.xex  Boot the ATR image or XEX program.\n"
+		"                            XEX files are converted to a temporary ATR.\n"
+		"  -h, --help              Show this help and exit.\n"
+		"  -f, -F                  Start in desktop fullscreen mode.\n"
+		"  -b, -B                  Compatibility alias for the default BASIC boot.\n"
+		"  -o, -O                  Simulate holding OPTION during OS startup.\n"
+		"  --option-on-start       Same as -o: start with BASIC disabled.\n"
+		"  -n, -N                  Start an NTSC machine. PAL is the default.\n"
+		"  -d, -D                  Write audio diagnostics to a8e_audio_debug.csv.\n"
+		"  -128K                   Enable the 128K 130XE memory expansion.\n"
+		"  -192R                   Enable the 192K RAMBO memory expansion.\n"
+		"  -256R                   Enable the 256K RAMBO memory expansion.\n"
+		"  -320R                   Enable the 320K RAMBO memory expansion.\n"
+		"  -320C                   Enable the 320K COMPY memory expansion.\n"
+		"  -576R                   Enable the 576K RAMBO memory expansion.\n"
+		"  -576C                   Enable the 576K COMPY memory expansion.\n"
+		"  -1088R                  Enable the 1088K RAMBO memory expansion.\n"
+		"  -U1MB                   Enable the Ultimate1MB memory model.\n"
+		"\n"
+		"Function and system keys:\n"
+		"  F1                      Atari HELP key.\n"
+		"  F2                      Atari OPTION key.\n"
+		"  F3                      Atari SELECT key.\n"
+		"  F4                      Atari START key.\n"
+		"  F5                      Atari RESET key.\n"
+		"  F9                      Toggle the floating Library window.\n"
+		"  F11                     Hold for turbo mode; reload D1.ATR on press.\n"
+		"  F12                     Start live CPU disassembly when enabled at build time.\n"
+		"  Alt+Enter               Toggle fullscreen and windowed mode.\n"
+		"  Alt+F4                  Close the emulator window.\n"
+		"\n"
+		"Library window (F9):\n"
+		"  Type / Backspace        Filter the library by name; Backspace returns from ATR view.\n"
+		"  Click D1: through D8:   Mount an entry, or unmount it when already selected.\n"
+		"  Right-click a mounted  Toggle its write-protection state.\n"
+		"  Click an ATR name       Open its read-only directory and geometry view.\n"
+		"  Up/Down/Page/Home/End  Navigate the list; Enter opens folders or ATR entries.\n"
+		"  Enter (ATR view)        Preview the selected ATR file as text or hexadecimal.\n"
+		"  D                       Download the selected ATR file to a typed path.\n"
+		"  I                       Import an .a8e library package.\n"
+		"  E                       Export the current library as an .a8e package.\n"
+		"  Y                       Promote a retained revision ID to active content.\n"
+		"  N                       Create a blank writable ATR.\n"
+		"  B/R/P                   Open trash; restore or purge the selected entry.\n"
+		"  Delete                  Delete the selected unmounted library entry.\n"
+		"  Esc                     Return from ATR view or close the Library window.\n"
+		"\n"
+		"The Library uses the application-owned library/ directory when present.\n");
+}
 
 /********************************************************************
 *
@@ -57,9 +163,19 @@ int main(int argc, char *argv[])
 	u32 lLogicalWidth;
 	u32 lWindowScale = 2;
 	u32 lFullscreen = 0;
+	u8 bCommandLineDisk = 0;
 	char cMemoryTitle[64];
 	char cWindowTitle[160];
+	A8E_LibraryRepository_t tLibraryRepository;
+	A8E_LibraryWindow_t tLibraryWindow;
 	int lIndex;
+	if(A8E_HelpRequested(argc, argv))
+	{
+		A8E_PrintHelp();
+		return 0;
+	}
+	A8E_LibraryRepository_Init(&tLibraryRepository);
+	memset(&tLibraryWindow, 0, sizeof(tLibraryWindow));
 
 	if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0)
 	{
@@ -130,6 +246,7 @@ int main(int argc, char *argv[])
 		else
 		{
 			pDiskFileName = argv[lIndex];
+			bCommandLineDisk = 1;
 		}
 	}
 
@@ -220,9 +337,33 @@ int main(int argc, char *argv[])
 
 	pAtariContext = _6502_Open();
 	AtariIoOpenWithMemory(pAtariContext, lMode, pDiskFileName, eVideoStandard, eMemoryExpansion);
+	{
+		FILE *pLibraryManifest = fopen("library/library.json", "rb");
+		if(pLibraryManifest)
+		{
+			char sError[160];
+			fclose(pLibraryManifest);
+			if(A8E_LibraryRepository_LoadDirectory(
+				&tLibraryRepository, "library", sError, sizeof(sError)))
+			{
+				A8E_LoadLibraryWorkspace(
+					pAtariContext, &tLibraryRepository, bCommandLineDisk);
+			}
+			else fprintf(stderr, "A8E: library load skipped: %s\n", sError);
+		}
+	}
 	printf("A8E memory: opened %s\n", cMemoryTitle);
+	A8E_LibraryWindow_Init(&tLibraryWindow, pAtariContext, &tLibraryRepository);
+	if(bCommandLineDisk)
+	{
+		/* The command-line medium is outside the library repository. Keep it
+		 * out of the library panel's mounted-entry bookkeeping as well. */
+		tLibraryWindow.acMountedIds[0][0] = '\0';
+	}
 	llCycles = CYCLES_PER_LINE *
 		(eVideoStandard == ATARI_VIDEO_NTSC ? LINES_PER_SCREEN_NTSC : LINES_PER_SCREEN_PAL);
+	{
+		Uint32 lLastLibraryAutosave = SDL_GetTicks();
 	{
 		u32 lCpuHz = eVideoStandard == ATARI_VIDEO_NTSC
 			? ATARI_CPU_HZ_NTSC
@@ -257,24 +398,38 @@ int main(int argc, char *argv[])
 			llCycles += CYCLES_PER_LINE *
 				(eVideoStandard == ATARI_VIDEO_NTSC ? LINES_PER_SCREEN_NTSC : LINES_PER_SCREEN_PAL);
 		}
-
 		AtariIoDrawScreen(pAtariContext, pScreenSurface, lAtariScreenWidth, lAtariScreenHeight);
+		if(SDL_GetTicks() - lLastLibraryAutosave >= 5000u)
+		{
+			A8E_LibraryWindow_SaveDirty(&tLibraryWindow);
+			lLastLibraryAutosave = SDL_GetTicks();
+		}
 
 		SDL_UpdateTexture(pScreenTexture, NULL, pScreenSurface->pixels, pScreenSurface->pitch);
 		SDL_RenderClear(pRenderer);
 		SDL_RenderCopy(pRenderer, pScreenTexture, NULL, NULL);
 		SDL_RenderPresent(pRenderer);
+		A8E_LibraryWindow_Draw(&tLibraryWindow);
 		Pokey_DebugFrame(pAtariContext);
 
 		while(SDL_PollEvent(&tEvent))
 		{
-			if(tEvent.type == SDL_QUIT)
+			if(A8E_LibraryWindow_HandleEvent(&tLibraryWindow, &tEvent)) continue;
+			if(tEvent.type == SDL_QUIT ||
+			   (tEvent.type == SDL_WINDOWEVENT &&
+				tEvent.window.event == SDL_WINDOWEVENT_CLOSE &&
+				tEvent.window.windowID == SDL_GetWindowID(pWindow)))
 			{
 				goto Exit;
 			}
 
 			if(tEvent.type == SDL_KEYDOWN)
 			{
+				if(tEvent.key.keysym.sym == SDLK_F9 && tEvent.key.repeat == 0)
+				{
+					A8E_LibraryWindow_Toggle(&tLibraryWindow);
+					continue;
+				}
 				if(tEvent.key.keysym.sym == SDLK_F11)
 				{
 					cTurboFlag = 1;
@@ -308,7 +463,8 @@ int main(int argc, char *argv[])
 				}
 			}
 
-			if(tEvent.type == SDL_KEYDOWN || tEvent.type == SDL_KEYUP)
+			if((tEvent.type == SDL_KEYDOWN || tEvent.type == SDL_KEYUP) &&
+				tEvent.key.windowID == SDL_GetWindowID(pWindow))
 			{
 				AtariIoKeyboardEvent(pAtariContext, &tEvent.key);
 			}
@@ -349,8 +505,12 @@ int main(int argc, char *argv[])
 
 		lLastTicks = SDL_GetTicks();
 	}
+	}
 
 Exit:
+	A8E_LibraryWindow_SaveDirty(&tLibraryWindow);
+	A8E_LibraryWindow_Free(&tLibraryWindow);
+	A8E_LibraryRepository_Free(&tLibraryRepository);
 	AtariIoClose(pAtariContext);
 	_6502_Close(pAtariContext);
 	SDL_FreeSurface(pScreenSurface);

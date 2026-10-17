@@ -358,7 +358,10 @@
       "js/core/antic.js",
       "js/core/gtia.js",
       "js/core/hostfs.js",
+      "js/core/atr_inspector.js",
       "js/core/disk_library.js",
+      "js/core/library_archive.js",
+      "js/core/library_package.js",
       "js/core/hdevice.js",
       "js/core/debugger.js",
       "js/core/atari_support.js",
@@ -418,6 +421,7 @@
       ready: typeof diskLibrary.isReady === "function" ? diskLibrary.isReady() : true,
       restored: typeof diskLibrary.isRestored === "function" ? diskLibrary.isRestored() : true,
       files: diskLibrary.listFiles(),
+      folders: typeof diskLibrary.listAllFolders === "function" ? diskLibrary.listAllFolders() : [],
     });
   }
 
@@ -909,6 +913,9 @@
           return app.getTraceTail(data.limit | 0);
         }
         return [];
+      case "getSioTrace":
+        if (typeof app.getSioTrace === "function") return app.getSioTrace();
+        return [];
       case "runUntilPc":
         if (typeof app.runUntilPc === "function") {
           const hasTarget =
@@ -951,6 +958,7 @@
         const result = await library.addFile(
           data.name || "",
           data.buffer || new ArrayBuffer(0),
+          data.folderId || "root",
         );
         postDiskLibrarySnapshot();
         return result;
@@ -992,12 +1000,58 @@
         postDiskLibrarySnapshot();
         return result;
       }
+      case "diskLibraryCreateBlankAtr": {
+        const library = requireDiskLibrary();
+        const result = await library.createBlankAtr(
+          data.name || "",
+          data.folderId || "root",
+        );
+        postDiskLibrarySnapshot();
+        return result;
+      }
+      case "diskLibraryExport": {
+        const library = requireDiskLibrary();
+        return library.exportPackage(data || {});
+      }
+      case "diskLibraryInspect": {
+        const library = requireDiskLibrary();
+        return library.inspectPackage(data.buffer || new ArrayBuffer(0));
+      }
+      case "diskLibraryPreviewImport": {
+        const library = requireDiskLibrary();
+        return library.previewImport(data.buffer || new ArrayBuffer(0));
+      }
+      case "diskLibraryImport": {
+        const library = requireDiskLibrary();
+        const result = await library.importPackage(data.buffer || new ArrayBuffer(0));
+        postDiskLibrarySnapshot();
+        postState();
+        return result;
+      }
       case "diskLibraryDelete": {
         const library = requireDiskLibrary();
         const result = await library.deleteFile(data.id || "");
         postDiskLibrarySnapshot();
         postState();
         return { ok: !!result };
+      }
+      case "diskLibraryFolderCreate": {
+        const library = requireDiskLibrary();
+        const result = await library.createFolder(data.name || "", data.parentId || "root");
+        postDiskLibrarySnapshot();
+        return result;
+      }
+      case "diskLibraryFolderDelete": {
+        const library = requireDiskLibrary();
+        const result = await library.deleteFolder(data.id || "");
+        postDiskLibrarySnapshot();
+        return { ok: !!result };
+      }
+      case "diskLibraryMove": {
+        const library = requireDiskLibrary();
+        const result = await library.moveFile(data.id || "", data.folderId || "root");
+        postDiskLibrarySnapshot();
+        return result;
       }
       case "readMemory":
         if (typeof app.readMemory === "function") {

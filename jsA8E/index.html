@@ -412,37 +412,99 @@
       <section id="diskLibraryPanel" class="disklibPanel" hidden aria-label="Persistent disk image library">
         <div class="disklib-titlebar">
           <i class="fa-solid fa-hard-drive disklib-title-icon"></i>
-          <span class="disklib-title-text">Disk Library (D1:-D4:)</span>
+          <span class="disklib-title-text">Disk Library</span>
+          <span class="disklib-current-path" aria-live="polite">Library</span>
           <span class="disklib-status" aria-live="polite"></span>
         </div>
+        <div class="disklib-mounted-panel">
+          <div class="disklib-mounted-title"><i class="fa-solid fa-plug"></i> Mounted devices</div>
+          <div class="disklib-mounted-list"></div>
+        </div>
         <div class="disklib-toolbar">
-          <label class="disklib-label">Add</label>
-          <button class="disklib-btn disklib-upload-btn" title="Upload ATR or XEX files">
-            <i class="fa-solid fa-upload"></i> Upload
+          <button class="disklib-btn disklib-upload-btn" title="Upload ATR or XEX files" aria-label="Upload ATR or XEX files">
+            <i class="fa-solid fa-upload" aria-hidden="true"></i>
           </button>
           <input type="file" class="disklib-upload-input" accept=".atr,.xex,application/octet-stream" multiple hidden />
-          <span class="disklib-toolbar-sep"></span>
-          <label class="disklib-label">Select</label>
-          <button class="disklib-btn disklib-sel-all-btn" title="Select all library entries">
-            <i class="fa-solid fa-check-double"></i> All
+          <button class="disklib-btn disklib-new-folder-btn" title="Create a folder" aria-label="Create a folder">
+            <i class="fa-solid fa-folder-plus" aria-hidden="true"></i>
           </button>
-          <button class="disklib-btn disklib-sel-none-btn" title="Deselect all library entries">
-            <i class="fa-regular fa-square"></i> None
+          <button class="disklib-btn disklib-new-atr-btn" title="Create a blank ATR in the current folder" aria-label="Create a blank ATR in the current folder">
+            <i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i>
           </button>
           <span class="disklib-toolbar-sep"></span>
-          <button class="disklib-btn disklib-dl-sel-btn" title="Download selected images" disabled>
-            <i class="fa-solid fa-download"></i> Download
+          <button class="disklib-btn disklib-sel-all-btn" title="Select all library entries" aria-label="Select all library entries">
+            <i class="fa-solid fa-check-double" aria-hidden="true"></i>
           </button>
-          <button class="disklib-btn disklib-btn-danger disklib-del-sel-btn" title="Delete selected images" disabled>
-            <i class="fa-solid fa-trash"></i> Delete
+          <button class="disklib-btn disklib-sel-none-btn" title="Deselect all library entries" aria-label="Deselect all library entries">
+            <i class="fa-regular fa-square" aria-hidden="true"></i>
           </button>
+          <span class="disklib-toolbar-sep"></span>
+          <button class="disklib-btn disklib-dl-sel-btn" title="Download selected images" aria-label="Download selected images" disabled>
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-btn-danger disklib-del-sel-btn" title="Delete selected images" aria-label="Delete selected images" disabled>
+            <i class="fa-solid fa-trash" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-trash-btn" title="Open recoverable trash" aria-label="Open recoverable trash">
+            <i class="fa-solid fa-trash-can-arrow-up" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-btn-danger disklib-purge-trash-btn" title="Purge all trash" aria-label="Purge all trash">
+            <i class="fa-solid fa-fire" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-btn-danger disklib-purge-old-trash-btn" title="Purge trash older than..." aria-label="Purge trash older than...">
+            <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
+          </button>
+          <span class="disklib-toolbar-sep"></span>
+          <button class="disklib-btn disklib-export-btn" title="Export the complete library" aria-label="Export the complete library">
+            <i class="fa-solid fa-box-archive" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-workspace-export-btn" title="Export mounted workspace" aria-label="Export mounted workspace">
+            <i class="fa-solid fa-hard-drive"></i>
+          </button>
+          <button class="disklib-btn disklib-storage-btn" title="Show browser storage capacity" aria-label="Show browser storage capacity">
+            <i class="fa-solid fa-database" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-import-btn" title="Import a complete library package" aria-label="Import a complete library package">
+            <i class="fa-solid fa-file-import" aria-hidden="true"></i>
+          </button>
+          <button class="disklib-btn disklib-cancel-btn" title="Cancel the active library operation" aria-label="Cancel the active library operation" disabled>
+            <i class="fa-solid fa-stop" aria-hidden="true"></i>
+          </button>
+          <input type="file" class="disklib-import-input" accept=".a8e,.zip,application/zip,application/octet-stream" hidden />
+        </div>
+        <div class="disklib-atr-view" hidden>
+          <div class="disklib-atr-toolbar">
+            <button class="disklib-btn disklib-atr-back-btn" type="button" title="Back to library" aria-label="Back to library">
+              <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+            </button>
+            <span class="disklib-atr-title"></span>
+            <span class="disklib-flex"></span>
+            <button class="disklib-btn disklib-atr-download-btn" type="button" title="Download the ATR image" aria-label="Download the ATR image">
+              <i class="fa-solid fa-download" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="disklib-atr-info" aria-live="polite"></div>
+          <div class="disklib-atr-content">
+            <div class="disklib-atr-cols-header">
+              <span>Name</span>
+              <span>Sectors</span>
+              <span>Start</span>
+              <span>Status</span>
+              <span></span>
+            </div>
+            <div class="disklib-atr-list"></div>
+          </div>
+          <div class="disklib-atr-preview" hidden>
+            <div class="disklib-atr-preview-title"></div>
+            <pre class="disklib-atr-preview-text"></pre>
+          </div>
         </div>
         <div class="disklib-drop-zone">
           <div class="disklib-table-scroll">
             <div class="disklib-cols-header">
               <span class="disklib-col disklib-col-chk"><input type="checkbox" class="disklib-master-chk" title="Select or deselect all" /></span>
               <span class="disklib-col disklib-col-name">Name</span>
-              <span class="disklib-col disklib-col-size">Size</span>
+              <span class="disklib-col disklib-col-rw">RW</span>
               <span class="disklib-col disklib-col-drive">D1:</span>
               <span class="disklib-col disklib-col-drive">D2:</span>
               <span class="disklib-col disklib-col-drive">D3:</span>
@@ -453,10 +515,32 @@
           </div>
           <div class="disklib-drop-hint"><i class="fa-solid fa-upload"></i> Drop ATR or XEX files here</div>
         </div>
+        <div class="disklib-searchbar">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input class="disklib-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search library..." aria-label="Search library" />
+          <select class="disklib-filter-type" aria-label="Filter by type" title="Filter by type">
+            <option value="all">All types</option>
+            <option value="atr">ATR</option>
+            <option value="xex">XEX</option>
+          </select>
+          <select class="disklib-filter-status" aria-label="Filter by status" title="Filter by status">
+            <option value="all">All status</option>
+            <option value="mounted">Mounted</option>
+            <option value="dirty">Dirty</option>
+            <option value="clean">Clean</option>
+          </select>
+          <select class="disklib-sort" aria-label="Sort library" title="Sort library">
+            <option value="name">Name</option>
+            <option value="type">Type</option>
+            <option value="size">Size</option>
+            <option value="modified">Modified</option>
+          </select>
+        </div>
         <div class="disklib-statusbar">
           <span class="disklib-stat-count">0 files</span>
           <span class="disklib-stat-sep">|</span>
           <span class="disklib-stat-sel" hidden></span>
+          <span class="disklib-stat-info" aria-live="polite"></span>
           <span class="disklib-flex"></span>
           <span class="disklib-stat-total"></span>
         </div>
@@ -470,11 +554,11 @@
         <!-- Toolbar -->
         <div class="hostfs-toolbar">
           <label class="hostfs-label">Add</label>
-          <button class="hostfs-btn hostfs-upload-btn" title="Upload files to H:">
-            <i class="fa-solid fa-upload"></i> Upload
+          <button class="hostfs-btn hostfs-upload-btn" title="Upload files to H:" aria-label="Upload files to H:">
+            <i class="fa-solid fa-upload" aria-hidden="true"></i>
           </button>
-          <button class="hostfs-btn hostfs-folder-btn" title="Upload a folder to H:">
-            <i class="fa-solid fa-folder-open"></i> Folder
+          <button class="hostfs-btn hostfs-folder-btn" title="Upload a folder to H:" aria-label="Upload a folder to H:">
+            <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
           </button>
           <input type="file" class="hostfs-upload-input" multiple hidden />
           <input type="file" class="hostfs-folder-input" webkitdirectory multiple hidden />
@@ -482,18 +566,18 @@
           <span class="hostfs-toolbar-sep"></span>
 
           <label class="hostfs-label">Select</label>
-          <button class="hostfs-btn hostfs-sel-all-btn" title="Select all files">
-            <i class="fa-solid fa-check-double"></i> All
+          <button class="hostfs-btn hostfs-sel-all-btn" title="Select all files" aria-label="Select all files">
+            <i class="fa-solid fa-check-double" aria-hidden="true"></i>
           </button>
-          <button class="hostfs-btn hostfs-sel-none-btn" title="Deselect all">
-            <i class="fa-regular fa-square"></i> None
+          <button class="hostfs-btn hostfs-sel-none-btn" title="Deselect all" aria-label="Deselect all">
+            <i class="fa-regular fa-square" aria-hidden="true"></i>
           </button>
           <span class="hostfs-toolbar-sep"></span>
-          <button class="hostfs-btn hostfs-dl-sel-btn" title="Download selected files" disabled>
-            <i class="fa-solid fa-download"></i> Download
+          <button class="hostfs-btn hostfs-dl-sel-btn" title="Download selected files" aria-label="Download selected files" disabled>
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
           </button>
-          <button class="hostfs-btn hostfs-btn-danger hostfs-del-sel-btn" title="Delete selected files" disabled>
-            <i class="fa-solid fa-trash"></i> Delete
+          <button class="hostfs-btn hostfs-btn-danger hostfs-del-sel-btn" title="Delete selected files" aria-label="Delete selected files" disabled>
+            <i class="fa-solid fa-trash" aria-hidden="true"></i>
           </button>
         </div>
         <!-- File list / drop zone -->
@@ -537,31 +621,31 @@
         <div class="asm-toolbar">
           <label class="asm-label">File</label>
           <select id="asmSourceSelect" class="asm-select asm-source-select" aria-label="HostFS source file list"></select>
-          <button class="asm-btn asm-load-btn" title="Load selected source from HostFS">
-            <i class="fa-solid fa-download"></i> Load
+          <button class="asm-btn asm-load-btn" title="Load selected source from HostFS" aria-label="Load selected source from HostFS">
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
           </button>
           <input id="asmSourceName" class="asm-input asm-source-name" type="text" value="PROGRAM.ASM" maxlength="32" spellcheck="false" />
-          <button class="asm-btn asm-save-btn" title="Save source to HostFS (Ctrl+S)">
-            <i class="fa-solid fa-floppy-disk"></i> Save
+          <button class="asm-btn asm-save-btn" title="Save source to HostFS (Ctrl+S)" aria-label="Save source to HostFS (Ctrl+S)">
+            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
           </button>
 
           <span class="asm-toolbar-sep"></span>
 
           <label class="asm-label">Build</label>
-          <button class="asm-btn asm-build-btn" title="Assemble and write .XEX to HostFS (Ctrl+Shift+B)">
-            <i class="fa-solid fa-gears"></i> Assemble
+          <button class="asm-btn asm-build-btn" title="Assemble and write .XEX to HostFS (Ctrl+Shift+B)" aria-label="Assemble and write .XEX to HostFS (Ctrl+Shift+B)">
+            <i class="fa-solid fa-gears" aria-hidden="true"></i>
           </button>
-          <button class="asm-btn asm-run-btn" title="Save, assemble, load into D1: and start (Ctrl+Enter)">
-            <i class="fa-solid fa-play"></i> Run
+          <button class="asm-btn asm-run-btn" title="Save, assemble, load into D1: and start (Ctrl+Enter)" aria-label="Save, assemble, load into D1: and start (Ctrl+Enter)">
+            <i class="fa-solid fa-play" aria-hidden="true"></i>
           </button>
-          <button class="asm-btn asm-step-btn" title="Execute the next instruction and pause again" hidden>
-            <i class="fa-solid fa-forward-step"></i> Step
+          <button class="asm-btn asm-step-btn" title="Execute the next instruction and pause again" aria-label="Execute the next instruction and pause again" hidden>
+            <i class="fa-solid fa-forward-step" aria-hidden="true"></i>
           </button>
-          <button class="asm-btn asm-step-over-btn" title="Execute subroutine calls without entering them" hidden>
-            <i class="fa-solid fa-share-from-square"></i> Step Over
+          <button class="asm-btn asm-step-over-btn" title="Execute subroutine calls without entering them" aria-label="Execute subroutine calls without entering them" hidden>
+            <i class="fa-solid fa-share-from-square" aria-hidden="true"></i>
           </button>
-          <button class="asm-btn asm-continue-btn" title="Continue execution until the next breakpoint" hidden>
-            <i class="fa-solid fa-play"></i> Continue
+          <button class="asm-btn asm-continue-btn" title="Continue execution until the next breakpoint" aria-label="Continue execution until the next breakpoint" hidden>
+            <i class="fa-solid fa-play" aria-hidden="true"></i>
           </button>
         </div>
         <div class="asm-editor-wrap">
@@ -585,19 +669,19 @@
         </div>
         <div class="snapshot-toolbar">
           <label class="snapshot-label">Quick Slot</label>
-          <button class="snapshot-btn snapshot-save-btn" title="Save a full emulator snapshot into the browser quick-save slot. If the emulator is running it will be paused first.">
-            <i class="fa-solid fa-floppy-disk"></i> Save
+          <button class="snapshot-btn snapshot-save-btn" title="Save a full emulator snapshot into the browser quick-save slot. If the emulator is running it will be paused first." aria-label="Save a full emulator snapshot into the browser quick-save slot">
+            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
           </button>
-          <button class="snapshot-btn snapshot-load-btn" title="Load the browser quick-save slot and restore the saved emulator state." disabled>
-            <i class="fa-solid fa-rotate-left"></i> Load
+          <button class="snapshot-btn snapshot-load-btn" title="Load the browser quick-save slot and restore the saved emulator state." aria-label="Load the browser quick-save slot and restore the saved emulator state" disabled>
+            <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
           </button>
           <span class="snapshot-toolbar-sep"></span>
           <label class="snapshot-label">File</label>
-          <button class="snapshot-btn snapshot-export-btn" title="Export the current emulator snapshot as a downloadable file.">
-            <i class="fa-solid fa-download"></i> Export
+          <button class="snapshot-btn snapshot-export-btn" title="Export the current emulator snapshot as a downloadable file." aria-label="Export the current emulator snapshot as a downloadable file">
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
           </button>
-          <button class="snapshot-btn snapshot-import-btn" title="Import a previously exported snapshot file and restore it.">
-            <i class="fa-solid fa-upload"></i> Import
+          <button class="snapshot-btn snapshot-import-btn" title="Import a previously exported snapshot file and restore it." aria-label="Import a previously exported snapshot file and restore it">
+            <i class="fa-solid fa-upload" aria-hidden="true"></i>
           </button>
           <input type="file" class="snapshot-import-input" accept=".a8esnap,application/x-a8e-snapshot,application/octet-stream" hidden />
         </div>
@@ -734,6 +818,9 @@
     <script src="js/core/antic.js"></script>
     <script src="js/core/gtia.js"></script>
     <script src="js/core/hostfs.js"></script>
+    <script src="js/core/atr_inspector.js"></script>
+    <script src="js/core/library_archive.js"></script>
+    <script src="js/core/library_package.js"></script>
     <script src="js/core/disk_library.js"></script>
     <script src="js/core/rom_library.js"></script>
     <script src="js/core/hdevice.js"></script>

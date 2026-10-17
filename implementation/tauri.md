@@ -87,8 +87,13 @@ A8E_TAURI_BUNDLES=deb,rpm ./scripts/build-tauri-linux.sh
 `main` remains the development branch. To publish a desktop build, merge the
 selected `main` commit into `Tauri`. The `Publish Tauri latest` GitHub Actions
 workflow then builds the DEB, RPM, and AppImage packages and replaces the
-assets on the rolling `tauri-latest` prerelease. That release is intentionally
-not a versioned stable release; each successful push to `Tauri` supersedes it.
+assets on the rolling `tauri-latest` prerelease. The `tauri-latest` Git tag is
+created only when the release is first created and is never force-moved; later
+runs update the existing release assets in place. The release body records the
+exact source commit used for the current assets, while the tag remains a
+stable release anchor rather than a moving source reference. That release is
+intentionally not a versioned stable release; each successful push to `Tauri`
+supersedes its assets.
 
 The web site follows the same promotion model through `web_publish`, which is
 the only branch allowed to deploy GitHub Pages.

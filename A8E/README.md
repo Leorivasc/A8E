@@ -80,6 +80,9 @@ surface; BIOS/flash, RTC, and PBI device images are not bundled with A8E yet.
 A8E [options] [disk.atr|program.xex]
 ```
 
+Run `A8E -h` to print the complete command-line, function-key, and Library
+window reference without starting SDL or the emulator.
+
 **Options & Arguments:**
 * `disk.atr` / `program.xex`: Pass an ATR image or Atari executable as the first argument. `.xex` files are converted to a temporary ATR layout at load time. If no argument is passed, the emulator defaults to looking for `d1.atr`.
 * `-f` / `-F`: Launch in fullscreen mode. Uses desktop-resolution fullscreen (`SDL_WINDOW_FULLSCREEN_DESKTOP`) — the display mode is never changed, so the aspect ratio is correct on widescreen monitors and the desktop is never left in a degraded state if the app crashes. The window can be toggled at runtime with **Alt+Enter**.
@@ -116,6 +119,35 @@ For standard keyboard, joystick, and console mappings, please see the [main READ
 | **Alt+F4** | Quit the emulator (standard OS close shortcut). |
 | **F11** | Turbo mode (hold) + attempts to reload `D1.ATR` from the current directory (case-sensitive on UNIX-like systems). |
 | **F12** | Start live CPU disassembly. *Note: This is a one-way latch and requires the `ENABLE_VERBOSE_DEBUGGING` compile flag. Restart the emulator to stop.* |
+
+**Library Window (F9):**
+
+- Click an ATR name to inspect its read-only directory and geometry.
+- Click a folder or `..` to navigate the native library folders.
+- Press **Enter** to preview the selected ATR file as ATASCII or hexadecimal.
+- Press **V** to run a read-only integrity check on the selected ATR.
+- Press **D** to download the selected ATR file to a typed path.
+- Press **F** to create a folder, **R** to rename the selected folder or entry,
+  and **M** to move the selected entry into the current folder.
+- Press **I** / **E** / **W** / **N** to import, export the complete library,
+  export only the mounted workspace, or create a blank ATR in the current
+  folder.
+- Press **Y** and type a retained revision ID to promote that revision to the
+  active content; the current content is retained in history first.
+- Click a `D1:` through `D8:` cell to mount or unmount an entry.
+- Right-click a mounted drive cell to toggle write protection.
+- Drop an ATR/XEX file or a directory onto the Library window to import it;
+  nested directories are recreated under the current folder. Dropped `.a8e`
+  files import as complete packages.
+- Type to filter entries; **Backspace** returns to the parent folder when the
+  search field is empty; **Delete** removes an unmounted entry or an empty
+  folder; **T** cycles ATR/XEX type filtering; **Q** cycles mounted/unmounted
+  filtering; **S** cycles name/type/size/modified sorting; **H** reports native
+  storage capacity; **B** opens recoverable trash, **R** restores the selected
+  trash entry, **P** purges it, and **A** prompts for an age in days before
+  purging older trash; **Esc** returns from the ATR view
+  or closes the Library window. **Up/Down**, **PageUp/PageDown**, **Home/End**
+  and **Enter** provide keyboard navigation and activation of folders/images.
 
 ---
 

@@ -165,7 +165,9 @@ static void AtariIoAdvanceScanline(_6502_Context_t *pContext)
 		pIoData->bModeLineScrollExit = 0;
 		pIoData->bModeLineExitDli = 0;
 		pIoData->bModeLineEndsThisLine = 0;
-		memset(pIoData->tVideoData.pPriorityData, 0, PIXELS_PER_LINE * LINES_PER_SCREEN_MAX);
+		memset(pIoData->tVideoData.pPriorityData, 0,
+			sizeof(*pIoData->tVideoData.pPriorityData) *
+			PIXELS_PER_LINE * LINES_PER_SCREEN_MAX);
 	}
 
 	RAM[IO_VCOUNT] = pIoData->tVideoData.lCurrentDisplayLine >> 1;
@@ -884,7 +886,14 @@ static int XexToAtr(u8 *pDisk, u32 *pDiskSize, u8 *pXexData, u32 lXexSize)
 #define PRIO_PM1 0x20
 #define PRIO_PM2 0x40
 #define PRIO_PM3 0x80
+#define PRIO_M10_PM0 0x100
+#define PRIO_M10_PM1 0x200
+#define PRIO_M10_PM2 0x400
+#define PRIO_M10_PM3 0x800
 #define PRIO_PMG_MASK (PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3)
+#define PRIO_M10_PMG_MASK \
+	(PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2 | PRIO_M10_PM3)
+#define PRIO_ALL_PMG_MASK (PRIO_PMG_MASK | PRIO_M10_PMG_MASK)
 
 #define FIXED_ADD(address, bits, value) ((address) = ((address) & ~(bits)) | (((address) + (value)) & (bits)))
 
@@ -1614,7 +1623,12 @@ static u8 AtariIo_CurrentChbaseRegister(_6502_Context_t *pContext)
 		pIoData->cChbasePendingValue = cRawValue;
 		if(pIoData->llChbasePendingCycle == CYCLE_NEVER)
 		{
-			pIoData->llChbasePendingCycle = pIoData->llCycle + 2;
+			/* The 6502 write is visible on the final cycle of the
+			 * instruction.  AHRM 4.4 applies CHBASE two color clocks
+			 * after that bus cycle, matching jsA8E's timing model. */
+			pIoData->llChbasePendingCycle = pIoData->llCycle +
+				(u64)(pContext->cCurrentInstructionCycles > 0
+					? pContext->cCurrentInstructionCycles - 1 : 0) + 2;
 		}
 	}
 
@@ -1911,10 +1925,15 @@ static u8 AtariIo_GetCurrentBackgroundColor(_6502_Context_t *pContext)
 	}
 }
 
+static u16 AtariIo_GetCurrentBackgroundPriority(_6502_Context_t *pContext)
+{
+	return (SRAM[IO_PRIOR] >> 6) == 2 ? PRIO_M10_PM0 : PRIO_BKG;
+}
+
 static void AtariIo_DrawBackgroundLine(
 	_6502_Context_t *pContext,
 	u8 *pDestination,
-	u8 *pPriorityData,
+	u16 *pPriorityData,
 	u32 lCycles)
 {
 	u32 i;
@@ -1928,10 +1947,10 @@ static void AtariIo_DrawBackgroundLine(
 		*pDestination++ = cColor;
 		*pDestination++ = cColor;
 
-		*pPriorityData++ = PRIO_BKG;
-		*pPriorityData++ = PRIO_BKG;
-		*pPriorityData++ = PRIO_BKG;
-		*pPriorityData++ = PRIO_BKG;
+		*pPriorityData++ = AtariIo_GetCurrentBackgroundPriority(pContext);
+		*pPriorityData++ = AtariIo_GetCurrentBackgroundPriority(pContext);
+		*pPriorityData++ = AtariIo_GetCurrentBackgroundPriority(pContext);
+		*pPriorityData++ = AtariIo_GetCurrentBackgroundPriority(pContext);
 
 		AtariIo_DrawClockAction(pContext);
 	}
@@ -1950,7 +1969,7 @@ static void AtariIo_StepClockActions(_6502_Context_t *pContext, u32 lCycles)
 static void AtariIo_DrawBackgroundClipped(
 	_6502_Context_t *pContext,
 	u8 *pDestination,
-	u8 *pPriorityData,
+	u16 *pPriorityData,
 	u32 lStartX,
 	u32 lCycles)
 {
@@ -1966,10 +1985,10 @@ static void AtariIo_DrawBackgroundClipped(
 		{
 			if(lX < PIXELS_PER_LINE)
 			{
-				if((pPriorityData[lX] & PRIO_PMG_MASK) == 0)
+				if((pPriorityData[lX] & PRIO_ALL_PMG_MASK) == 0)
 				{
 					pDestination[lX] = cColor;
-					pPriorityData[lX] = PRIO_BKG;
+					pPriorityData[lX] = AtariIo_GetCurrentBackgroundPriority(pContext);
 				}
 			}
 		}
@@ -2074,13 +2093,14 @@ static u8 AtariIo_ComputeActiveLineGeometry(
 
 static void AtariIo_FillBackgroundSpan(
 	u8 *pDestination,
-	u8 *pPriorityData,
+	u16 *pPriorityData,
 	u32 lStartX,
 	u32 lEndX,
 	u8 cColor,
-	u8 bPreservePmgPixels)
+	u8 bPreservePmgPixels,
+	u16 cBackgroundPriority)
 {
-	const u8 cPmgPriorityMask = PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3;
+	const u16 cPmgPriorityMask = PRIO_ALL_PMG_MASK;
 	u32 lClampedStart = MIN(PIXELS_PER_LINE, lStartX);
 	u32 lClampedEnd = MIN(PIXELS_PER_LINE, lEndX);
 	u32 lX;
@@ -2095,7 +2115,7 @@ static void AtariIo_FillBackgroundSpan(
 		if(!bPreservePmgPixels || ((pPriorityData[lX] & cPmgPriorityMask) == 0))
 		{
 			pDestination[lX] = cColor;
-			pPriorityData[lX] = PRIO_BKG;
+			pPriorityData[lX] = cBackgroundPriority;
 		}
 	}
 }
@@ -2358,7 +2378,7 @@ static void AtariIo_DrawLineMode2(_6502_Context_t *pContext)
 static void AtariIo_DrawVisibleBlankLine(
 	_6502_Context_t *pContext,
 	u8 *pDestination,
-	u8 *pPriorityData)
+	u16 *pPriorityData)
 {
 	AtariIo_StepClockActions(pContext, ACTIVE_LINE_COLOR_BURST_CYCLES);
 	AtariIo_DrawBackgroundClipped(
@@ -3245,6 +3265,7 @@ static void AtariIo_DrawLineModeF(_6502_Context_t *pContext)
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
 	u8 cData;
 	u8 cColor;
+	u16 cPriority;
 	u32 lPlayfieldCycles = pIoData->tDrawLineData.lBytesPerLine * 2;
 	u32 lCycle;
 	u8 cMask = 0x00;
@@ -3346,6 +3367,7 @@ static void AtariIo_DrawLineModeF(_6502_Context_t *pContext)
 
 		case 2:
 			{
+				u8 cColorIndex;
 				u8 aColorTable[16] =
 					{
 						SRAM[IO_COLPM0_TRIG2],
@@ -3366,13 +3388,23 @@ static void AtariIo_DrawLineModeF(_6502_Context_t *pContext)
 						SRAM[IO_COLPF3],
 					};
 
-				if(cMask > 0x08)
+				cColorIndex = cMask > 0x08 ? cData >> 4 : cData & 0x0f;
+				cColor = aColorTable[cColorIndex];
+				if(cColorIndex < 4)
 				{
-					cColor = aColorTable[cData >> 4];
+					cPriority = PRIO_M10_PM0 << cColorIndex;
+				}
+				else if(cColorIndex < 8)
+				{
+					cPriority = PRIO_PF0 << (cColorIndex - 4);
+				}
+				else if(cColorIndex < 12)
+				{
+					cPriority = PRIO_BKG;
 				}
 				else
 				{
-					cColor = aColorTable[cData & 0x0f];
+					cPriority = PRIO_PF0 << (cColorIndex - 12);
 				}
 			}
 
@@ -3381,10 +3413,10 @@ static void AtariIo_DrawLineModeF(_6502_Context_t *pContext)
 			*(pIoData->tDrawLineData.pDestination)++ = cColor;
 			*(pIoData->tDrawLineData.pDestination)++ = cColor;
 
-			*(pIoData->tDrawLineData.pPriorityData)++ = PRIO_BKG;
-			*(pIoData->tDrawLineData.pPriorityData)++ = PRIO_BKG;
-			*(pIoData->tDrawLineData.pPriorityData)++ = PRIO_BKG;
-			*(pIoData->tDrawLineData.pPriorityData)++ = PRIO_BKG;
+			*(pIoData->tDrawLineData.pPriorityData)++ = cPriority;
+			*(pIoData->tDrawLineData.pPriorityData)++ = cPriority;
+			*(pIoData->tDrawLineData.pPriorityData)++ = cPriority;
+			*(pIoData->tDrawLineData.pPriorityData)++ = cPriority;
 
 			cMask >>= 4;
 			break;
@@ -3608,7 +3640,7 @@ void AtariIoDrawLine(_6502_Context_t *pContext)
 	u8 *pLineDestination =
 		(u8 *)pIoData->tVideoData.pSdlAtariSurface->pixels +
 		pIoData->tVideoData.lCurrentDisplayLine * PIXELS_PER_LINE;
-	u8 *pLinePriorityData =
+	u16 *pLinePriorityData =
 		pIoData->tVideoData.pPriorityData +
 		pIoData->tVideoData.lCurrentDisplayLine * PIXELS_PER_LINE;
 
@@ -3714,14 +3746,16 @@ void AtariIoDrawLine(_6502_Context_t *pContext)
 					lFetchStartX,
 					lLeftClipEnd,
 					cBaseColor,
-					1);
+					1,
+					AtariIo_GetCurrentBackgroundPriority(pContext));
 				AtariIo_FillBackgroundSpan(
 					pLineDestination,
 					pLinePriorityData,
 					lRightClipStart,
 					lFetchEndX,
 					cBaseColor,
-					1);
+					1,
+					AtariIo_GetCurrentBackgroundPriority(pContext));
 			}
 
 			if(pIoData->bFirstRowScanline)
@@ -3763,19 +3797,19 @@ void AtariIoDrawLine(_6502_Context_t *pContext)
 			pDestination[offset] = cColor;                                          \
 	};
 
-static u8 AtariIo_DrawPlayer(
+static u16 AtariIo_DrawPlayer(
 	u8 cColor,
 	u8 cSize,
 	u8 cData,
-	u8 cPriorityMask,
-	u8 cPriority,
-	u8 *pPriorityData,
+	u16 cPriorityMask,
+	u16 cPriority,
+	u16 *pPriorityData,
 	u8 *pDestination,
 	u8 cSpecial,
 	u8 cOverlap)
 {
 	u8 cMask = 0x80;
-	u8 cCollision = 0;
+	u16 cCollision = 0;
 
 	if((cSize & 0x3) == 0x1)
 	{
@@ -3879,17 +3913,17 @@ static u8 AtariIo_DrawPlayer(
 	else if(!(pPriorityData[offset] & cPriorityMask))                           \
 		pDestination[offset] = cColor;
 
-static u8 AtariIo_DrawMissile(
+static u16 AtariIo_DrawMissile(
 	u8 cNumber,
 	u8 cColor,
 	u8 cSize,
 	u8 cData,
-	u8 cPriorityMask,
-	u8 *pPriorityData,
+	u16 cPriorityMask,
+	u16 *pPriorityData,
 	u8 *pDestination,
 	u8 cSpecial)
 {
-	u8 cCollision = 0;
+	u16 cCollision = 0;
 	u8 cMask;
 
 	cNumber <<= 1;
@@ -4069,24 +4103,24 @@ static void AtariIo_AdvanceMissileShift(u8 *pcShift, u8 *pcState, u8 cNumber, u8
 	}
 }
 
-static u8 AtariIo_DrawPlayerClockCell(
+static u16 AtariIo_DrawPlayerClockCell(
 	u8 cColor,
-	u8 cPriorityMask,
-	u8 cPriority,
-	u8 *pLinePriorityData,
+	u16 cPriorityMask,
+	u16 cPriority,
+	u16 *pLinePriorityData,
 	u8 *pLineDestination,
 	u32 lStartX,
 	u8 cSpecial,
 	u8 cOverlap,
 	u16 sPlayfieldColors,
-	u8 cMixMask)
+	u16 cMixMask)
 {
-	u8 cCollision = 0;
+	u16 cCollision = 0;
 	u32 lPixel;
 
 	for(lPixel = lStartX; lPixel < lStartX + 2; lPixel++)
 	{
-		u8 cPixelPriority = pLinePriorityData[lPixel];
+		u16 cPixelPriority = pLinePriorityData[lPixel];
 		/* Preserve the playfield contribution independently of lower players. */
 		u8 cMixedColor = cColor | ((cPixelPriority & cMixMask)
 			? (u8)(sPlayfieldColors >> ((lPixel - lStartX) * 8)) : 0);
@@ -4126,20 +4160,20 @@ static u8 AtariIo_DrawPlayerClockCell(
 	return cCollision;
 }
 
-static u8 AtariIo_DrawMissileClockCell(
+static u16 AtariIo_DrawMissileClockCell(
 	u8 cColor,
-	u8 cPriorityMask,
-	u8 *pLinePriorityData,
+	u16 cPriorityMask,
+	u16 *pLinePriorityData,
 	u8 *pLineDestination,
 	u32 lStartX,
 	u8 cSpecial)
 {
-	u8 cCollision = 0;
+	u16 cCollision = 0;
 	u32 lPixel;
 
 	for(lPixel = lStartX; lPixel < lStartX + 2; lPixel++)
 	{
-		u8 cPixelPriority = pLinePriorityData[lPixel];
+		u16 cPixelPriority = pLinePriorityData[lPixel];
 
 		if(cSpecial && (cPixelPriority & PRIO_PF1))
 		{
@@ -4189,60 +4223,70 @@ static void AtariIo_ResetPmgClockState(_6502_Context_t *pContext)
 	memset(pDrawLineData->aMissilePmgState, 0, sizeof(pDrawLineData->aMissilePmgState));
 }
 
-static u8 AtariIo_PlayerPriorityMask(u8 cPrior, u8 cNumber)
+static u16 AtariIo_PlayerPriorityMask(u8 cPrior, u8 cNumber)
 {
 	switch(cNumber)
 	{
 	case 3:
 		if(cPrior & 0x01)
 		{
-			return PRIO_PM0 | PRIO_PM1 | PRIO_PM2;
+			return PRIO_PM0 | PRIO_PM1 | PRIO_PM2 |
+				PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2;
 		}
 		if(cPrior & 0x02)
 		{
-			return PRIO_PM0 | PRIO_PM1 | PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 | PRIO_PM2;
+			return PRIO_PM0 | PRIO_PM1 | PRIO_PF0 | PRIO_PF1 |
+				PRIO_PF2 | PRIO_PF3 | PRIO_PM2 |
+				PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2;
 		}
 		if(cPrior & 0x04)
 		{
-			return PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 | PRIO_PM0 | PRIO_PM1 | PRIO_PM2;
+			return PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 |
+				PRIO_PM0 | PRIO_PM1 | PRIO_PM2 |
+				PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2;
 		}
 		if(cPrior & 0x08)
 		{
-			return PRIO_PF0 | PRIO_PF1 | PRIO_PM0 | PRIO_PM1 | PRIO_PM2;
+			return PRIO_PF0 | PRIO_PF1 | PRIO_PM0 | PRIO_PM1 | PRIO_PM2 |
+				PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2;
 		}
 		return 0x00;
 
 	case 2:
 		if(cPrior & 0x01)
 		{
-			return PRIO_PM0 | PRIO_PM1;
+			return PRIO_PM0 | PRIO_PM1 | PRIO_M10_PM0 | PRIO_M10_PM1;
 		}
 		if(cPrior & 0x02)
 		{
-			return PRIO_PM0 | PRIO_PM1 | PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3;
+			return PRIO_PM0 | PRIO_PM1 | PRIO_PF0 | PRIO_PF1 |
+				PRIO_PF2 | PRIO_PF3 | PRIO_M10_PM0 | PRIO_M10_PM1;
 		}
 		if(cPrior & 0x04)
 		{
-			return PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 | PRIO_PM0 | PRIO_PM1;
+			return PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 |
+				PRIO_PM0 | PRIO_PM1 | PRIO_M10_PM0 | PRIO_M10_PM1;
 		}
 		if(cPrior & 0x08)
 		{
-			return PRIO_PF0 | PRIO_PF1 | PRIO_PM0 | PRIO_PM1;
+			return PRIO_PF0 | PRIO_PF1 | PRIO_PM0 | PRIO_PM1 |
+				PRIO_M10_PM0 | PRIO_M10_PM1;
 		}
 		return 0x00;
 
 	case 1:
 		if(cPrior & (0x01 | 0x02))
 		{
-			return PRIO_PM0;
+			return PRIO_PM0 | PRIO_M10_PM0;
 		}
 		if(cPrior & 0x04)
 		{
-			return PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 | PRIO_PM0;
+			return PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 |
+				PRIO_PM0 | PRIO_M10_PM0;
 		}
 		if(cPrior & 0x08)
 		{
-			return PRIO_PF0 | PRIO_PF1 | PRIO_PM0;
+			return PRIO_PF0 | PRIO_PF1 | PRIO_PM0 | PRIO_M10_PM0;
 		}
 		return 0x00;
 
@@ -4259,75 +4303,117 @@ static u8 AtariIo_PlayerPriorityMask(u8 cPrior, u8 cNumber)
 	}
 }
 
-static u8 AtariIo_MissilePriorityMask(u8 cPrior, u8 cNumber)
+static u16 AtariIo_MissilePriorityMask(u8 cPrior, u8 cNumber)
 {
 	switch(cNumber)
 	{
 	case 3:
 		if(cPrior & 0x01)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 : PRIO_PM0 | PRIO_PM1 | PRIO_PM2;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2 | PRIO_M10_PM3
+				: PRIO_PM0 | PRIO_PM1 | PRIO_PM2 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2;
 		}
 		if(cPrior & 0x02)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 : PRIO_PM0 | PRIO_PM1 | PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 | PRIO_PM2;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_M10_PM0 | PRIO_M10_PM1
+				: PRIO_PM0 | PRIO_PM1 | PRIO_PF0 | PRIO_PF1 |
+					PRIO_PF2 | PRIO_PF3 | PRIO_PM2 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2;
 		}
 		if(cPrior & 0x04)
 		{
-			return cPrior & 0x10 ? 0x00 : PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 | PRIO_PM0 | PRIO_PM1 | PRIO_PM2;
+			return cPrior & 0x10 ? 0x00 :
+				PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 |
+				PRIO_PM0 | PRIO_PM1 | PRIO_PM2 |
+				PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2;
 		}
 		if(cPrior & 0x08)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 : PRIO_PF0 | PRIO_PF1 | PRIO_PM0 | PRIO_PM1 | PRIO_PM2;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2 | PRIO_M10_PM3
+				: PRIO_PF0 | PRIO_PF1 | PRIO_PM0 | PRIO_PM1 | PRIO_PM2 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2;
 		}
 		return 0x00;
 
 	case 2:
 		if(cPrior & 0x01)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 : PRIO_PM0 | PRIO_PM1;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2 | PRIO_M10_PM3
+				: PRIO_PM0 | PRIO_PM1 | PRIO_M10_PM0 | PRIO_M10_PM1;
 		}
 		if(cPrior & 0x02)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 : PRIO_PM0 | PRIO_PM1 | PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_M10_PM0 | PRIO_M10_PM1
+				: PRIO_PM0 | PRIO_PM1 | PRIO_PF0 | PRIO_PF1 |
+					PRIO_PF2 | PRIO_PF3 | PRIO_M10_PM0 | PRIO_M10_PM1;
 		}
 		if(cPrior & 0x04)
 		{
-			return cPrior & 0x10 ? 0x00 : PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 | PRIO_PM0 | PRIO_PM1;
+			return cPrior & 0x10 ? 0x00 :
+				PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 |
+				PRIO_PM0 | PRIO_PM1 | PRIO_M10_PM0 | PRIO_M10_PM1;
 		}
 		if(cPrior & 0x08)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 : PRIO_PF0 | PRIO_PF1 | PRIO_PM0 | PRIO_PM1;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2 | PRIO_M10_PM3
+				: PRIO_PF0 | PRIO_PF1 | PRIO_PM0 | PRIO_PM1 |
+					PRIO_M10_PM0 | PRIO_M10_PM1;
 		}
 		return 0x00;
 
 	case 1:
 		if(cPrior & 0x01)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 : PRIO_PM0;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2 | PRIO_M10_PM3
+				: PRIO_PM0 | PRIO_M10_PM0;
 		}
 		if(cPrior & 0x02)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 : PRIO_PM0;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_M10_PM0 | PRIO_M10_PM1
+				: PRIO_PM0 | PRIO_M10_PM0;
 		}
 		if(cPrior & 0x04)
 		{
-			return cPrior & 0x10 ? 0x00 : PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 | PRIO_PM0;
+			return cPrior & 0x10 ? 0x00 :
+				PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3 |
+				PRIO_PM0 | PRIO_M10_PM0;
 		}
 		if(cPrior & 0x08)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 : PRIO_PF0 | PRIO_PF1 | PRIO_PM0;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2 | PRIO_M10_PM3
+				: PRIO_PF0 | PRIO_PF1 | PRIO_PM0 | PRIO_M10_PM0;
 		}
 		return 0x00;
 
 	default:
 		if(cPrior & 0x01)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 : 0x00;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2 | PRIO_M10_PM3
+				: 0x00;
 		}
 		if(cPrior & 0x02)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 : 0x00;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_M10_PM0 | PRIO_M10_PM1
+				: 0x00;
 		}
 		if(cPrior & 0x04)
 		{
@@ -4335,19 +4421,22 @@ static u8 AtariIo_MissilePriorityMask(u8 cPrior, u8 cNumber)
 		}
 		if(cPrior & 0x08)
 		{
-			return cPrior & 0x10 ? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 : PRIO_PF0 | PRIO_PF1;
+			return cPrior & 0x10
+				? PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 |
+					PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2 | PRIO_M10_PM3
+				: PRIO_PF0 | PRIO_PF1;
 		}
 		return 0x00;
 	}
 }
 
-static u8 AtariIo_DrawPlayerSpan(
+static u16 AtariIo_DrawPlayerSpan(
 	u8 cColor,
 	u8 cSize,
 	u8 cData,
-	u8 cPriorityMask,
-	u8 cPriority,
-	u8 *pLinePriorityData,
+	u16 cPriorityMask,
+	u16 cPriority,
+	u16 *pLinePriorityData,
 	u8 *pLineDestination,
 	u32 lStartX,
 	u32 lSpanStartX,
@@ -4355,7 +4444,7 @@ static u8 AtariIo_DrawPlayerSpan(
 	u8 cSpecial,
 	u8 cOverlap)
 {
-	u8 cCollision = 0;
+	u16 cCollision = 0;
 	u8 cMask = 0x80;
 	u32 lStep = AtariIo_PlayerStep(cSize);
 	u32 lPixelStart = lStartX;
@@ -4371,7 +4460,7 @@ static u8 AtariIo_DrawPlayerSpan(
 
 			for(lPixel = lDrawStart; lPixel < lDrawEnd; lPixel++)
 			{
-				u8 cPixelPriority = pLinePriorityData[lPixel];
+				u16 cPixelPriority = pLinePriorityData[lPixel];
 
 				if(cOverlap && (cPixelPriority & cOverlap))
 				{
@@ -4413,20 +4502,20 @@ static u8 AtariIo_DrawPlayerSpan(
 	return cCollision;
 }
 
-static u8 AtariIo_DrawMissileSpan(
+static u16 AtariIo_DrawMissileSpan(
 	u8 cNumber,
 	u8 cColor,
 	u8 cSize,
 	u8 cData,
-	u8 cPriorityMask,
-	u8 *pLinePriorityData,
+	u16 cPriorityMask,
+	u16 *pLinePriorityData,
 	u8 *pLineDestination,
 	u32 lStartX,
 	u32 lSpanStartX,
 	u32 lSpanEndX,
 	u8 cSpecial)
 {
-	u8 cCollision = 0;
+	u16 cCollision = 0;
 	u8 cShift = (cNumber & 0x03) << 1;
 	u8 cMask = 0x02 << cShift;
 	u32 lWidth = AtariIo_MissileWidth(cNumber, cSize);
@@ -4444,7 +4533,7 @@ static u8 AtariIo_DrawMissileSpan(
 
 			for(lPixel = lDrawStart; lPixel < lDrawEnd; lPixel++)
 			{
-				u8 cPixelPriority = pLinePriorityData[lPixel];
+				u16 cPixelPriority = pLinePriorityData[lPixel];
 
 				if(cSpecial && (cPixelPriority & PRIO_PF1))
 				{
@@ -4481,19 +4570,19 @@ static void AtariIo_DrawPlayerMissilesClock(_6502_Context_t *pContext)
 	u32 lClockX;
 	u32 lDisplayLine = pIoData->tVideoData.lCurrentDisplayLine;
 	u8 *pLineDestination;
-	u8 *pLinePriorityData;
+	u16 *pLinePriorityData;
 	u8 cPrior;
 	u8 cData;
 	u8 cHpos;
-	u8 cCollision;
+	u16 cCollision;
 	u8 cSpecial;
 	u8 cLeadingSpan;
 	u8 *pPlayerShift;
 	u8 *pPlayerState;
 	u8 *pMissileShift;
 	u8 *pMissileState;
-	u8 aPlayerCollision[4] = {0, 0, 0, 0};
-	u8 aMissileCollision[4] = {0, 0, 0, 0};
+	u16 aPlayerCollision[4] = {0, 0, 0, 0};
+	u16 aMissileCollision[4] = {0, 0, 0, 0};
 	u8 aPmgReplayRegisters[PMG_REGISTER_COUNT];
 	u8 cPmgEventIndex = 0;
 	int lReplayLineCycle;
@@ -4865,9 +4954,9 @@ void AtariIoDrawPlayerMissiles(_6502_Context_t *pContext)
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
 	u8 cData;
 	u8 *pDestination;
-	u8 *pPriorityData;
-	u8 cPriorityMask;
-	u8 cCollision;
+	u16 *pPriorityData;
+	u16 cPriorityMask;
+	u16 cCollision;
 
 	if(pIoData->tVideoData.lCurrentDisplayLine >= 248)
 	{
@@ -5665,6 +5754,15 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 
 	if(llMasterCycle >= pIoData->llSerialOutputTransmissionDoneCycle)
 	{
+	#ifdef VERBOSE_SIO
+		fprintf(stderr, "DBG_XMT cycle=%llu pc=%04X ram=%02X en=%02X pending=%u shift=%u\\n",
+			(unsigned long long)llMasterCycle, pContext->tCpu.pc,
+			RAM[IO_IRQEN_IRQST], SRAM[IO_IRQEN_IRQST],
+			pIoData->bSerialOutputBytePending,
+			pIoData->bSerialOutputShiftActive);
+	#endif
+		u8 bQueuedByte = Pokey_SerialOutputTransmissionDone(pContext,
+			llMasterCycle);
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIAL_OUTPUT_TRANSMISSION_DONE request!\n", pContext->llCycleCounter);
 		printf("POKEY_TRACE TRANSMISSION_DONE cycle=%llu pc=%04X opcode=%02X pad=%02X level=%u need=%llu done=%llu irqst=%02X\n",
@@ -5676,17 +5774,35 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 		       (unsigned long long)pIoData->llSerialOutputTransmissionDoneCycle,
 		       RAM[IO_IRQEN_IRQST]);
 #endif
-		RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
-		if(SRAM[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE)
+		if(!bQueuedByte)
 		{
-			_6502_Irq(pContext);
+			RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
+			if(SRAM[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE)
+			{
+				_6502_Irq(pContext);
+			}
+			pIoData->llSerialOutputTransmissionDoneCycle = CYCLE_NEVER;
 		}
-
-		pIoData->llSerialOutputTransmissionDoneCycle = CYCLE_NEVER;
+		else
+		{
+			RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+			if(SRAM[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED)
+			{
+				_6502_Irq(pContext);
+			}
+		}
 	}
 
 	if(llMasterCycle >= pIoData->llSerialOutputNeedDataCycle)
 	{
+	#ifdef VERBOSE_SIO
+		fprintf(stderr, "DBG_NEED cycle=%llu pc=%04X ram=%02X en=%02X pending=%u shift=%u\\n",
+			(unsigned long long)llMasterCycle, pContext->tCpu.pc,
+			RAM[IO_IRQEN_IRQST], SRAM[IO_IRQEN_IRQST],
+			pIoData->bSerialOutputBytePending,
+			pIoData->bSerialOutputShiftActive);
+	#endif
+		Pokey_SerialOutputDataNeeded(pContext);
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIAL_OUTPUT_DATA_NEEDED request!\n", pContext->llCycleCounter);
 		printf("POKEY_TRACE DATA_NEEDED cycle=%llu pc=%04X opcode=%02X pad=%02X level=%u need=%llu done=%llu irqst=%02X\n",
@@ -5719,6 +5835,7 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIAL_INPUT_DATA_READY request!\n", pContext->llCycleCounter);
 #endif
+		Pokey_SerialInputReady(pContext);
 		if(SRAM[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY)
 		{
 			RAM[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_INPUT_DATA_READY;
@@ -5842,6 +5959,9 @@ void AtariIoOpenWithMemory(
 	IoInitValue_t *pIoInitValue = m_aIoInitValues;
 	IoData_t *pIoData;
 	SDL_Surface *pSdlAtariSurface;
+	#ifdef SIO_DIAG
+	fprintf(stderr, "DBG_OPEN cwd-file=%s\\n", pDiskFileName ? pDiskFileName : "(null)");
+	#endif
 
 	/* create an 8-bit indexed surface; masks must be zero or SDL will
 	   refuse the format.  the previous masks were intended for a
@@ -5987,6 +6107,10 @@ void AtariIoOpenWithMemory(
 	pIoData->llPokeyTimerResetCycle = CYCLE_NEVER;
 	pIoData->llPokeySlowClockOriginCycle = 0;
 	pIoData->cSerialOutputClockHigh = 0;
+	pIoData->bSerialOutputBytePending = 0;
+	pIoData->bSerialOutputShiftActive = 0;
+	pIoData->cSerialOutputRegisterValue = 0;
+	pIoData->cSerialOutputShiftValue = 0;
 	AtariIoCycleTimedEventUpdate(pContext);
 
 	pIoData->tVideoData.pSdlAtariSurface = pSdlAtariSurface;
@@ -6021,14 +6145,31 @@ void AtariIoOpenWithMemory(
 		exit(1);
 	}
 	memset(pIoData->pDisk1, 0, MAX_DISK_SIZE);
+	pIoData->apDisk[0] = pIoData->pDisk1;
+	pIoData->alDiskSize[0] = 0;
+	pIoData->abDiskWritable[0] = 1;
+	pIoData->abDiskDirty[0] = 0;
 
 	if(pDiskFileName)
 	{
 		pFile = fopen(pDiskFileName, "rb");
+		#ifdef SIO_DIAG
+		fprintf(stderr, "DBG_OPEN_RESULT file=%s opened=%u\\n",
+			pDiskFileName, pFile ? 1u : 0u);
+		#endif
 
 		if(pFile)
 		{
 			pIoData->lDiskSize = fread(pIoData->pDisk1, 1, MAX_DISK_SIZE, pFile);
+			pIoData->alDiskSize[0] = pIoData->lDiskSize;
+		#ifdef SIO_DIAG
+			fprintf(stderr, "DBG_MOUNT file=%s size=%lu first=%02X second=%02X sector=%u\\n",
+				pDiskFileName, pIoData->lDiskSize, pIoData->pDisk1[0],
+				pIoData->pDisk1[1],
+				(unsigned)(pIoData->pDisk1[4] | (pIoData->pDisk1[5] << 8)));
+		#endif
+			strncpy(pIoData->acDiskName[0], pDiskFileName, sizeof(pIoData->acDiskName[0]) - 1u);
+			pIoData->acDiskName[0][sizeof(pIoData->acDiskName[0]) - 1u] = '\0';
 			AtariIo_CloseFileOrWarn(pFile, pDiskFileName);
 
 			if(IsXexFile(pDiskFileName))
@@ -6045,6 +6186,7 @@ void AtariIoOpenWithMemory(
 						AtariIo_LogError("A8E: Failed to convert XEX to ATR: %s\n",
 										 pDiskFileName);
 					}
+					pIoData->alDiskSize[0] = pIoData->lDiskSize;
 					free(pXexCopy);
 				}
 				else
@@ -6060,7 +6202,9 @@ void AtariIoOpenWithMemory(
 		}
 	}
 
-	pIoData->tVideoData.pPriorityData = (u8 *)malloc(PIXELS_PER_LINE * LINES_PER_SCREEN_MAX);
+	pIoData->tVideoData.pPriorityData = (u16 *)malloc(
+		sizeof(*pIoData->tVideoData.pPriorityData) *
+		PIXELS_PER_LINE * LINES_PER_SCREEN_MAX);
 
 	if(pIoData->tVideoData.pPriorityData == NULL)
 	{
@@ -6077,6 +6221,194 @@ void AtariIoOpenWithMemory(
 	Pokey_Init(pContext);
 }
 
+int AtariIoMountDisk(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	const u8 *pBytes,
+	u32 lSize,
+	const char *pName,
+	u8 bWritable)
+{
+	IoData_t *pIoData;
+	u8 *pCopy;
+	u8 *pConverted = NULL;
+	const u8 *pMountBytes = pBytes;
+	u32 lMountSize = lSize;
+
+	if(!pContext || lDrive >= 8u || !pBytes || lSize == 0u) return 0;
+	if(IsXexFile(pName))
+	{
+		u32 lNormalizedSize;
+		u32 lAtrSize;
+		if(!XexGetNormalizedSize(pBytes, lSize, &lNormalizedSize)) return 0;
+		lAtrSize = 16u + 384u + ((lNormalizedSize + 127u) / 128u) * 128u;
+		if(lAtrSize > MAX_DISK_SIZE) return 0;
+		pConverted = (u8 *)malloc(lAtrSize);
+		if(!pConverted) return 0;
+		if(!XexToAtr(pConverted, &lMountSize, (u8 *)pBytes, lSize))
+		{
+			free(pConverted);
+			return 0;
+		}
+		pMountBytes = pConverted;
+	}
+	if(lMountSize == 0u || lMountSize > MAX_DISK_SIZE)
+	{
+		free(pConverted);
+		return 0;
+	}
+	pIoData = (IoData_t *)pContext->pIoData;
+	if(lDrive == 0u)
+	{
+		memcpy(pIoData->pDisk1, pMountBytes, lMountSize);
+		pIoData->lDiskSize = lMountSize;
+		pIoData->apDisk[0] = pIoData->pDisk1;
+	}
+	else
+	{
+		pCopy = (u8 *)malloc(lMountSize);
+		if(!pCopy)
+		{
+			free(pConverted);
+			return 0;
+		}
+		memcpy(pCopy, pMountBytes, lMountSize);
+		free(pIoData->apDisk[lDrive]);
+		pIoData->apDisk[lDrive] = pCopy;
+	}
+	pIoData->alDiskSize[lDrive] = lMountSize;
+	pIoData->abDiskWritable[lDrive] = bWritable ? 1u : 0u;
+	pIoData->abDiskDirty[lDrive] = 0u;
+	pIoData->abDiskActivity[lDrive] = ATARI_IO_DISK_ACTIVITY_NONE;
+	pIoData->allDiskActivityUntil[lDrive] = 0;
+	pIoData->abSioDiskFdcStatus[lDrive] = 0u;
+	if(pName)
+	{
+		strncpy(pIoData->acDiskName[lDrive], pName, sizeof(pIoData->acDiskName[lDrive]) - 1u);
+		pIoData->acDiskName[lDrive][sizeof(pIoData->acDiskName[lDrive]) - 1u] = '\0';
+	}
+	else pIoData->acDiskName[lDrive][0] = '\0';
+	free(pConverted);
+	return 1;
+}
+
+int AtariIoUnmountDisk(
+	_6502_Context_t *pContext,
+	u32 lDrive)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return 0;
+	pIoData = (IoData_t *)pContext->pIoData;
+	if(lDrive == 0u)
+	{
+		pIoData->lDiskSize = 0u;
+		pIoData->alDiskSize[0] = 0u;
+		pIoData->abDiskDirty[0] = 0u;
+		pIoData->abDiskWritable[0] = 1u;
+		pIoData->abDiskActivity[0] = ATARI_IO_DISK_ACTIVITY_NONE;
+		pIoData->allDiskActivityUntil[0] = 0;
+		pIoData->abSioDiskFdcStatus[0] = 0u;
+		pIoData->acDiskName[0][0] = '\0';
+		return 1;
+	}
+	free(pIoData->apDisk[lDrive]);
+	pIoData->apDisk[lDrive] = NULL;
+	pIoData->alDiskSize[lDrive] = 0u;
+	pIoData->abDiskDirty[lDrive] = 0u;
+	pIoData->abDiskActivity[lDrive] = ATARI_IO_DISK_ACTIVITY_NONE;
+	pIoData->allDiskActivityUntil[lDrive] = 0;
+	pIoData->abSioDiskFdcStatus[lDrive] = 0u;
+	pIoData->acDiskName[lDrive][0] = '\0';
+	return 1;
+}
+
+const u8 *AtariIoGetDiskBytes(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u32 *pSize)
+{
+	IoData_t *pIoData;
+	if(pSize) *pSize = 0u;
+	if(!pContext || lDrive >= 8u) return NULL;
+	pIoData = (IoData_t *)pContext->pIoData;
+	if(pSize) *pSize = pIoData->alDiskSize[lDrive];
+	return pIoData->apDisk[lDrive];
+}
+
+u8 AtariIoIsDiskDirty(
+	_6502_Context_t *pContext,
+	u32 lDrive)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return 0u;
+	pIoData = (IoData_t *)pContext->pIoData;
+	return pIoData->abDiskDirty[lDrive];
+}
+
+void AtariIoClearDiskDirty(
+	_6502_Context_t *pContext,
+	u32 lDrive)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return;
+	pIoData = (IoData_t *)pContext->pIoData;
+	pIoData->abDiskDirty[lDrive] = 0u;
+}
+
+void AtariIoSetDiskWritable(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u8 bWritable)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return;
+	pIoData = (IoData_t *)pContext->pIoData;
+	pIoData->abDiskWritable[lDrive] = bWritable ? 1u : 0u;
+}
+
+u8 AtariIoIsDiskWritable(
+	_6502_Context_t *pContext,
+	u32 lDrive)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return 0u;
+	pIoData = (IoData_t *)pContext->pIoData;
+	return pIoData->abDiskWritable[lDrive];
+}
+
+void AtariIoSetDiskActivity(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u8 cActivity)
+{
+	IoData_t *pIoData;
+	u64 lDuration;
+	if(!pContext || lDrive >= 8u) return;
+	pIoData = (IoData_t *)pContext->pIoData;
+	if(cActivity == ATARI_IO_DISK_ACTIVITY_NONE)
+	{
+		pIoData->abDiskActivity[lDrive] = ATARI_IO_DISK_ACTIVITY_NONE;
+		pIoData->allDiskActivityUntil[lDrive] = 0;
+		return;
+	}
+	lDuration = ((u64)(pIoData->lCpuHz ? pIoData->lCpuHz : ATARI_CPU_HZ_PAL) * 9u) / 10u;
+	pIoData->abDiskActivity[lDrive] = cActivity;
+	pIoData->allDiskActivityUntil[lDrive] = pContext->llCycleCounter + lDuration;
+}
+
+u8 AtariIoGetDiskActivity(
+	_6502_Context_t *pContext,
+	u32 lDrive)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return ATARI_IO_DISK_ACTIVITY_NONE;
+	pIoData = (IoData_t *)pContext->pIoData;
+	if(pIoData->abDiskActivity[lDrive] != ATARI_IO_DISK_ACTIVITY_NONE &&
+	   pContext->llCycleCounter >= pIoData->allDiskActivityUntil[lDrive])
+		pIoData->abDiskActivity[lDrive] = ATARI_IO_DISK_ACTIVITY_NONE;
+	return pIoData->abDiskActivity[lDrive];
+}
+
 void AtariIoClose(_6502_Context_t *pContext)
 {
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
@@ -6087,6 +6419,7 @@ void AtariIoClose(_6502_Context_t *pContext)
 
 	free(pIoData->tVideoData.pPriorityData);
 	free(pIoData->pDisk1);
+	for(u32 lDrive = 1u; lDrive < 8u; lDrive++) free(pIoData->apDisk[lDrive]);
 	free(pIoData->pBasicRom);
 	free(pIoData->pOsRom);
 	free(pIoData->pSelfTestRom);
@@ -6271,6 +6604,9 @@ void AtariIoKeyboardEvent(_6502_Context_t *pContext, SDL_KeyboardEvent *pKeyboar
 			if(pFile)
 			{
 				pIoData->lDiskSize = fread(pIoData->pDisk1, 1, MAX_DISK_SIZE, pFile);
+				pIoData->alDiskSize[0] = pIoData->lDiskSize;
+				strncpy(pIoData->acDiskName[0], "D1.ATR", sizeof(pIoData->acDiskName[0]) - 1u);
+				pIoData->acDiskName[0][sizeof(pIoData->acDiskName[0]) - 1u] = '\0';
 				AtariIo_CloseFileOrWarn(pFile, "D1.ATR");
 #ifdef VERBOSE_SIO
 				printf("Disk name: %s, size = %lu\n", "D1.ATR", pIoData->lDiskSize);

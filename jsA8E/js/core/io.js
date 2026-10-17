@@ -610,7 +610,15 @@
               io.sioDataIndex = 0;
               io.sioInSize = 0;
               io.sioInIndex = 0;
+              io.sioInReady = false;
               io.sioPendingReadSize = 0;
+              io.sioPendingWriteResult = 0;
+              io.serialOutputBytePending = false;
+              io.serialOutputShiftActive = false;
+              io.serialOutputRegisterValue = 0;
+              io.serialOutputShiftValue = 0;
+              io.serialOutputNeedDataCycle = CYCLE_NEVER;
+              io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
             }
             // AHRM 5.3: the slow clock phase is set when initialization ends.
             if (wasPokeyInitializing && (v & 0x03) !== 0) {

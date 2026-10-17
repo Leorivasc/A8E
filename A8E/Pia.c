@@ -225,7 +225,8 @@ static void Pia_ApplyPortBValue(_6502_Context_t *pContext, u8 cEffectivePortB)
 		: (u8)((SRAM[IO_PORTB] & 0x02) == 0);
 	bOldSelfTest = pIoData->bMemoryExpansionInitialized
 		? pIoData->bSelfTestRomEnabled
-		: (u8)((SRAM[IO_PORTB] & 0x80) == 0);
+		: (u8)((SRAM[IO_PORTB] & 0x80) == 0 &&
+		       (SRAM[IO_PORTB] & 0x01) != 0);
 
 	if(eProfile == ATARI_MEMORY_ULTIMATE1MB)
 	{
@@ -297,7 +298,10 @@ static void Pia_ApplyPortBValue(_6502_Context_t *pContext, u8 cEffectivePortB)
 	 * do so only while the CPU window is enabled; U1MB has no such force
 	 * because its shadow PIA allows the ROMs to remain visible. */
 	bNewBasic = (u8)((cEffectivePortB & 0x02) == 0);
-	bNewSelfTest = (u8)((cEffectivePortB & 0x80) == 0);
+	/* AHRM 2.6: Self-test is selected by PB7 only while OS ROM is
+	 * enabled by PB0. Clearing PB0 disables Self-test regardless of PB7. */
+	bNewSelfTest = (u8)((cEffectivePortB & 0x80) == 0 &&
+					(cEffectivePortB & 0x01) != 0);
 	if(pIoData->eMemoryExpansion == ATARI_MEMORY_ULTIMATE1MB)
 	{
 		if(bNewCpu && (pIoData->cU1mbUctl & 0x03) != 0)

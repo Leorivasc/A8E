@@ -23,6 +23,10 @@
       cfg.IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
     const IRQ_SERIAL_OUTPUT_DATA_NEEDED = cfg.IRQ_SERIAL_OUTPUT_DATA_NEEDED;
     const IRQ_SERIAL_INPUT_DATA_READY = cfg.IRQ_SERIAL_INPUT_DATA_READY;
+    const pokeySerialInputReady = cfg.pokeySerialInputReady;
+    const pokeySerialOutputDataNeeded = cfg.pokeySerialOutputDataNeeded;
+    const pokeySerialOutputTransmissionDone =
+      cfg.pokeySerialOutputTransmissionDone;
     const pokeyTraceEvent = cfg.pokeyTraceEvent;
 
     const IO_VCOUNT = cfg.IO_VCOUNT;
@@ -505,15 +509,28 @@
       }
 
       if (masterEff >= io.serialOutputTransmissionDoneCycle) {
+        const hasQueuedByte = typeof pokeySerialOutputTransmissionDone === "function"
+          ? pokeySerialOutputTransmissionDone(ctx, masterEff)
+          : false;
         if (typeof pokeyTraceEvent === "function")
           pokeyTraceEvent(ctx, "TRANSMISSION_DONE", { eventCycle: masterEff });
-        ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
-        if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE)
-          {CPU.irq(ctx);}
-        io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
+        if (!hasQueuedByte) {
+          ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
+          if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE)
+            {CPU.irq(ctx);}
+          io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
+        } else {
+          // Back-to-back output keeps XMTDONE inactive and signals that the
+          // one-byte SEROUT holding register is available again.
+          ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_DATA_NEEDED;
+          if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED)
+            {CPU.irq(ctx);}
+        }
       }
 
       if (masterEff >= io.serialOutputNeedDataCycle) {
+        if (typeof pokeySerialOutputDataNeeded === "function")
+          pokeySerialOutputDataNeeded(ctx);
         if (typeof pokeyTraceEvent === "function")
           pokeyTraceEvent(ctx, "DATA_NEEDED", { eventCycle: masterEff });
         // AHRM 5.7: all latched sources except XMTDONE remain inactive
@@ -527,6 +544,8 @@
       }
 
       if (masterEff >= io.serialInputDataReadyCycle) {
+        if (typeof pokeySerialInputReady === "function")
+          pokeySerialInputReady(ctx);
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY)
           {ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_INPUT_DATA_READY;}
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY) CPU.irq(ctx);
