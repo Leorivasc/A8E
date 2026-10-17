@@ -32,6 +32,7 @@
       const traceBuffer = new Array(TRACE_BUFFER_SIZE);
       let traceWriteIndex = 0;
       let traceCount = 0;
+      let traceEnabled = false;
       let lastStopReason = "";
       let lastStopAddress = -1;
       let lastFaultInfo = null;
@@ -62,7 +63,14 @@
         traceCount = 0;
       }
 
-      machine.ctx.instructionTraceHook = pushTraceEntry;
+      function setDebugMode(enabled) {
+        traceEnabled = !!enabled;
+        machine.ctx.instructionTraceHook = traceEnabled ? pushTraceEntry : null;
+        lastDebugState = null;
+        return traceEnabled;
+      }
+
+      setDebugMode(false);
       machine.ctx.illegalOpcodeHook = function (faultState, ctx) {
         lastStopReason = "fault_illegal_opcode";
         lastStopAddress = faultState && typeof faultState.pc === "number"
@@ -96,6 +104,7 @@
           p: CPU.getPs(machine.ctx) & 0xff,
           cycleCounter: machine.ctx.cycleCounter >>> 0,
           instructionCounter: machine.ctx.instructionCounter >>> 0,
+          debugMode: traceEnabled,
         };
         if (breakpointHitAddress >= 0) {
           out.breakpointHit = breakpointHitAddress & 0xffff;
@@ -268,6 +277,7 @@
           breakpointSet[String(nextList[i] & 0xffff)] = true;
         }
         breakpointAddresses = nextList;
+        setDebugMode(nextList.length > 0);
 
         if (
           breakpointHitAddress >= 0 &&
@@ -293,6 +303,7 @@
         breakpointResumeAddress = -1;
         clearLastStopState();
         clearTraceBuffer();
+        setDebugMode(breakpointAddresses.length > 0);
       }
 
       function onStart() {
@@ -303,6 +314,7 @@
           {breakpointResumeAddress = breakpointHitAddress & 0xffff;}
         breakpointHitAddress = -1;
         clearLastStopState();
+        if (!breakpointAddresses.length) setDebugMode(false);
         emitDebugState("start");
       }
 
@@ -338,6 +350,7 @@
             breakpointResumeAddress >= 0 ? breakpointResumeAddress & 0xffff : null,
           lastStopReason: lastStopReason ? String(lastStopReason) : "",
           lastStopAddress: lastStopAddress >= 0 ? lastStopAddress & 0xffff : null,
+          debugMode: traceEnabled,
           lastFaultInfo: lastFaultInfo
             ? {
                 faultType: lastFaultInfo.faultType
@@ -413,6 +426,7 @@
         } else {
           lastFaultInfo = null;
         }
+        setDebugMode(state.debugMode === true || breakpointAddresses.length > 0);
         lastDebugState = null;
       }
 
@@ -743,11 +757,13 @@
       }
 
       function stepInstruction() {
+        setDebugMode(true);
         removeStepOverHook();
         return runInstructionWhilePaused("step");
       }
 
       function stepOver() {
+        setDebugMode(true);
         if (isReady && !isReady()) return false;
         if (machine.running) return false;
         const pc = machine.ctx.cpu.pc & 0xffff;
@@ -764,6 +780,7 @@
       }
 
       function stepInstructionAsync() {
+        setDebugMode(true);
         if (isReady && !isReady()) {
           return finalizePausedRun({ ok: false, reason: "notReady" }, "pause");
         }
@@ -782,6 +799,7 @@
       }
 
       function stepOverAsync() {
+        setDebugMode(true);
         const pc = machine.ctx.cpu.pc & 0xffff;
         const opcode = machine.ctx.ram[pc] & 0xff;
         if (opcode !== 0x20) return stepInstructionAsync();
@@ -795,6 +813,7 @@
       }
 
       function runUntilPc(targetPc, opts) {
+        setDebugMode(true);
         const result = runUntilPcInternal(targetPc, opts);
         return finalizePausedRun(
           result,
@@ -821,6 +840,7 @@
         getTraceTail: getTraceTail,
         onDebugStateChange: onDebugStateChange,
         onPause: onPause,
+        setDebugMode: setDebugMode,
         setBreakpoints: setBreakpoints,
         rebindBreakpointHooks: rebindBreakpointHooks,
         suspendBreakpoints: suspendBreakpoints,

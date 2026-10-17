@@ -182,6 +182,7 @@
       p: (raw.p | 0) & 0xff,
       cycleCounter: raw.cycleCounter >>> 0,
       instructionCounter: raw.instructionCounter >>> 0,
+      debugMode: !!raw.debugMode,
       breakpointHit:
         typeof raw.breakpointHit === "number"
           ? (raw.breakpointHit | 0) & 0xffff
@@ -773,6 +774,9 @@
           );
         }
         shouldPostState = false;
+        break;
+      case "setDebugMode":
+        if (app.setDebugMode) app.setDebugMode(!!data.enabled);
         break;
       case "stepInstruction":
         if (app.stepInstruction) app.stepInstruction();

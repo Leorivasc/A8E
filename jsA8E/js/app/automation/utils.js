@@ -396,6 +396,7 @@
       p: clamp8(raw.p),
       cycleCounter: raw.cycleCounter >>> 0,
       instructionCounter: raw.instructionCounter >>> 0,
+      debugMode: !!raw.debugMode,
     };
     if (typeof raw.breakpointHit === "number") {
       out.breakpointHit = clamp16(raw.breakpointHit);
