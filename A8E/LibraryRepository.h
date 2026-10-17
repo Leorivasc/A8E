@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "LibraryArchive.h"
+#include "LibraryPackage.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,11 +16,24 @@ typedef struct
 	char *pType;
 	char *pPath;
 	char *pFolderId;
+	char *pModifiedAt;
+	char *pDeletedAt;
+	char *pPreferredRevisionId;
+	uint16_t sRevisionCount;
 	uint32_t lSize;
 	int32_t lMountedSlot;
 	uint32_t lObjectStart;
 	uint32_t lObjectEnd;
 } A8E_LibraryRepositoryRecord_t;
+
+typedef struct
+{
+	char *pId;
+	char *pName;
+	char *pParentId;
+	uint32_t lObjectStart;
+	uint32_t lObjectEnd;
+} A8E_LibraryRepositoryFolder_t;
 
 /* The native local repository mirrors the portable layout:
  *
@@ -37,9 +50,41 @@ typedef struct
 	uint32_t lLibraryVersion;
 	A8E_LibraryRepositoryRecord_t *pRecords;
 	uint16_t sRecordCount;
+	A8E_LibraryRepositoryRecord_t *pTrashRecords;
+	uint16_t sTrashCount;
+	A8E_LibraryRepositoryFolder_t *pFolders;
+	uint16_t sFolderCount;
 	char acDeviceEntryId[8][257];
 	uint8_t abDeviceWriteProtected[8];
 } A8E_LibraryRepository_t;
+
+/* Return non-zero to continue. A zero return cancels before the next
+ * transaction boundary; the visible repository remains unchanged. */
+typedef int (*A8E_LibraryProgressCallback)(
+	const char *pPhase,
+	uint32_t lCompleted,
+	uint32_t lTotal,
+	const char *pCurrent,
+	void *pUserData);
+
+typedef struct
+{
+	uint16_t sPackageEntryCount;
+	uint16_t sNewEntryCount;
+	uint16_t sDuplicateCount;
+	uint16_t sConflictCount;
+	uint16_t sNameCollisionCount;
+	uint16_t sNewerCount;
+	uint16_t sOlderCount;
+	uint16_t sConcurrentCount;
+	uint16_t sNewFolderCount;
+	uint16_t sPayloadCount;
+	uint8_t sRestoredDeviceCount;
+	uint8_t bNewerLibraryVersion;
+	uint8_t bNewerSchemaVersion;
+	uint32_t lPackageSchemaVersion;
+	uint32_t lPackageLibraryVersion;
+} A8E_LibraryPackagePreview_t;
 
 void A8E_LibraryRepository_Init(A8E_LibraryRepository_t *pRepository);
 void A8E_LibraryRepository_Free(A8E_LibraryRepository_t *pRepository);
@@ -63,6 +108,87 @@ int A8E_LibraryRepository_SaveDirectory(
 const A8E_LibraryRepositoryRecord_t *A8E_LibraryRepository_GetRecord(
 	const A8E_LibraryRepository_t *pRepository,
 	uint16_t sIndex);
+
+const A8E_LibraryRepositoryRecord_t *A8E_LibraryRepository_GetTrashRecord(
+	const A8E_LibraryRepository_t *pRepository,
+	uint16_t sIndex);
+
+int A8E_LibraryRepository_RestoreTrashEntry(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pEntryId,
+	const char *pFolderId,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_PurgeTrashEntry(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pEntryId,
+	char *pError,
+	uint32_t lErrorSize);
+
+/* Purges trash records whose canonical UTC deletedAt is before pBeforeUtc.
+ * The cutoff must use the same YYYY-MM-DDTHH:MM:SSZ form written by the
+ * repository. pPurgedCount may be NULL when the caller does not need it. */
+int A8E_LibraryRepository_PurgeTrashBefore(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pBeforeUtc,
+	uint16_t *pPurgedCount,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_PromoteRevision(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pEntryId,
+	const char *pRevisionId,
+	char *pError,
+	uint32_t lErrorSize);
+
+const A8E_LibraryRepositoryFolder_t *A8E_LibraryRepository_GetFolder(
+	const A8E_LibraryRepository_t *pRepository,
+	uint16_t sIndex);
+
+int A8E_LibraryRepository_CreateFolder(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pParentId,
+	const char *pName,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_RenameFolder(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pFolderId,
+	const char *pName,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_DeleteFolder(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pFolderId,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_MoveEntry(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pEntryId,
+	const char *pFolderId,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_RenameEntry(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pEntryId,
+	const char *pName,
+	char *pError,
+	uint32_t lErrorSize);
 
 const uint8_t *A8E_LibraryRepository_GetPayload(
 	const A8E_LibraryRepository_t *pRepository,
@@ -88,7 +214,8 @@ int A8E_LibraryRepository_SaveWorkingCopy(
 	char *pError,
 	uint32_t lErrorSize);
 
-/* Removes an unmounted entry and its now-unreferenced payload. */
+/* Moves an unmounted entry to recoverable trash; purge removes unreferenced
+ * payloads after the trash reference is gone. */
 int A8E_LibraryRepository_RemoveEntry(
 	A8E_LibraryRepository_t *pRepository,
 	const char *pRootPath,
@@ -107,8 +234,9 @@ int A8E_LibraryRepository_SaveWorkspace(
 	char *pError,
 	uint32_t lErrorSize);
 
-/* Reads/writes the canonical dependency-free `.a8e` package. Import replaces
- * the repository directory only after the complete package validates. */
+/* Reads/writes the canonical dependency-free `.a8e` package. Import validates
+ * the complete package first, then installs it for a new repository or merges
+ * it into an existing repository without exposing a partial snapshot. */
 int A8E_LibraryRepository_ImportPackageFile(
 	A8E_LibraryRepository_t *pRepository,
 	const char *pRootPath,
@@ -116,9 +244,94 @@ int A8E_LibraryRepository_ImportPackageFile(
 	char *pError,
 	uint32_t lErrorSize);
 
+int A8E_LibraryRepository_ImportPackageFileWithLimits(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pPackagePath,
+	const A8E_LibraryPackageLimits_t *pLimits,
+	char *pError,
+	uint32_t lErrorSize);
+
+/* Validates a package and calculates a non-mutating import summary against
+ * the current repository. */
+int A8E_LibraryRepository_PreviewPackageFile(
+	const A8E_LibraryRepository_t *pRepository,
+	const char *pPackagePath,
+	A8E_LibraryPackagePreview_t *pPreview,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_PreviewPackageFileWithLimits(
+	const A8E_LibraryRepository_t *pRepository,
+	const char *pPackagePath,
+	const A8E_LibraryPackageLimits_t *pLimits,
+	A8E_LibraryPackagePreview_t *pPreview,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_ImportPackageFileWithProgress(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pPackagePath,
+	A8E_LibraryProgressCallback pProgress,
+	void *pUserData,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_ImportPackageFileWithProgressAndLimits(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pPackagePath,
+	A8E_LibraryProgressCallback pProgress,
+	void *pUserData,
+	const A8E_LibraryPackageLimits_t *pLimits,
+	char *pError,
+	uint32_t lErrorSize);
+
 int A8E_LibraryRepository_ExportPackageFile(
 	const A8E_LibraryRepository_t *pRepository,
 	const char *pPackagePath,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_ExportPackageFileWithProgress(
+	const A8E_LibraryRepository_t *pRepository,
+	const char *pPackagePath,
+	A8E_LibraryProgressCallback pProgress,
+	void *pUserData,
+	char *pError,
+	uint32_t lErrorSize);
+
+/* Exports only entries currently assigned to D1:-D8: and their payloads. */
+int A8E_LibraryRepository_ExportWorkspacePackageFile(
+	const A8E_LibraryRepository_t *pRepository,
+	const char *pPackagePath,
+	char *pError,
+	uint32_t lErrorSize);
+
+int A8E_LibraryRepository_ExportWorkspacePackageFileWithProgress(
+	const A8E_LibraryRepository_t *pRepository,
+	const char *pPackagePath,
+	A8E_LibraryProgressCallback pProgress,
+	void *pUserData,
+	char *pError,
+	uint32_t lErrorSize);
+
+/* Imports one local ATR/XEX file into the requested folder. The source file is
+ * copied into a content-addressed blob before library.json is committed. */
+int A8E_LibraryRepository_ImportImageFile(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
+	const char *pFolderId,
+	const char *pSourcePath,
+	char *pError,
+	uint32_t lErrorSize);
+
+/* Creates an empty schema-v1 directory when the application has no library
+ * yet, preserving an existing manifest or its validation error. */
+int A8E_LibraryRepository_EnsureDirectory(
+	A8E_LibraryRepository_t *pRepository,
+	const char *pRootPath,
 	char *pError,
 	uint32_t lErrorSize);
 

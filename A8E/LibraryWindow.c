@@ -2,7 +2,17 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#ifdef _WIN32
+#include <sys/stat.h>
+#include <windows.h>
+#else
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+#endif
 
 #include "AtariIo.h"
 #include "LibraryImage.h"
@@ -69,6 +79,75 @@ static int A8E_LibraryWindow_IsAbsolutePath(const char *pPath)
 	if(!pPath || !pPath[0]) return 0;
 	if(pPath[0] == '/' || pPath[0] == '\\') return 1;
 	return isalpha((unsigned char)pPath[0]) && pPath[1] == ':';
+}
+
+static int A8E_LibraryWindow_IsDirectory(const char *pPath)
+{
+#ifdef _WIN32
+	struct _stat tInfo;
+	return pPath && _stat(pPath, &tInfo) == 0 && (tInfo.st_mode & _S_IFDIR) != 0;
+#else
+	struct stat tInfo;
+	return pPath && lstat(pPath, &tInfo) == 0 && S_ISDIR(tInfo.st_mode);
+#endif
+}
+
+static int A8E_LibraryWindow_EqualName(const char *pLeft, const char *pRight)
+{
+	if(!pLeft || !pRight) return 0;
+	while(*pLeft && *pRight)
+	{
+		if(tolower((unsigned char)*pLeft++) != tolower((unsigned char)*pRight++)) return 0;
+	}
+	return *pLeft == '\0' && *pRight == '\0';
+}
+
+static const A8E_LibraryRepositoryFolder_t *A8E_LibraryWindow_FindChildFolder(
+	const A8E_LibraryRepository_t *pRepository,
+	const char *pParentId,
+	const char *pName)
+{
+	uint16_t i;
+	const char *pParent = pParentId && pParentId[0] ? pParentId : "root";
+	if(!pRepository || !pName) return NULL;
+	for(i = 0; i < pRepository->sFolderCount; i++)
+	{
+		const A8E_LibraryRepositoryFolder_t *pFolder = &pRepository->pFolders[i];
+		if(A8E_LibraryWindow_EqualName(
+			pFolder->pParentId ? pFolder->pParentId : "root", pParent) &&
+			A8E_LibraryWindow_EqualName(pFolder->pName, pName)) return pFolder;
+	}
+	return NULL;
+}
+
+static const char *A8E_LibraryWindow_FileExtension(const char *pPath)
+{
+	const char *pName = pPath;
+	const char *pDot = NULL;
+	if(!pPath) return "";
+	for(; *pPath; pPath++)
+		if(*pPath == '/' || *pPath == '\\') pName = pPath + 1;
+	for(; *pName; pName++)
+		if(*pName == '.') pDot = pName + 1;
+	return pDot ? pDot : "";
+}
+
+static int A8E_LibraryWindow_JoinDropPath(
+	char *pOutput,
+	uint32_t lOutputSize,
+	const char *pDirectory,
+	const char *pName)
+{
+	int lLength;
+	if(!pOutput || !pDirectory || !pName) return 0;
+	lLength = snprintf(pOutput, lOutputSize, "%s%c%s", pDirectory,
+#ifdef _WIN32
+		'\\',
+#else
+		'/',
+#endif
+		pName);
+	return lLength > 0 && (uint32_t)lLength < lOutputSize;
 }
 
 static const char *A8E_LibraryWindow_ResolvePackagePath(
@@ -171,6 +250,38 @@ static void A8E_LibraryWindow_CopyMountedIds(A8E_LibraryWindow_t *pWindow)
 	}
 }
 
+static void A8E_LibraryWindow_ShowStorage(A8E_LibraryWindow_t *pWindow)
+{
+	uint64_t lCapacity = 0;
+	uint64_t lAvailable = 0;
+	uint64_t lUsed;
+#ifdef _WIN32
+	ULARGE_INTEGER tAvailable;
+	ULARGE_INTEGER tTotal;
+	if(!GetDiskFreeSpaceExA("library", &tAvailable, &tTotal, NULL))
+	{
+		strncpy(pWindow->acStatus, "STORAGE UNAVAILABLE", sizeof(pWindow->acStatus) - 1u);
+		return;
+	}
+	lCapacity = (uint64_t)tTotal.QuadPart;
+	lAvailable = (uint64_t)tFree.QuadPart;
+#else
+	struct statvfs tStats;
+	if(statvfs("library", &tStats) != 0)
+	{
+		strncpy(pWindow->acStatus, "STORAGE UNAVAILABLE", sizeof(pWindow->acStatus) - 1u);
+		return;
+	}
+	lCapacity = (uint64_t)tStats.f_blocks * (uint64_t)tStats.f_frsize;
+	lAvailable = (uint64_t)tStats.f_bavail * (uint64_t)tStats.f_frsize;
+#endif
+	lUsed = lCapacity > lAvailable ? lCapacity - lAvailable : 0;
+	snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+		"STORAGE %llu USED / %llu FREE MB",
+		(unsigned long long)(lUsed / (1024u * 1024u)),
+		(unsigned long long)(lAvailable / (1024u * 1024u)));
+}
+
 static int A8E_LibraryWindow_MatchesSearch(
 	const A8E_LibraryWindow_t *pWindow,
 	const A8E_LibraryRepositoryRecord_t *pRecord)
@@ -188,27 +299,180 @@ static int A8E_LibraryWindow_MatchesSearch(
 	return 0;
 }
 
+static int A8E_LibraryWindow_MatchesFilters(
+	const A8E_LibraryWindow_t *pWindow,
+	const A8E_LibraryRepositoryRecord_t *pRecord)
+{
+	uint32_t lDrive;
+	int bMounted = 0;
+	if(!pWindow || !pRecord || !A8E_LibraryWindow_MatchesSearch(pWindow, pRecord)) return 0;
+	if(pWindow->nTypeFilter == 1u && strcmp(pRecord->pType, "atr") != 0) return 0;
+	if(pWindow->nTypeFilter == 2u && strcmp(pRecord->pType, "xex") != 0) return 0;
+	for(lDrive = 0; lDrive < 8u; lDrive++)
+		if(strcmp(pWindow->acMountedIds[lDrive], pRecord->pId) == 0) bMounted = 1;
+	if(pWindow->nMountFilter == 1u && !bMounted) return 0;
+	if(pWindow->nMountFilter == 2u && bMounted) return 0;
+	return 1;
+}
+
+static int A8E_LibraryWindow_CompareText(const char *pLeft, const char *pRight)
+{
+	while(*pLeft && *pRight)
+	{
+		int lLeft = toupper((unsigned char)*pLeft++);
+		int lRight = toupper((unsigned char)*pRight++);
+		if(lLeft != lRight) return lLeft < lRight ? -1 : 1;
+	}
+	return *pLeft ? 1 : *pRight ? -1 : 0;
+}
+
+static int A8E_LibraryWindow_CompareRecords(
+	const A8E_LibraryWindow_t *pWindow,
+	const A8E_LibraryRepositoryRecord_t *pLeft,
+	const A8E_LibraryRepositoryRecord_t *pRight)
+{
+	int lResult;
+	if(pWindow->nSortMode == 1u)
+		lResult = A8E_LibraryWindow_CompareText(pLeft->pType, pRight->pType);
+	else if(pWindow->nSortMode == 2u)
+		lResult = pLeft->lSize < pRight->lSize ? -1 : pLeft->lSize > pRight->lSize ? 1 : 0;
+	else if(pWindow->nSortMode == 3u)
+		lResult = A8E_LibraryWindow_CompareText(
+			pRight->pModifiedAt ? pRight->pModifiedAt : "",
+			pLeft->pModifiedAt ? pLeft->pModifiedAt : "");
+	else
+		lResult = A8E_LibraryWindow_CompareText(pLeft->pName, pRight->pName);
+	if(!lResult) lResult = A8E_LibraryWindow_CompareText(pLeft->pName, pRight->pName);
+	return lResult;
+}
+
+static const A8E_LibraryRepositoryFolder_t *A8E_LibraryWindow_CurrentFolder(
+	const A8E_LibraryWindow_t *pWindow)
+{
+	uint16_t i;
+	if(!pWindow || strcmp(pWindow->acFolderId, "root") == 0) return NULL;
+	for(i = 0; i < pWindow->pRepository->sFolderCount; i++)
+		if(strcmp(pWindow->pRepository->pFolders[i].pId, pWindow->acFolderId) == 0)
+			return &pWindow->pRepository->pFolders[i];
+	return NULL;
+}
+
+static uint32_t A8E_LibraryWindow_FolderRowCount(
+	const A8E_LibraryWindow_t *pWindow)
+{
+	uint32_t lCount = 0;
+	uint16_t i;
+	if(pWindow->bTrashView) return 0;
+	const A8E_LibraryRepositoryFolder_t *pCurrent =
+		A8E_LibraryWindow_CurrentFolder(pWindow);
+	if(pWindow->sSearchLength > 0) return 0;
+	if(pCurrent && pCurrent->pParentId) lCount++;
+	for(i = 0; i < pWindow->pRepository->sFolderCount; i++)
+	{
+		const A8E_LibraryRepositoryFolder_t *pFolder =
+			&pWindow->pRepository->pFolders[i];
+		if(strcmp(pFolder->pId, "root") != 0 &&
+			strcmp(pFolder->pParentId ? pFolder->pParentId : "root", pWindow->acFolderId) == 0)
+			lCount++;
+	}
+	return lCount;
+}
+
+static const A8E_LibraryRepositoryFolder_t *A8E_LibraryWindow_VisibleFolder(
+	const A8E_LibraryWindow_t *pWindow,
+	uint32_t lVisibleIndex,
+	int *pParentRow)
+{
+	uint32_t lOffset = 0;
+	uint16_t i;
+	const A8E_LibraryRepositoryFolder_t *pCurrent =
+		A8E_LibraryWindow_CurrentFolder(pWindow);
+	if(pParentRow) *pParentRow = 0;
+	if(pWindow->bTrashView) return NULL;
+	if(pWindow->sSearchLength > 0) return NULL;
+	if(pCurrent && pCurrent->pParentId)
+	{
+		if(lVisibleIndex == 0u)
+		{
+			if(pParentRow) *pParentRow = 1;
+			return NULL;
+		}
+		lOffset = 1u;
+	}
+	if(lVisibleIndex < lOffset) return NULL;
+	lVisibleIndex -= lOffset;
+	for(i = 0; i < pWindow->pRepository->sFolderCount; i++)
+	{
+		const A8E_LibraryRepositoryFolder_t *pFolder =
+			&pWindow->pRepository->pFolders[i];
+		if(strcmp(pFolder->pId, "root") == 0 ||
+			strcmp(pFolder->pParentId ? pFolder->pParentId : "root", pWindow->acFolderId) != 0)
+			continue;
+		if(lVisibleIndex-- == 0u) return pFolder;
+	}
+	return NULL;
+}
+
 static const A8E_LibraryRepositoryRecord_t *A8E_LibraryWindow_VisibleRecord(
 	const A8E_LibraryWindow_t *pWindow, uint32_t lVisibleIndex)
 {
 	uint16_t sIndex;
+	uint16_t sCount = 0;
+	uint16_t *pIndices;
+	if(pWindow->bTrashView)
+		return A8E_LibraryRepository_GetTrashRecord(
+			pWindow->pRepository, (uint16_t)lVisibleIndex);
+	uint32_t lFolderRows = A8E_LibraryWindow_FolderRowCount(pWindow);
+	if(lVisibleIndex < lFolderRows) return NULL;
+	lVisibleIndex -= lFolderRows;
+	pIndices = (uint16_t *)calloc(pWindow->pRepository->sRecordCount, sizeof(*pIndices));
+	if(!pIndices) return NULL;
 	for(sIndex = 0; sIndex < pWindow->pRepository->sRecordCount; sIndex++)
 	{
 		const A8E_LibraryRepositoryRecord_t *pRecord =
 			A8E_LibraryRepository_GetRecord(pWindow->pRepository, sIndex);
-		if(!A8E_LibraryWindow_MatchesSearch(pWindow, pRecord)) continue;
-		if(lVisibleIndex-- == 0u) return pRecord;
+		if(!A8E_LibraryWindow_MatchesFilters(pWindow, pRecord)) continue;
+		if(pWindow->sSearchLength == 0 && strcmp(
+			pRecord->pFolderId ? pRecord->pFolderId : "root", pWindow->acFolderId) != 0) continue;
+		pIndices[sCount++] = sIndex;
 	}
+	for(sIndex = 1; sIndex < sCount; sIndex++)
+	{
+		uint16_t sPosition = sIndex;
+		while(sPosition > 0u && A8E_LibraryWindow_CompareRecords(
+			pWindow,
+			A8E_LibraryRepository_GetRecord(pWindow->pRepository, pIndices[sPosition]),
+			A8E_LibraryRepository_GetRecord(pWindow->pRepository, pIndices[sPosition - 1u])) < 0)
+		{
+			uint16_t sSwap = pIndices[sPosition];
+			pIndices[sPosition] = pIndices[sPosition - 1u];
+			pIndices[sPosition - 1u] = sSwap;
+			sPosition--;
+		}
+	}
+	if(lVisibleIndex < sCount)
+	{
+		const A8E_LibraryRepositoryRecord_t *pResult =
+			A8E_LibraryRepository_GetRecord(pWindow->pRepository, pIndices[lVisibleIndex]);
+		free(pIndices);
+		return pResult;
+	}
+	free(pIndices);
 	return NULL;
 }
 
 static uint32_t A8E_LibraryWindow_VisibleCount(const A8E_LibraryWindow_t *pWindow)
 {
 	uint16_t sIndex;
-	uint32_t lCount = 0;
+	if(pWindow->bTrashView) return pWindow->pRepository->sTrashCount;
+	uint32_t lCount = A8E_LibraryWindow_FolderRowCount(pWindow);
 	for(sIndex = 0; sIndex < pWindow->pRepository->sRecordCount; sIndex++)
-		if(A8E_LibraryWindow_MatchesSearch(
-			pWindow, A8E_LibraryRepository_GetRecord(pWindow->pRepository, sIndex))) lCount++;
+		if(A8E_LibraryWindow_MatchesFilters(
+			pWindow, A8E_LibraryRepository_GetRecord(pWindow->pRepository, sIndex)) &&
+			(pWindow->sSearchLength > 0 || strcmp(
+				A8E_LibraryRepository_GetRecord(pWindow->pRepository, sIndex)->pFolderId
+				? A8E_LibraryRepository_GetRecord(pWindow->pRepository, sIndex)->pFolderId
+				: "root", pWindow->acFolderId) == 0)) lCount++;
 	return lCount;
 }
 
@@ -216,14 +480,16 @@ static int A8E_LibraryWindow_SaveDirtyDrive(
 	A8E_LibraryWindow_t *pWindow, uint32_t lDrive)
 {
 	const uint8_t *pBytes;
-	uint32_t lSize;
+	u32 lSize;
 	if(lDrive >= 8u || pWindow->acMountedIds[lDrive][0] == '\0' ||
 		!AtariIoIsDiskDirty(pWindow->pContext, lDrive)) return 1;
 	pBytes = AtariIoGetDiskBytes(pWindow->pContext, lDrive, &lSize);
 	if(!pBytes) return 0;
-	return A8E_LibraryRepository_SaveWorkingCopy(
+	if(!A8E_LibraryRepository_SaveWorkingCopy(
 		pWindow->pRepository, "library", pWindow->acMountedIds[lDrive],
-		pBytes, lSize, NULL, 0);
+		pBytes, (uint32_t)lSize, NULL, 0)) return 0;
+	AtariIoClearDiskDirty(pWindow->pContext, lDrive);
+	return 1;
 }
 
 static int A8E_LibraryWindow_SaveWorkspace(A8E_LibraryWindow_t *pWindow)
@@ -318,6 +584,175 @@ static void A8E_LibraryWindow_CloseAtr(
 	pWindow->acAtrEntryId[0] = '\0';
 	pWindow->acAtrPreview[0] = '\0';
 	strncpy(pWindow->acStatus, "BACK TO LIBRARY", sizeof(pWindow->acStatus) - 1u);
+}
+
+static void A8E_LibraryWindow_SetFolder(
+	A8E_LibraryWindow_t *pWindow,
+	const char *pFolderId)
+{
+	if(!pWindow) return;
+	strncpy(pWindow->acFolderId,
+		pFolderId && pFolderId[0] ? pFolderId : "root",
+		sizeof(pWindow->acFolderId) - 1u);
+	pWindow->acFolderId[sizeof(pWindow->acFolderId) - 1u] = '\0';
+	pWindow->lScroll = 0;
+	pWindow->sSelectedRow = 0;
+}
+
+static int A8E_LibraryWindow_ImportDropPath(
+	A8E_LibraryWindow_t *pWindow,
+	const char *pPath,
+	const char *pFolderId,
+	uint32_t lDepth,
+	uint32_t *pImported,
+	uint32_t *pSkipped)
+{
+	char sError[160];
+	if(!pWindow || !pPath || !pFolderId || lDepth > 32u) return 0;
+	if(!A8E_LibraryWindow_IsDirectory(pPath))
+	{
+		const char *pExtension = A8E_LibraryWindow_FileExtension(pPath);
+		if(tolower((unsigned char)pExtension[0]) != 'a' &&
+			tolower((unsigned char)pExtension[0]) != 'x')
+		{
+			if(pSkipped) (*pSkipped)++;
+			return 0;
+		}
+		if(!A8E_LibraryRepository_ImportImageFile(
+			pWindow->pRepository, "library", pFolderId, pPath,
+			sError, sizeof(sError)))
+		{
+			if(pSkipped) (*pSkipped)++;
+			return 0;
+		}
+		if(pImported) (*pImported)++;
+		return 1;
+	}
+	{
+		char sDirectory[1024];
+		char sFolderName[257];
+		char sChildFolderId[257];
+		const char *pLeaf;
+		const A8E_LibraryRepositoryFolder_t *pChild;
+		if(!pWindow->pRepository->pManifest &&
+			!A8E_LibraryRepository_EnsureDirectory(
+				pWindow->pRepository, "library", sError, sizeof(sError)))
+		{
+			if(pSkipped) (*pSkipped)++;
+			return 0;
+		}
+		strncpy(sDirectory, pPath, sizeof(sDirectory) - 1u);
+		sDirectory[sizeof(sDirectory) - 1u] = '\0';
+		while(strlen(sDirectory) > 1u &&
+			(sDirectory[strlen(sDirectory) - 1u] == '/' ||
+			 sDirectory[strlen(sDirectory) - 1u] == '\\'))
+			sDirectory[strlen(sDirectory) - 1u] = '\0';
+		pLeaf = strrchr(sDirectory, '/');
+		{
+			const char *pBackslash = strrchr(sDirectory, '\\');
+			if(!pLeaf || (pBackslash && pBackslash > pLeaf)) pLeaf = pBackslash;
+		}
+		pLeaf = pLeaf ? pLeaf + 1 : sDirectory;
+		if(strlen(pLeaf) == 0u || strlen(pLeaf) >= sizeof(sFolderName))
+		{
+			if(pSkipped) (*pSkipped)++;
+			return 0;
+		}
+		strcpy(sFolderName, pLeaf);
+		pChild = A8E_LibraryWindow_FindChildFolder(
+			pWindow->pRepository, pFolderId, sFolderName);
+		if(!pChild)
+		{
+			if(!A8E_LibraryRepository_CreateFolder(
+				pWindow->pRepository, "library", pFolderId, sFolderName,
+				sError, sizeof(sError)) ||
+				!(pChild = A8E_LibraryWindow_FindChildFolder(
+					pWindow->pRepository, pFolderId, sFolderName)))
+			{
+				if(pSkipped) (*pSkipped)++;
+				return 0;
+			}
+		}
+		strncpy(sChildFolderId, pChild->pId, sizeof(sChildFolderId) - 1u);
+		sChildFolderId[sizeof(sChildFolderId) - 1u] = '\0';
+#ifdef _WIN32
+		{
+			char sPattern[1024];
+			WIN32_FIND_DATAA tData;
+			HANDLE hFind;
+			if(!A8E_LibraryWindow_JoinDropPath(
+				sPattern, sizeof(sPattern), sDirectory, "*")) return 0;
+			hFind = FindFirstFileA(sPattern, &tData);
+			if(hFind == INVALID_HANDLE_VALUE) return 0;
+			do
+			{
+				char sChild[1024];
+				if(strcmp(tData.cFileName, ".") != 0 &&
+					strcmp(tData.cFileName, "..") != 0 &&
+					A8E_LibraryWindow_JoinDropPath(
+						sChild, sizeof(sChild), sDirectory, tData.cFileName))
+					A8E_LibraryWindow_ImportDropPath(
+						pWindow, sChild, sChildFolderId, lDepth + 1u,
+						pImported, pSkipped);
+			} while(FindNextFileA(hFind, &tData));
+			FindClose(hFind);
+		}
+#else
+		{
+			DIR *pDirectory = opendir(sDirectory);
+			struct dirent *pEntry;
+			if(!pDirectory) return 0;
+			while((pEntry = readdir(pDirectory)) != NULL)
+			{
+				char sChild[1024];
+				if(strcmp(pEntry->d_name, ".") == 0 ||
+					strcmp(pEntry->d_name, "..") == 0 ||
+					!A8E_LibraryWindow_JoinDropPath(
+						sChild, sizeof(sChild), sDirectory, pEntry->d_name))
+					continue;
+				A8E_LibraryWindow_ImportDropPath(
+					pWindow, sChild, sChildFolderId, lDepth + 1u,
+					pImported, pSkipped);
+			}
+			closedir(pDirectory);
+		}
+#endif
+	}
+	return 1;
+}
+
+static const A8E_LibraryRepositoryRecord_t *A8E_LibraryWindow_SelectedRecord(
+	const A8E_LibraryWindow_t *pWindow)
+{
+	return A8E_LibraryWindow_VisibleRecord(
+		pWindow, pWindow->sSelectedRow + pWindow->lScroll);
+}
+
+static void A8E_LibraryWindow_DrawRecordInfo(
+	A8E_LibraryWindow_t *pWindow,
+	const A8E_LibraryRepositoryRecord_t *pRecord,
+	int lY)
+{
+	char acFull[220];
+	char acInfo[100];
+	char acMount[8] = "";
+	if(!pWindow || !pRecord) return;
+	if(pRecord->lMountedSlot >= 0)
+	{
+		acMount[0] = 'D';
+		acMount[1] = (char)('1' + pRecord->lMountedSlot);
+		acMount[2] = '\0';
+	}
+	snprintf(acFull, sizeof(acFull), "%s REV %s | %u HIST | %s | %s",
+		pRecord->pType ? pRecord->pType : "MEDIA",
+		pRecord->pPreferredRevisionId ? pRecord->pPreferredRevisionId : "-",
+		(unsigned)pRecord->sRevisionCount,
+		pRecord->pModifiedAt && pRecord->pModifiedAt[0]
+			? pRecord->pModifiedAt : "MODIFIED UNKNOWN",
+		acMount[0] ? acMount : "UNMOUNTED");
+	A8E_LibraryWindow_CopyColumnText(acInfo, sizeof(acInfo), acFull, 74u);
+	A8E_LibraryWindow_Text(pWindow->pRenderer, 14, lY, acInfo,
+		(SDL_Color){ 150, 160, 170, 255 });
 }
 
 static int A8E_LibraryWindow_OpenAtr(
@@ -454,11 +889,261 @@ static void A8E_LibraryWindow_RestoreWorkspace(A8E_LibraryWindow_t *pWindow)
 	}
 }
 
+static int A8E_LibraryWindow_ReportLibraryProgress(
+	const char *pPhase,
+	uint32_t lCompleted,
+	uint32_t lTotal,
+	const char *pCurrent,
+	void *pUserData)
+{
+	A8E_LibraryWindow_t *pWindow = (A8E_LibraryWindow_t *)pUserData;
+	if(!pWindow) return 1;
+	snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+		"%s %u/%u %s", pPhase ? pPhase : "LIBRARY",
+		(unsigned)lCompleted, (unsigned)lTotal,
+		pCurrent ? pCurrent : "");
+	SDL_PumpEvents();
+	if(SDL_GetKeyboardFocus() == pWindow->pWindow)
+	{
+		const Uint8 *pKeyboard = SDL_GetKeyboardState(NULL);
+		if(pKeyboard && pKeyboard[SDL_SCANCODE_ESCAPE]) return 0;
+	}
+	return 1;
+}
+
+static int A8E_LibraryWindow_ImportPackage(
+	A8E_LibraryWindow_t *pWindow,
+	const char *pPackagePath)
+{
+	A8E_LibraryPackagePreview_t tPreview;
+	char sError[160];
+	char sMessage[512];
+	const SDL_MessageBoxButtonData aButtons[] = {
+		{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel" },
+		{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Import" },
+	};
+	const SDL_MessageBoxData tMessageBox = {
+		SDL_MESSAGEBOX_INFORMATION,
+		pWindow ? pWindow->pWindow : NULL,
+		"Import A8E library package",
+		sMessage,
+		2,
+		aButtons,
+		NULL,
+	};
+	int lButton = 0;
+	uint32_t lDrive;
+	if(!pWindow || !pPackagePath) return 0;
+	if(!A8E_LibraryRepository_PreviewPackageFile(
+		pWindow->pRepository, pPackagePath, &tPreview,
+		sError, sizeof(sError)))
+	{
+		snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+			"IMPORT FAILED %s", sError);
+		return 0;
+	}
+	snprintf(sMessage, sizeof(sMessage),
+		"Entries: %u\nNew: %u\nDuplicates: %u\nConflicts: %u "
+		"(newer %u, older %u, concurrent %u)\nName collisions: %u\n"
+		"New folders: %u\nPayloads: %u\nWorkspace mounts: %u\n\n"
+		"Import without replacing local content?",
+		(unsigned)tPreview.sPackageEntryCount,
+		(unsigned)tPreview.sNewEntryCount,
+		(unsigned)tPreview.sDuplicateCount,
+		(unsigned)tPreview.sConflictCount,
+		(unsigned)tPreview.sNewerCount,
+		(unsigned)tPreview.sOlderCount,
+		(unsigned)tPreview.sConcurrentCount,
+		(unsigned)tPreview.sNameCollisionCount,
+		(unsigned)tPreview.sNewFolderCount,
+		(unsigned)tPreview.sPayloadCount,
+		(unsigned)tPreview.sRestoredDeviceCount);
+	if(tPreview.bNewerSchemaVersion || tPreview.bNewerLibraryVersion)
+	{
+		char sWarning[192];
+		if(tPreview.bNewerSchemaVersion && tPreview.bNewerLibraryVersion)
+			snprintf(sWarning, sizeof(sWarning),
+				"Warning: package schema %u and library version %u are newer.\n\n",
+				(unsigned)tPreview.lPackageSchemaVersion,
+				(unsigned)tPreview.lPackageLibraryVersion);
+		else if(tPreview.bNewerSchemaVersion)
+			snprintf(sWarning, sizeof(sWarning),
+				"Warning: package schema %u is newer; known fields only will be imported.\n\n",
+				(unsigned)tPreview.lPackageSchemaVersion);
+		else
+			snprintf(sWarning, sizeof(sWarning),
+				"Warning: package library version %u is newer.\n\n",
+				(unsigned)tPreview.lPackageLibraryVersion);
+		/* Rebuild the short message with the warning while retaining the
+		 * bounded summary above. */
+		{
+			char sSummary[512];
+			strncpy(sSummary, sMessage, sizeof(sSummary) - 1u);
+			sSummary[sizeof(sSummary) - 1u] = '\0';
+			snprintf(sMessage, sizeof(sMessage), "%s%s", sWarning, sSummary);
+		}
+	}
+	if(SDL_ShowMessageBox(&tMessageBox, &lButton) != 0 || lButton != 1)
+	{
+		strncpy(pWindow->acStatus, "IMPORT CANCELED",
+			sizeof(pWindow->acStatus) - 1u);
+		pWindow->acStatus[sizeof(pWindow->acStatus) - 1u] = '\0';
+		return 0;
+	}
+	A8E_LibraryWindow_SaveDirty(pWindow);
+	if(!A8E_LibraryRepository_ImportPackageFileWithProgress(
+		pWindow->pRepository, "library", pPackagePath,
+		A8E_LibraryWindow_ReportLibraryProgress, pWindow,
+		sError, sizeof(sError)))
+	{
+		snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+			"IMPORT FAILED %s", sError);
+		fprintf(stderr, "A8E Library import failed for '%s': %s\n",
+			pPackagePath, sError);
+		return 0;
+	}
+	for(lDrive = 0; lDrive < 8u; lDrive++)
+	{
+		AtariIoUnmountDisk(pWindow->pContext, lDrive);
+		pWindow->acMountedIds[lDrive][0] = '\0';
+	}
+	A8E_LibraryWindow_RestoreWorkspace(pWindow);
+	A8E_LibraryWindow_SetFolder(pWindow, "root");
+	snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+		"IMPORTED PACKAGE %s", pPackagePath);
+	return 1;
+}
+
 static void A8E_LibraryWindow_PerformPathOperation(A8E_LibraryWindow_t *pWindow)
 {
 	char sError[160];
 	uint32_t lDrive;
 	if(!pWindow || !pWindow->bPathInput || pWindow->sPathLength == 0) return;
+	if(pWindow->cPathOperation == 'A')
+	{
+		char *pEnd;
+		unsigned long lDays = strtoul(pWindow->acPath, &pEnd, 10);
+		time_t lNow;
+		time_t lAge;
+		time_t lCutoff;
+		struct tm *pUtc;
+		char sBefore[32];
+		char sMessage[192];
+		const SDL_MessageBoxButtonData aButtons[] = {
+			{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel" },
+			{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Purge" },
+		};
+		SDL_MessageBoxData tMessageBox;
+		int lButton = 0;
+		uint16_t sPurged = 0;
+		if(*pEnd != '\0' || lDays > 3650000ul)
+		{
+			strncpy(pWindow->acStatus, "AGE MUST BE 0-3650000 DAYS",
+				sizeof(pWindow->acStatus) - 1u);
+			return;
+		}
+		lNow = time(NULL);
+		/* Avoid converting a large age to a narrow time_t before checking
+		 * whether the cutoff predates the representable Unix epoch. */
+		if(lNow >= (time_t)0 &&
+			lDays > (unsigned long)(lNow / (time_t)86400))
+			lCutoff = (time_t)0;
+		else
+		{
+			lAge = (time_t)lDays * (time_t)86400;
+			lCutoff = lNow - lAge;
+		}
+		if(!(pUtc = gmtime(&lCutoff)) ||
+			strftime(sBefore, sizeof(sBefore), "%Y-%m-%dT%H:%M:%SZ", pUtc) == 0)
+		{
+			strncpy(pWindow->acStatus, "INVALID TRASH AGE",
+				sizeof(pWindow->acStatus) - 1u);
+			return;
+		}
+		snprintf(sMessage, sizeof(sMessage),
+			"Permanently purge trash older than %lu days?", lDays);
+		tMessageBox.flags = SDL_MESSAGEBOX_WARNING;
+		tMessageBox.window = pWindow->pWindow;
+		tMessageBox.title = "Purge old trash";
+		tMessageBox.message = sMessage;
+		tMessageBox.numbuttons = 2;
+		tMessageBox.buttons = aButtons;
+		tMessageBox.colorScheme = NULL;
+		if(SDL_ShowMessageBox(&tMessageBox, &lButton) != 0 || lButton != 1)
+		{
+			strncpy(pWindow->acStatus, "TRASH PURGE CANCELED",
+				sizeof(pWindow->acStatus) - 1u);
+			return;
+		}
+		if(A8E_LibraryRepository_PurgeTrashBefore(
+			pWindow->pRepository, "library", sBefore, &sPurged,
+			sError, sizeof(sError)))
+			snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+				"PURGED %u OLD TRASH", (unsigned)sPurged);
+		else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+			"TRASH PURGE FAILED %s", sError);
+		return;
+	}
+	if(pWindow->cPathOperation == 'F')
+	{
+		if(A8E_LibraryRepository_CreateFolder(
+			pWindow->pRepository, "library", pWindow->acFolderId,
+			pWindow->acPath, sError, sizeof(sError)))
+			snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+				"CREATED FOLDER %s", pWindow->acPath);
+		else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+			"FOLDER FAILED %s", sError);
+		return;
+	}
+	if(pWindow->cPathOperation == 'R')
+	{
+		const A8E_LibraryRepositoryFolder_t *pFolder;
+		int bParentRow = 0;
+		pFolder = A8E_LibraryWindow_VisibleFolder(
+			pWindow, pWindow->sSelectedRow + pWindow->lScroll, &bParentRow);
+		if(pFolder)
+		{
+			if(A8E_LibraryRepository_RenameFolder(
+				pWindow->pRepository, "library", pFolder->pId,
+				pWindow->acPath, sError, sizeof(sError)))
+				snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+					"RENAMED FOLDER %s", pWindow->acPath);
+			else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+				"RENAME FAILED %s", sError);
+			return;
+		}
+		{
+			const A8E_LibraryRepositoryRecord_t *pRecord =
+				A8E_LibraryWindow_SelectedRecord(pWindow);
+			if(pRecord && A8E_LibraryRepository_RenameEntry(
+				pWindow->pRepository, "library", pRecord->pId,
+				pWindow->acPath, sError, sizeof(sError)))
+				snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+					"RENAMED %s", pWindow->acPath);
+			else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+				"RENAME FAILED %s", sError);
+		}
+		return;
+	}
+	if(pWindow->cPathOperation == 'M')
+	{
+		const A8E_LibraryRepositoryRecord_t *pRecord =
+			A8E_LibraryWindow_SelectedRecord(pWindow);
+		char sName[257];
+		if(pRecord)
+		{
+			strncpy(sName, pRecord->pName, sizeof(sName) - 1u);
+			sName[sizeof(sName) - 1u] = '\0';
+		}
+		if(pRecord && A8E_LibraryRepository_MoveEntry(
+			pWindow->pRepository, "library", pRecord->pId,
+			pWindow->acFolderId, sError, sizeof(sError)))
+			snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+				"MOVED %s", sName);
+		else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+			"MOVE FAILED %s", sError);
+		return;
+	}
 	if(pWindow->cPathOperation == 'N')
 	{
 		char sName[1024];
@@ -467,10 +1152,57 @@ static void A8E_LibraryWindow_PerformPathOperation(A8E_LibraryWindow_t *pWindow)
 		if(!strchr(sName, '.') && strlen(sName) + 4u < sizeof(sName)) strcat(sName, ".atr");
 		if(A8E_LibraryRepository_CreateBlankAtr(
 			pWindow->pRepository, "library", sName, sError, sizeof(sError)))
+		{
+			uint16_t i;
+			const A8E_LibraryRepositoryRecord_t *pCreated = NULL;
+			for(i = 0; i < pWindow->pRepository->sRecordCount; i++)
+				if(strcmp(pWindow->pRepository->pRecords[i].pName, sName) == 0)
+				{
+					pCreated = &pWindow->pRepository->pRecords[i];
+					break;
+				}
+			if(pCreated && strcmp(pWindow->acFolderId, "root") != 0)
+				A8E_LibraryRepository_MoveEntry(
+					pWindow->pRepository, "library", pCreated->pId,
+					pWindow->acFolderId, NULL, 0);
 			snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
 				"CREATED %s", sName);
+		}
 		else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
 				"CREATE FAILED %s", sError);
+		return;
+	}
+	if(pWindow->cPathOperation == 'Y')
+	{
+		const A8E_LibraryRepositoryRecord_t *pRecord =
+			A8E_LibraryWindow_SelectedRecord(pWindow);
+		char sEntryId[257];
+		uint32_t lDrive;
+		if(!pRecord)
+		{
+			strncpy(pWindow->acStatus, "NO FILE SELECTED",
+				sizeof(pWindow->acStatus) - 1u);
+			return;
+		}
+		strncpy(sEntryId, pRecord->pId, sizeof(sEntryId) - 1u);
+		sEntryId[sizeof(sEntryId) - 1u] = '\0';
+		A8E_LibraryWindow_SaveDirty(pWindow);
+		for(lDrive = 0; lDrive < 8u; lDrive++)
+			if(strcmp(pWindow->acMountedIds[lDrive], sEntryId) == 0)
+			{
+				AtariIoUnmountDisk(pWindow->pContext, lDrive);
+				pWindow->acMountedIds[lDrive][0] = '\0';
+			}
+		if(A8E_LibraryRepository_PromoteRevision(
+			pWindow->pRepository, "library", sEntryId, pWindow->acPath,
+			sError, sizeof(sError)))
+		{
+			A8E_LibraryWindow_SaveWorkspace(pWindow);
+			snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+				"PROMOTED REVISION %s", sEntryId);
+		}
+		else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+			"PROMOTE FAILED %s", sError);
 		return;
 	}
 	if(pWindow->cPathOperation == 'D')
@@ -516,38 +1248,67 @@ static void A8E_LibraryWindow_PerformPathOperation(A8E_LibraryWindow_t *pWindow)
 	if(pWindow->cPathOperation == 'E')
 	{
 		A8E_LibraryWindow_SaveDirty(pWindow);
-		if(A8E_LibraryRepository_ExportPackageFile(
-			pWindow->pRepository, pWindow->acPath, sError, sizeof(sError)))
+		if(A8E_LibraryRepository_ExportPackageFileWithProgress(
+			pWindow->pRepository, pWindow->acPath,
+			A8E_LibraryWindow_ReportLibraryProgress, pWindow,
+			sError, sizeof(sError)))
 			snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
 				"EXPORTED %s", pWindow->acPath);
 		else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
 				"EXPORT FAILED %s", sError);
 		return;
 	}
-	A8E_LibraryWindow_SaveDirty(pWindow);
+	if(pWindow->cPathOperation == 'W')
+	{
+		A8E_LibraryWindow_SaveDirty(pWindow);
+		if(A8E_LibraryRepository_ExportWorkspacePackageFileWithProgress(
+			pWindow->pRepository, pWindow->acPath,
+			A8E_LibraryWindow_ReportLibraryProgress, pWindow,
+			sError, sizeof(sError)))
+			snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+				"EXPORTED WORKSPACE %s", pWindow->acPath);
+		else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+				"WORKSPACE EXPORT FAILED %s", sError);
+		return;
+	}
 	{
 		char sResolvedPackagePath[2048];
 		const char *pPackagePath = A8E_LibraryWindow_ResolvePackagePath(
 			pWindow->acPath, sResolvedPackagePath, sizeof(sResolvedPackagePath));
-		for(lDrive = 0; lDrive < 8u; lDrive++)
+		if(A8E_LibraryWindow_ImportPackage(pWindow, pPackagePath))
 		{
-			AtariIoUnmountDisk(pWindow->pContext, lDrive);
-			pWindow->acMountedIds[lDrive][0] = '\0';
+			SDL_StopTextInput();
+			SDL_HideWindow(pWindow->pWindow);
 		}
-		if(!A8E_LibraryRepository_ImportPackageFile(
-			pWindow->pRepository, "library", pPackagePath,
-			sError, sizeof(sError)))
-		{
-			snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
-				"IMPORT FAILED %s", sError);
-			fprintf(stderr, "A8E Library import failed for '%s': %s\n",
-				pPackagePath, sError);
-			return;
-		}
-		A8E_LibraryWindow_RestoreWorkspace(pWindow);
-		snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
-			"IMPORTED %s", pPackagePath);
 	}
+}
+
+static void A8E_LibraryWindow_VerifySelected(
+	A8E_LibraryWindow_t *pWindow)
+{
+	const A8E_LibraryRepositoryRecord_t *pRecord;
+	const uint8_t *pBytes;
+	A8E_LibraryAtrIntegrityReport Report;
+	uint32_t lSize;
+	if(!pWindow) return;
+	pRecord = A8E_LibraryWindow_SelectedRecord(pWindow);
+	if(!pRecord || strcmp(pRecord->pType, "atr") != 0)
+	{
+		strncpy(pWindow->acStatus, "VERIFY ATR ONLY", sizeof(pWindow->acStatus) - 1u);
+		return;
+	}
+	pBytes = A8E_LibraryRepository_GetPayload(
+		pWindow->pRepository, pRecord->pPath, &lSize);
+	if(!pBytes || !A8E_LibraryImage_VerifyAtr(pBytes, lSize, &Report))
+	{
+		strncpy(pWindow->acStatus, "VERIFY FAILED", sizeof(pWindow->acStatus) - 1u);
+		return;
+	}
+	if(Report.valid)
+		snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+			"INTEGRITY OK %s", Report.warningCount ? "WITH WARNING" : "");
+	else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+		"INTEGRITY ERROR %s", Report.firstError);
 }
 
 static int A8E_LibraryWindow_Mount(
@@ -614,6 +1375,7 @@ int A8E_LibraryWindow_Init(
 	memset(pWindow, 0, sizeof(*pWindow));
 	pWindow->pContext = pContext;
 	pWindow->pRepository = pRepository;
+	strcpy(pWindow->acFolderId, "root");
 	pWindow->pWindow = SDL_CreateWindow(
 		"A8E Library", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 		A8E_LIBRARY_WINDOW_WIDTH, A8E_LIBRARY_WINDOW_HEIGHT,
@@ -663,12 +1425,45 @@ int A8E_LibraryWindow_HandleEvent(
 	int lRow;
 	int lDrive;
 	if(!pWindow || !pEvent || pEvent->type == SDL_QUIT ||
-		pEvent->window.windowID != pWindow->lWindowId) return 0;
+		(pEvent->type == SDL_DROPFILE
+			? pEvent->drop.windowID != pWindow->lWindowId
+			: pEvent->window.windowID != pWindow->lWindowId)) return 0;
 	if(pEvent->type == SDL_WINDOWEVENT && pEvent->window.event == SDL_WINDOWEVENT_CLOSE)
 	{
 		pWindow->bVisible = 0;
 		SDL_StopTextInput();
 		SDL_HideWindow(pWindow->pWindow);
+		return 1;
+	}
+	if(pEvent->type == SDL_DROPFILE)
+	{
+		char sPath[1024];
+		const char *pExtension;
+		uint32_t lImported = 0;
+		uint32_t lSkipped = 0;
+		if(!pEvent->drop.file)
+			return 1;
+		strncpy(sPath, pEvent->drop.file, sizeof(sPath) - 1u);
+		sPath[sizeof(sPath) - 1u] = '\0';
+		pExtension = A8E_LibraryWindow_FileExtension(sPath);
+		if(pWindow->bTrashView)
+			strncpy(pWindow->acStatus, "CLOSE TRASH BEFORE DROP",
+				sizeof(pWindow->acStatus) - 1u);
+		else if(A8E_LibraryWindow_EqualName(pExtension, "a8e") &&
+			!A8E_LibraryWindow_IsDirectory(sPath))
+		{
+			(void)A8E_LibraryWindow_ImportPackage(pWindow, sPath);
+		}
+		else
+		{
+			A8E_LibraryWindow_ImportDropPath(
+				pWindow, sPath, pWindow->acFolderId, 0u,
+				&lImported, &lSkipped);
+			snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+				"DROPPED %u FILE%s, %u SKIPPED", lImported,
+				lImported == 1u ? "" : "S", lSkipped);
+		}
+		SDL_free(pEvent->drop.file);
 		return 1;
 	}
 	if(pEvent->type == SDL_KEYDOWN && pEvent->key.keysym.sym == SDLK_ESCAPE)
@@ -740,7 +1535,15 @@ int A8E_LibraryWindow_HandleEvent(
 			A8E_LibraryWindow_CloseAtr(pWindow);
 			return 1;
 		}
-		if(pWindow->sSearchLength > 0) pWindow->acSearch[--pWindow->sSearchLength] = '\0';
+		if(pWindow->sSearchLength > 0)
+			pWindow->acSearch[--pWindow->sSearchLength] = '\0';
+		else
+		{
+			const A8E_LibraryRepositoryFolder_t *pFolder =
+				A8E_LibraryWindow_CurrentFolder(pWindow);
+			if(pFolder && pFolder->pParentId)
+				A8E_LibraryWindow_SetFolder(pWindow, pFolder->pParentId);
+		}
 		pWindow->lScroll = 0;
 		return 1;
 	}
@@ -752,6 +1555,74 @@ int A8E_LibraryWindow_HandleEvent(
 		pWindow->bIgnorePathActivation = 0;
 		pWindow->sPathLength = 0;
 		pWindow->acPath[0] = '\0';
+		return 1;
+	}
+	if(pEvent->type == SDL_KEYDOWN && !pWindow->bPathInput && !pWindow->bAtrView &&
+		(pEvent->key.keysym.sym == SDLK_UP || pEvent->key.keysym.sym == SDLK_DOWN ||
+		 pEvent->key.keysym.sym == SDLK_PAGEUP || pEvent->key.keysym.sym == SDLK_PAGEDOWN ||
+		 pEvent->key.keysym.sym == SDLK_HOME || pEvent->key.keysym.sym == SDLK_END))
+	{
+		uint32_t lCount = A8E_LibraryWindow_VisibleCount(pWindow);
+		uint32_t lPosition;
+		if(lCount == 0u)
+		{
+			pWindow->lScroll = 0;
+			pWindow->sSelectedRow = 0;
+			return 1;
+		}
+		lPosition = pWindow->lScroll + pWindow->sSelectedRow;
+		if(lPosition >= lCount) lPosition = lCount - 1u;
+		if(pEvent->key.keysym.sym == SDLK_UP)
+		{
+			if(lPosition > 0u) lPosition--;
+		}
+		else if(pEvent->key.keysym.sym == SDLK_DOWN)
+		{
+			if(lPosition + 1u < lCount) lPosition++;
+		}
+		else if(pEvent->key.keysym.sym == SDLK_PAGEUP)
+			lPosition = lPosition > A8E_LIBRARY_MAX_VISIBLE_ROWS
+				? lPosition - A8E_LIBRARY_MAX_VISIBLE_ROWS : 0u;
+		else if(pEvent->key.keysym.sym == SDLK_PAGEDOWN)
+		{
+			uint32_t lPageEnd = lPosition + A8E_LIBRARY_MAX_VISIBLE_ROWS;
+			lPosition = lPageEnd < lCount ? lPageEnd : lCount - 1u;
+		}
+		else if(pEvent->key.keysym.sym == SDLK_HOME)
+			lPosition = 0u;
+		else lPosition = lCount - 1u;
+		if(lPosition < pWindow->lScroll) pWindow->lScroll = lPosition;
+		else if(lPosition >= pWindow->lScroll + A8E_LIBRARY_MAX_VISIBLE_ROWS)
+			pWindow->lScroll = lPosition - A8E_LIBRARY_MAX_VISIBLE_ROWS + 1u;
+		pWindow->sSelectedRow = (uint16_t)(lPosition - pWindow->lScroll);
+		return 1;
+	}
+	if(pEvent->type == SDL_KEYDOWN && !pEvent->key.repeat &&
+		!pWindow->bPathInput && !pWindow->bAtrView &&
+		(pEvent->key.keysym.sym == SDLK_RETURN ||
+		 pEvent->key.keysym.sym == SDLK_KP_ENTER))
+	{
+		int bParentRow = 0;
+		const A8E_LibraryRepositoryFolder_t *pFolder =
+			A8E_LibraryWindow_VisibleFolder(
+			pWindow, pWindow->sSelectedRow + pWindow->lScroll, &bParentRow);
+		if(pFolder)
+			A8E_LibraryWindow_SetFolder(pWindow, pFolder->pId);
+		else if(bParentRow)
+		{
+			const A8E_LibraryRepositoryFolder_t *pCurrent =
+				A8E_LibraryWindow_CurrentFolder(pWindow);
+			if(pCurrent) A8E_LibraryWindow_SetFolder(pWindow, pCurrent->pParentId);
+		}
+		else if(pWindow->bTrashView)
+			strncpy(pWindow->acStatus, "USE R TO RESTORE P TO PURGE",
+				sizeof(pWindow->acStatus) - 1u);
+		else
+		{
+			const A8E_LibraryRepositoryRecord_t *pRecord =
+				A8E_LibraryWindow_SelectedRecord(pWindow);
+			if(pRecord) A8E_LibraryWindow_OpenAtr(pWindow, pRecord);
+		}
 		return 1;
 	}
 	if(pEvent->type == SDL_KEYDOWN && pEvent->key.repeat == 0 &&
@@ -776,19 +1647,170 @@ int A8E_LibraryWindow_HandleEvent(
 	}
 	if(pEvent->type == SDL_KEYDOWN && pEvent->key.repeat == 0 && !pWindow->bPathInput &&
 		(pEvent->key.keysym.sym == SDLK_i || pEvent->key.keysym.sym == SDLK_e ||
-			pEvent->key.keysym.sym == SDLK_n))
+			pEvent->key.keysym.sym == SDLK_w || pEvent->key.keysym.sym == SDLK_n ||
+			(pEvent->key.keysym.sym == SDLK_y && !pWindow->bTrashView)))
 	{
 		pWindow->bPathInput = 1;
 		pWindow->bIgnorePathActivation = 1;
 		pWindow->cPathOperation = pEvent->key.keysym.sym == SDLK_e ? 'E' :
+			pEvent->key.keysym.sym == SDLK_w ? 'W' :
 			pEvent->key.keysym.sym == SDLK_n ? 'N' : 'I';
+		if(pEvent->key.keysym.sym == SDLK_y) pWindow->cPathOperation = 'Y';
 		pWindow->sPathLength = 0;
 		pWindow->acPath[0] = '\0';
 		return 1;
 	}
+	if(pEvent->type == SDL_KEYDOWN && pEvent->key.repeat == 0 && !pWindow->bPathInput)
+	{
+		if(pEvent->key.keysym.sym == SDLK_b)
+		{
+			pWindow->bTrashView = (uint8_t)!pWindow->bTrashView;
+			pWindow->lScroll = 0;
+			pWindow->sSelectedRow = 0;
+			pWindow->acStatus[0] = '\0';
+			return 1;
+		}
+		if(pWindow->bTrashView && pEvent->key.keysym.sym == SDLK_r)
+		{
+			const A8E_LibraryRepositoryRecord_t *pTrash =
+				A8E_LibraryWindow_SelectedRecord(pWindow);
+			if(pTrash && A8E_LibraryRepository_RestoreTrashEntry(
+				pWindow->pRepository, "library", pTrash->pId,
+				pWindow->acFolderId, pWindow->acStatus, sizeof(pWindow->acStatus)))
+				strncpy(pWindow->acStatus, "TRASH ENTRY RESTORED",
+					sizeof(pWindow->acStatus) - 1u);
+			else if(!pTrash) strncpy(pWindow->acStatus, "NO TRASH ENTRY SELECTED",
+				sizeof(pWindow->acStatus) - 1u);
+			return 1;
+		}
+		if(pWindow->bTrashView && pEvent->key.keysym.sym == SDLK_p)
+		{
+			const A8E_LibraryRepositoryRecord_t *pTrash =
+				A8E_LibraryWindow_SelectedRecord(pWindow);
+			if(pTrash && A8E_LibraryRepository_PurgeTrashEntry(
+				pWindow->pRepository, "library", pTrash->pId,
+				pWindow->acStatus, sizeof(pWindow->acStatus)))
+				strncpy(pWindow->acStatus, "TRASH ENTRY PURGED",
+					sizeof(pWindow->acStatus) - 1u);
+			else if(!pTrash) strncpy(pWindow->acStatus, "NO TRASH ENTRY SELECTED",
+					sizeof(pWindow->acStatus) - 1u);
+			return 1;
+		}
+		if(pWindow->bTrashView && pEvent->key.keysym.sym == SDLK_a)
+		{
+			pWindow->bPathInput = 1;
+			pWindow->bIgnorePathActivation = 1;
+			pWindow->cPathOperation = 'A';
+			pWindow->sPathLength = 0;
+			pWindow->acPath[0] = '\0';
+			return 1;
+		}
+		if(pEvent->key.keysym.sym == SDLK_t)
+		{
+			pWindow->nTypeFilter = (uint8_t)((pWindow->nTypeFilter + 1u) % 3u);
+			pWindow->lScroll = 0;
+			strncpy(pWindow->acStatus, pWindow->nTypeFilter == 0u ? "TYPE ALL" :
+				pWindow->nTypeFilter == 1u ? "TYPE ATR" : "TYPE XEX",
+				sizeof(pWindow->acStatus) - 1u);
+			return 1;
+		}
+		if(pEvent->key.keysym.sym == SDLK_q)
+		{
+			pWindow->nMountFilter = (uint8_t)((pWindow->nMountFilter + 1u) % 3u);
+			pWindow->lScroll = 0;
+			strncpy(pWindow->acStatus, pWindow->nMountFilter == 0u ? "MOUNT ALL" :
+				pWindow->nMountFilter == 1u ? "MOUNTED ONLY" : "UNMOUNTED ONLY",
+				sizeof(pWindow->acStatus) - 1u);
+			return 1;
+		}
+		if(pEvent->key.keysym.sym == SDLK_s)
+		{
+			pWindow->nSortMode = (uint8_t)((pWindow->nSortMode + 1u) % 4u);
+			pWindow->lScroll = 0;
+			strncpy(pWindow->acStatus, pWindow->nSortMode == 0u ? "SORT NAME" :
+				pWindow->nSortMode == 1u ? "SORT TYPE" :
+				pWindow->nSortMode == 2u ? "SORT SIZE" : "SORT MODIFIED",
+				sizeof(pWindow->acStatus) - 1u);
+			return 1;
+		}
+		if(pEvent->key.keysym.sym == SDLK_h)
+		{
+			A8E_LibraryWindow_ShowStorage(pWindow);
+			return 1;
+		}
+		if(pEvent->key.keysym.sym == SDLK_v)
+		{
+			if(pWindow->bTrashView)
+			{
+				strncpy(pWindow->acStatus, "VERIFY ACTIVE ATR ONLY",
+					sizeof(pWindow->acStatus) - 1u);
+				return 1;
+			}
+			A8E_LibraryWindow_VerifySelected(pWindow);
+			return 1;
+		}
+		if(!pWindow->bTrashView &&
+			(pEvent->key.keysym.sym == SDLK_f || pEvent->key.keysym.sym == SDLK_r))
+		{
+			pWindow->bPathInput = 1;
+			pWindow->bIgnorePathActivation = 1;
+			pWindow->cPathOperation = pEvent->key.keysym.sym == SDLK_f ? 'F' : 'R';
+			pWindow->sPathLength = 0;
+			pWindow->acPath[0] = '\0';
+			return 1;
+		}
+		if(pEvent->key.keysym.sym == SDLK_m)
+		{
+			const A8E_LibraryRepositoryRecord_t *pRecord =
+				A8E_LibraryWindow_SelectedRecord(pWindow);
+			char sError[160];
+			char sName[257];
+			if(pRecord)
+			{
+				strncpy(sName, pRecord->pName, sizeof(sName) - 1u);
+				sName[sizeof(sName) - 1u] = '\0';
+			}
+			if(pRecord && A8E_LibraryRepository_MoveEntry(
+				pWindow->pRepository, "library", pRecord->pId,
+				pWindow->acFolderId, sError, sizeof(sError)))
+				snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+					"MOVED %s", sName);
+			else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+				"MOVE FAILED %s", pRecord ? sError : "NO FILE SELECTED");
+			return 1;
+		}
+	}
 	if(pEvent->type == SDL_KEYDOWN && pEvent->key.keysym.sym == SDLK_DELETE)
 	{
 		if(pWindow->bAtrView) return 1;
+		if(pWindow->bTrashView)
+		{
+			strncpy(pWindow->acStatus, "USE P TO PURGE TRASH",
+				sizeof(pWindow->acStatus) - 1u);
+			return 1;
+		}
+		{
+			int bParentRow = 0;
+			const A8E_LibraryRepositoryFolder_t *pFolder =
+				A8E_LibraryWindow_VisibleFolder(
+				pWindow, pWindow->sSelectedRow + pWindow->lScroll, &bParentRow);
+			if(pFolder)
+			{
+				char sError[160];
+				char sName[257];
+				strncpy(sName, pFolder->pName, sizeof(sName) - 1u);
+				sName[sizeof(sName) - 1u] = '\0';
+				if(A8E_LibraryRepository_DeleteFolder(
+					pWindow->pRepository, "library", pFolder->pId,
+					sError, sizeof(sError)))
+					snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+						"DELETED FOLDER %s", sName);
+				else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
+					"DELETE FAILED %s", sError);
+				return 1;
+			}
+			if(bParentRow) return 1;
+		}
 		const A8E_LibraryRepositoryRecord_t *pRecord = A8E_LibraryWindow_VisibleRecord(
 			pWindow, pWindow->sSelectedRow + pWindow->lScroll);
 		char sName[257];
@@ -806,7 +1828,7 @@ int A8E_LibraryWindow_HandleEvent(
 		if(A8E_LibraryRepository_RemoveEntry(
 			pWindow->pRepository, "library", pRecord->pId, NULL, 0))
 			snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
-				"DELETED %s", sName);
+				"MOVED TO TRASH %s", sName);
 		else snprintf(pWindow->acStatus, sizeof(pWindow->acStatus),
 			"DELETE FAILED %s", sName);
 		return 1;
@@ -857,9 +1879,30 @@ int A8E_LibraryWindow_HandleEvent(
 	{
 		const A8E_LibraryRepositoryRecord_t *pRecord;
 		int lVisibleRow = lRow + (int)pWindow->lScroll;
+		int bParentRow = 0;
+		const A8E_LibraryRepositoryFolder_t *pFolder;
 		if(lRow < 0 || lRow >= A8E_LIBRARY_MAX_VISIBLE_ROWS ||
 			lVisibleRow < 0 || (uint32_t)lVisibleRow >= A8E_LibraryWindow_VisibleCount(pWindow)) return 1;
+		pFolder = A8E_LibraryWindow_VisibleFolder(
+			pWindow, (uint32_t)lVisibleRow, &bParentRow);
+		if(pFolder)
+		{
+			A8E_LibraryWindow_SetFolder(pWindow, pFolder->pId);
+			return 1;
+		}
+		if(bParentRow)
+		{
+			const A8E_LibraryRepositoryFolder_t *pCurrent =
+				A8E_LibraryWindow_CurrentFolder(pWindow);
+			if(pCurrent) A8E_LibraryWindow_SetFolder(pWindow, pCurrent->pParentId);
+			return 1;
+		}
 		pRecord = A8E_LibraryWindow_VisibleRecord(pWindow, (uint32_t)lVisibleRow);
+		if(pWindow->bTrashView)
+		{
+			pWindow->sSelectedRow = (uint16_t)lRow;
+			return 1;
+		}
 		if(pRecord && A8E_LibraryWindow_OpenAtr(pWindow, pRecord))
 			pWindow->sSelectedRow = (uint16_t)lRow;
 		return 1;
@@ -870,9 +1913,11 @@ int A8E_LibraryWindow_HandleEvent(
 	{
 		int lVisibleRow = lRow + (int)pWindow->lScroll;
 		const A8E_LibraryRepositoryRecord_t *pRecord;
+		if((uint32_t)lVisibleRow < A8E_LibraryWindow_FolderRowCount(pWindow)) return 1;
 		if(lVisibleRow < 0 || (uint32_t)lVisibleRow >= A8E_LibraryWindow_VisibleCount(pWindow)) return 1;
 		pRecord = A8E_LibraryWindow_VisibleRecord(pWindow, (uint32_t)lVisibleRow);
 		if(!pRecord) return 1;
+		if(pWindow->bTrashView) return 1;
 		pWindow->sSelectedRow = (uint16_t)lRow;
 		if(pEvent->button.button == SDL_BUTTON_RIGHT &&
 			strcmp(pWindow->acMountedIds[lDrive], pRecord->pId) == 0)
@@ -1015,6 +2060,8 @@ static void A8E_LibraryWindow_DrawAtr(
 			A8E_LIBRARY_ATR_LIST_TOP, "NO FILES IN DIRECTORY", tMuted);
 		}
 	}
+	A8E_LibraryWindow_DrawRecordInfo(pWindow, pRecord,
+		A8E_LIBRARY_WINDOW_HEIGHT - 48);
 	if(pWindow->acStatus[0]) A8E_LibraryWindow_Text(
 		pWindow->pRenderer, 14, A8E_LIBRARY_WINDOW_HEIGHT - 24,
 		pWindow->acStatus, tMuted);
@@ -1043,12 +2090,24 @@ void A8E_LibraryWindow_Draw(A8E_LibraryWindow_t *pWindow)
 		SDL_RenderPresent(pWindow->pRenderer);
 		return;
 	}
-	A8E_LibraryWindow_Text(pWindow->pRenderer, 14, 12, "DISK LIBRARY", tWhite);
+	{
+		const A8E_LibraryRepositoryFolder_t *pCurrent =
+			A8E_LibraryWindow_CurrentFolder(pWindow);
+		char sTitle[320];
+		snprintf(sTitle, sizeof(sTitle), "DISK LIBRARY / %s",
+			pWindow->bTrashView ? "Trash" : (pCurrent ? pCurrent->pName : "Library"));
+		A8E_LibraryWindow_Text(pWindow->pRenderer, 14, 12, sTitle, tWhite);
+	}
 	if(pWindow->bPathInput)
 	{
 		A8E_LibraryWindow_Text(pWindow->pRenderer, 14, 34,
 			pWindow->cPathOperation == 'E' ? "EXPORT PATH" :
-			pWindow->cPathOperation == 'N' ? "NEW ATR NAME" : "IMPORT PATH", tMuted);
+			pWindow->cPathOperation == 'W' ? "WORKSPACE EXPORT PATH" :
+			pWindow->cPathOperation == 'N' ? "NEW ATR NAME" :
+			pWindow->cPathOperation == 'Y' ? "REVISION ID" :
+			pWindow->cPathOperation == 'F' ? "NEW FOLDER NAME" :
+			pWindow->cPathOperation == 'R' ? "RENAME" :
+			pWindow->cPathOperation == 'A' ? "TRASH AGE DAYS" : "IMPORT PATH", tMuted);
 		A8E_LibraryWindow_Text(pWindow->pRenderer, 130, 34,
 			pWindow->sPathLength ? pWindow->acPath : "TYPE PATH ENTER ESC", tWhite);
 	}
@@ -1059,7 +2118,8 @@ void A8E_LibraryWindow_Draw(A8E_LibraryWindow_t *pWindow)
 			pWindow->sSearchLength ? pWindow->acSearch : "TYPE TO FILTER", tWhite);
 	}
 	A8E_LibraryWindow_Text(pWindow->pRenderer, 500, 34,
-		"I/E PACKAGE N ATR", tMuted);
+		pWindow->bTrashView ? "B LIBRARY R RESTORE P PURGE A AGE H SPACE" :
+		"B TRASH F NEW FOLDER R RENAME Y REVISION T TYPE Q MOUNT S SORT H SPACE V VERIFY I/E/W N", tMuted);
 	A8E_LibraryWindow_Text(pWindow->pRenderer, A8E_LIBRARY_NAME_X, 54, "NAME", tMuted);
 	A8E_LibraryWindow_Text(pWindow->pRenderer, A8E_LIBRARY_TYPE_X, 54, "TYPE", tMuted);
 	for(sRow = 0; sRow < 8u; sRow++)
@@ -1071,18 +2131,39 @@ void A8E_LibraryWindow_Draw(A8E_LibraryWindow_t *pWindow)
 	}
 	for(sRow = 0; sRow < A8E_LIBRARY_MAX_VISIBLE_ROWS; sRow++)
 	{
-		const A8E_LibraryRepositoryRecord_t *pRecord = A8E_LibraryWindow_VisibleRecord(
-			pWindow, sRow + pWindow->lScroll);
+		uint32_t lVisibleIndex = sRow + pWindow->lScroll;
+		int bParentRow = 0;
+		const A8E_LibraryRepositoryFolder_t *pFolder =
+			A8E_LibraryWindow_VisibleFolder(pWindow, lVisibleIndex, &bParentRow);
+		const A8E_LibraryRepositoryRecord_t *pRecord = pFolder || bParentRow
+			? NULL : A8E_LibraryWindow_VisibleRecord(pWindow, lVisibleIndex);
 		char acDisplayName[64];
 		int lY;
 		uint32_t lDrive;
-		if(!pRecord) break;
+		if(!pRecord && !pFolder && !bParentRow) break;
 		lY = A8E_LIBRARY_LIST_TOP + (int)sRow * A8E_LIBRARY_ROW_HEIGHT;
-		if(sRow & 1u)
+		if(sRow == pWindow->sSelectedRow)
+		{
+			SDL_Rect tRow = { 8, lY - 2, A8E_LIBRARY_WINDOW_WIDTH - 16, A8E_LIBRARY_ROW_HEIGHT };
+			SDL_SetRenderDrawColor(pWindow->pRenderer, 30, 45, 58, 255);
+			SDL_RenderFillRect(pWindow->pRenderer, &tRow);
+		}
+		else if(sRow & 1u)
 		{
 			SDL_Rect tRow = { 8, lY - 2, A8E_LIBRARY_WINDOW_WIDTH - 16, A8E_LIBRARY_ROW_HEIGHT };
 			SDL_SetRenderDrawColor(pWindow->pRenderer, 30, 35, 42, 255);
 			SDL_RenderFillRect(pWindow->pRenderer, &tRow);
+		}
+		if(pFolder || bParentRow)
+		{
+			const char *pName = bParentRow ? ".." : pFolder->pName;
+			A8E_LibraryWindow_CopyColumnText(acDisplayName, sizeof(acDisplayName),
+				pName, A8E_LIBRARY_NAME_MAX_CHARS - 2u);
+			A8E_LibraryWindow_Text(pWindow->pRenderer, A8E_LIBRARY_NAME_X, lY,
+				bParentRow ? ".." : "DIR", tMuted);
+			A8E_LibraryWindow_Text(pWindow->pRenderer, A8E_LIBRARY_NAME_X + 36,
+				lY, acDisplayName, tWhite);
+			continue;
 		}
 		A8E_LibraryWindow_CopyColumnText(acDisplayName, sizeof(acDisplayName),
 			pRecord->pName, A8E_LIBRARY_NAME_MAX_CHARS);
@@ -1114,9 +2195,12 @@ void A8E_LibraryWindow_Draw(A8E_LibraryWindow_t *pWindow)
 			}
 		}
 	}
-	if(pWindow->pRepository->sRecordCount == 0)
+	if(A8E_LibraryWindow_VisibleCount(pWindow) == 0)
 		A8E_LibraryWindow_Text(pWindow->pRenderer, A8E_LIBRARY_NAME_X,
-			A8E_LIBRARY_LIST_TOP, "EMPTY", tMuted);
+			A8E_LIBRARY_LIST_TOP, pWindow->bTrashView ? "TRASH EMPTY" : "EMPTY", tMuted);
+	A8E_LibraryWindow_DrawRecordInfo(
+		pWindow, A8E_LibraryWindow_SelectedRecord(pWindow),
+		A8E_LIBRARY_WINDOW_HEIGHT - 48);
 	if(pWindow->acStatus[0]) A8E_LibraryWindow_Text(
 		pWindow->pRenderer, 14, A8E_LIBRARY_WINDOW_HEIGHT - 24, pWindow->acStatus, tMuted);
 	SDL_RenderPresent(pWindow->pRenderer);

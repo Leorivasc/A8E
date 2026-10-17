@@ -156,6 +156,28 @@ static void SetError(char *pError, uint32_t lErrorSize, const char *pMessage)
 	snprintf(pError, lErrorSize, "%s", pMessage ? pMessage : "library package error");
 }
 
+void A8E_LibraryPackage_DefaultLimits(
+	A8E_LibraryPackageLimits_t *pLimits)
+{
+	if(!pLimits) return;
+	pLimits->lMaxArchiveSize = A8E_LIBRARY_PACKAGE_DEFAULT_MAX_ARCHIVE_SIZE;
+	pLimits->lMaxManifestSize = A8E_LIBRARY_PACKAGE_DEFAULT_MAX_MANIFEST_SIZE;
+	pLimits->lMaxPayloadSize = A8E_LIBRARY_PACKAGE_DEFAULT_MAX_PAYLOAD_SIZE;
+	pLimits->lMaxPayloadTotal = A8E_LIBRARY_PACKAGE_DEFAULT_MAX_PAYLOAD_TOTAL;
+}
+
+static void EffectiveLimits(
+	const A8E_LibraryPackageLimits_t *pRequested,
+	A8E_LibraryPackageLimits_t *pEffective)
+{
+	A8E_LibraryPackage_DefaultLimits(pEffective);
+	if(!pRequested) return;
+	if(pRequested->lMaxArchiveSize) pEffective->lMaxArchiveSize = pRequested->lMaxArchiveSize;
+	if(pRequested->lMaxManifestSize) pEffective->lMaxManifestSize = pRequested->lMaxManifestSize;
+	if(pRequested->lMaxPayloadSize) pEffective->lMaxPayloadSize = pRequested->lMaxPayloadSize;
+	if(pRequested->lMaxPayloadTotal) pEffective->lMaxPayloadTotal = pRequested->lMaxPayloadTotal;
+}
+
 static const char *SkipSpace(const char *p, const char *pEnd)
 {
 	while(p < pEnd && isspace((unsigned char)*p)) p++;
@@ -337,9 +359,10 @@ static uint32_t CountUniquePathReferences(const uint8_t *pJson, uint32_t lJsonSi
 	return lCount;
 }
 
-int A8E_LibraryPackage_ValidateManifest(
+int A8E_LibraryPackage_ValidateManifestWithSchema(
 	const uint8_t *pJson,
 	uint32_t lJsonSize,
+	uint32_t *pSchemaVersion,
 	uint32_t *pLibraryVersion,
 	char *pError,
 	uint32_t lErrorSize)
@@ -348,6 +371,7 @@ int A8E_LibraryPackage_ValidateManifest(
 	const char *pEnd = pText ? pText + lJsonSize : NULL;
 	const char *pValue;
 	uint32_t lVersion = 0;
+	uint32_t lSchemaVersion = 0;
 
 	if(!pText || lJsonSize == 0)
 	{
@@ -361,7 +385,7 @@ int A8E_LibraryPackage_ValidateManifest(
 		return 0;
 	}
 	pValue = FindKeyValue(pText, lJsonSize, "schemaVersion");
-	if(!pValue || !ReadIntegerValue(pValue, pEnd, &lVersion) || lVersion != 1)
+	if(!pValue || !ReadIntegerValue(pValue, pEnd, &lSchemaVersion) || lSchemaVersion < 1u)
 	{
 		SetError(pError, lErrorSize, "unsupported schemaVersion");
 		return 0;
@@ -385,23 +409,52 @@ int A8E_LibraryPackage_ValidateManifest(
 		SetError(pError, lErrorSize, "library must be an array");
 		return 0;
 	}
-	if(pLibraryVersion) *pLibraryVersion = lVersion;
+	if(pSchemaVersion) *pSchemaVersion = lSchemaVersion;
+	if(pLibraryVersion)
+	{
+		pValue = FindKeyValue(pText, lJsonSize, "libraryVersion");
+		if(!pValue || !ReadIntegerValue(pValue, pEnd, pLibraryVersion))
+		{
+			SetError(pError, lErrorSize, "invalid libraryVersion");
+			return 0;
+		}
+	}
 	return 1;
 }
 
-int A8E_LibraryPackage_Write(
+int A8E_LibraryPackage_ValidateManifest(
+	const uint8_t *pJson,
+	uint32_t lJsonSize,
+	uint32_t *pLibraryVersion,
+	char *pError,
+	uint32_t lErrorSize)
+{
+	return A8E_LibraryPackage_ValidateManifestWithSchema(
+		pJson, lJsonSize, NULL, pLibraryVersion, pError, lErrorSize);
+}
+
+int A8E_LibraryPackage_WriteWithLimits(
 	const uint8_t *pManifest,
 	uint32_t lManifestSize,
 	const A8E_LibraryArchiveInput_t *pPayloads,
 	uint16_t sPayloadCount,
+	const A8E_LibraryPackageLimits_t *pLimits,
 	uint8_t **ppArchive,
 	uint32_t *pArchiveSize,
 	char *pError,
 	uint32_t lErrorSize)
 {
+	A8E_LibraryPackageLimits_t tLimits;
 	A8E_LibraryArchiveInput_t *pEntries;
 	uint16_t i;
+	uint64_t llPayloadTotal = 0;
 	int lResult;
+	EffectiveLimits(pLimits, &tLimits);
+	if(lManifestSize > tLimits.lMaxManifestSize)
+	{
+		SetError(pError, lErrorSize, "manifest exceeds configured size limit");
+		return 0;
+	}
 	if(!A8E_LibraryPackage_ValidateManifest(
 		pManifest, lManifestSize, NULL, pError, lErrorSize)) return 0;
 	if(sPayloadCount > 0 && !pPayloads)
@@ -421,6 +474,14 @@ int A8E_LibraryPackage_Write(
 	pEntries[0].lSize = lManifestSize;
 	for(i = 0; i < sPayloadCount; i++)
 	{
+		if(pPayloads[i].lSize > tLimits.lMaxPayloadSize ||
+			llPayloadTotal + pPayloads[i].lSize > tLimits.lMaxPayloadTotal)
+		{
+			free(pEntries);
+			SetError(pError, lErrorSize, "payload exceeds configured size limit");
+			return 0;
+		}
+		llPayloadTotal += pPayloads[i].lSize;
 		if(!pPayloads[i].pName || strncmp(pPayloads[i].pName, "blobs/", 6) != 0 ||
 			strcmp(pPayloads[i].pName, "library.json") == 0)
 		{
@@ -440,12 +501,36 @@ int A8E_LibraryPackage_Write(
 	lResult = A8E_LibraryArchive_Write(
 		pEntries, (uint16_t)(sPayloadCount + 1), ppArchive, pArchiveSize, pError, lErrorSize);
 	free(pEntries);
+	if(lResult && *pArchiveSize > tLimits.lMaxArchiveSize)
+	{
+		free(*ppArchive);
+		*ppArchive = NULL;
+		*pArchiveSize = 0;
+		SetError(pError, lErrorSize, "archive exceeds configured size limit");
+		return 0;
+	}
 	return lResult;
 }
 
-int A8E_LibraryPackage_Read(
+int A8E_LibraryPackage_Write(
+	const uint8_t *pManifest,
+	uint32_t lManifestSize,
+	const A8E_LibraryArchiveInput_t *pPayloads,
+	uint16_t sPayloadCount,
+	uint8_t **ppArchive,
+	uint32_t *pArchiveSize,
+	char *pError,
+	uint32_t lErrorSize)
+{
+	return A8E_LibraryPackage_WriteWithLimits(
+		pManifest, lManifestSize, pPayloads, sPayloadCount, NULL,
+		ppArchive, pArchiveSize, pError, lErrorSize);
+}
+
+int A8E_LibraryPackage_ReadWithLimits(
 	const uint8_t *pArchive,
 	uint32_t lArchiveSize,
+	const A8E_LibraryPackageLimits_t *pLimits,
 	A8E_LibraryArchiveEntry_t **ppEntries,
 	uint16_t *pEntryCount,
 	uint32_t *pLibraryVersion,
@@ -457,13 +542,27 @@ int A8E_LibraryPackage_Read(
 	uint16_t i;
 	uint32_t lPathCount = 0;
 	uint32_t lBlobCount = 0;
+	uint64_t llPayloadTotal = 0;
+	A8E_LibraryPackageLimits_t tLimits;
 	int lResult;
+	EffectiveLimits(pLimits, &tLimits);
+	if(lArchiveSize > tLimits.lMaxArchiveSize)
+	{
+		SetError(pError, lErrorSize, "archive exceeds configured size limit");
+		return 0;
+	}
 	if(!A8E_LibraryArchive_Read(
 		pArchive, lArchiveSize, &pEntries, &sCount, pError, lErrorSize)) return 0;
 	for(i = 0; i < sCount; i++)
 	{
 		if(strcmp(pEntries[i].pName, "library.json") == 0)
 		{
+			if(pEntries[i].lSize > tLimits.lMaxManifestSize)
+			{
+				A8E_LibraryArchive_FreeEntries(pEntries, sCount);
+				SetError(pError, lErrorSize, "manifest exceeds configured size limit");
+				return 0;
+			}
 			lResult = A8E_LibraryPackage_ValidateManifest(
 				pEntries[i].pBytes, pEntries[i].lSize,
 				pLibraryVersion, pError, lErrorSize);
@@ -478,6 +577,14 @@ int A8E_LibraryPackage_Read(
 				for(j = 0; j < sCount; j++)
 				{
 					if(strncmp(pEntries[j].pName, "blobs/", 6) != 0) continue;
+					if(pEntries[j].lSize > tLimits.lMaxPayloadSize ||
+						llPayloadTotal + pEntries[j].lSize > tLimits.lMaxPayloadTotal)
+					{
+						A8E_LibraryArchive_FreeEntries(pEntries, sCount);
+						SetError(pError, lErrorSize, "payload exceeds configured size limit");
+						return 0;
+					}
+					llPayloadTotal += pEntries[j].lSize;
 					lBlobCount++;
 					if(!VerifyPayloadManifest(
 						pEntries[i].pBytes, pEntries[i].lSize,
@@ -503,4 +610,18 @@ int A8E_LibraryPackage_Read(
 	A8E_LibraryArchive_FreeEntries(pEntries, sCount);
 	SetError(pError, lErrorSize, "library.json is missing");
 	return 0;
+}
+
+int A8E_LibraryPackage_Read(
+	const uint8_t *pArchive,
+	uint32_t lArchiveSize,
+	A8E_LibraryArchiveEntry_t **ppEntries,
+	uint16_t *pEntryCount,
+	uint32_t *pLibraryVersion,
+	char *pError,
+	uint32_t lErrorSize)
+{
+	return A8E_LibraryPackage_ReadWithLimits(
+		pArchive, lArchiveSize, NULL, ppEntries, pEntryCount,
+		pLibraryVersion, pError, lErrorSize);
 }

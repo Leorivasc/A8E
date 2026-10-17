@@ -33,6 +33,17 @@ typedef struct A8E_LibraryAtrDirectoryEntry {
 	char name[12];
 } A8E_LibraryAtrDirectoryEntry;
 
+typedef struct A8E_LibraryAtrIntegrityReport {
+	uint32_t valid;
+	uint32_t filesystemKnown;
+	uint32_t errorCount;
+	uint32_t warningCount;
+	uint32_t checkedFiles;
+	uint32_t checkedSectors;
+	char firstError[128];
+	char firstWarning[128];
+} A8E_LibraryAtrIntegrityReport;
+
 /* Creates a standard writable 90 KiB ATR: 720 sectors of 128 bytes. */
 int A8E_LibraryImage_CreateBlankAtr(
     uint8_t **ppBytes,
@@ -43,6 +54,12 @@ int A8E_LibraryImage_InspectAtr(
 	const uint8_t *pBytes,
 	uint32_t lSize,
 	A8E_LibraryAtrInfo *pInfo);
+
+/* Verifies ATR geometry and, when present, DOS 2.x/MyDOS allocation chains. */
+int A8E_LibraryImage_VerifyAtr(
+	const uint8_t *pBytes,
+	uint32_t lSize,
+	A8E_LibraryAtrIntegrityReport *pReport);
 
 /* Reads one active directory entry. Returns zero for unused or invalid slots. */
 int A8E_LibraryImage_ReadDirectoryEntry(

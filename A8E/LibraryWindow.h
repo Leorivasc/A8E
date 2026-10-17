@@ -28,8 +28,13 @@ typedef struct
 	uint8_t bIgnorePathActivation;
 	uint8_t bAtrView;
 	uint8_t bAtrPreview;
+	uint8_t bTrashView;
+	uint8_t nTypeFilter;
+	uint8_t nMountFilter;
+	uint8_t nSortMode;
 	char cPathOperation;
 	char acMountedIds[8][257];
+	char acFolderId[257];
 	char acAtrEntryId[257];
 	char acSearch[257];
 	char acPath[1024];

@@ -12,6 +12,7 @@ int main(void)
 	uint8_t *pBytes = NULL;
 	uint32_t lSize = 0;
 	A8E_LibraryAtrInfo Info;
+	A8E_LibraryAtrIntegrityReport Report;
 	A8E_LibraryAtrDirectoryEntry Entry;
 	uint8_t *pFile = NULL;
 	uint32_t lFileSize = 0;
@@ -45,11 +46,20 @@ int main(void)
 	REQUIRE(A8E_LibraryImage_InspectAtr(pBytes, lSize, &Info));
 	REQUIRE(Info.filesystem == A8E_LIBRARY_IMAGE_FILESYSTEM_DOS2_MYDOS);
 	REQUIRE(Info.fileCount == 1u);
+	REQUIRE(A8E_LibraryImage_VerifyAtr(pBytes, lSize, &Report));
+	REQUIRE(Report.valid && Report.filesystemKnown);
+	REQUIRE(Report.checkedFiles == 1u && Report.checkedSectors == 1u);
 	REQUIRE(A8E_LibraryImage_ReadDirectoryEntry(pBytes, lSize, &Info, 0u, &Entry));
 	REQUIRE(strcmp(Entry.name, "HELLO   TXT") == 0);
 	REQUIRE(A8E_LibraryImage_ExtractFile(pBytes, lSize, &Info, 0u, &pFile, &lFileSize));
 	REQUIRE(lFileSize == 6u && memcmp(pFile, "Hello\n", 6u) == 0);
 	free(pFile);
+	pBytes[16u + (4u - 1u) * 128u + 126u] = 1u;
+	REQUIRE(A8E_LibraryImage_VerifyAtr(pBytes, lSize, &Report));
+	REQUIRE(!Report.valid && Report.errorCount > 0u);
+	pBytes[16u + (4u - 1u) * 128u + 126u] = 0u;
+	REQUIRE(A8E_LibraryImage_VerifyAtr(pBytes, lSize, &Report));
+	REQUIRE(Report.valid);
 	REQUIRE(A8E_LibraryImage_DecodeAtascii((const uint8_t *)"A\233B", 3u, &pText, &lTextSize));
 	REQUIRE(lTextSize == 3u && strcmp(pText, "A\nB") == 0);
 	free(pText);

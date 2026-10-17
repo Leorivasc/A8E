@@ -27,8 +27,10 @@ int main(void)
 	uint8_t *pCorrupted = NULL;
 	uint32_t lArchiveSize = 0;
 	uint32_t lLibraryVersion = 0;
+	uint32_t lSchemaVersion = 0;
 	uint16_t sEntryCount = 0;
 	char sError[128];
+	A8E_LibraryPackageLimits_t tLimits;
 	A8E_LibraryStore_t tStore;
 	A8E_LibraryStore_Init(&tStore);
 
@@ -54,6 +56,28 @@ int main(void)
 	REQUIRE(A8E_LibraryStore_ImportPackage(
 		&tStore, pArchive, lArchiveSize, sError, sizeof(sError)));
 	REQUIRE(tStore.sEntryCount == 2 && tStore.lLibraryVersion == 7);
+	A8E_LibraryArchive_FreeEntries(pEntries, sEntryCount);
+	pEntries = NULL;
+	sEntryCount = 0;
+	A8E_LibraryPackage_DefaultLimits(&tLimits);
+	tLimits.lMaxPayloadSize = sizeof(aAtr) - 1u;
+	REQUIRE(!A8E_LibraryPackage_ReadWithLimits(
+		pArchive, lArchiveSize, &tLimits, &pEntries, &sEntryCount,
+		&lLibraryVersion, sError, sizeof(sError)));
+	REQUIRE(strstr(sError, "payload") != NULL);
+	tLimits.lMaxPayloadSize = sizeof(aAtr);
+	tLimits.lMaxArchiveSize = lArchiveSize - 1u;
+	REQUIRE(!A8E_LibraryPackage_ReadWithLimits(
+		pArchive, lArchiveSize, &tLimits, &pEntries, &sEntryCount,
+		&lLibraryVersion, sError, sizeof(sError)));
+	REQUIRE(strstr(sError, "archive") != NULL);
+	tLimits.lMaxArchiveSize = 0;
+	tLimits.lMaxPayloadSize = sizeof(aAtr) - 1u;
+	REQUIRE(!A8E_LibraryPackage_WriteWithLimits(
+		(const uint8_t *)aJson, (uint32_t)(sizeof(aJson) - 1),
+		aPayloads, 1, &tLimits, &pCorrupted, &lArchiveSize,
+		sError, sizeof(sError)));
+	REQUIRE(strstr(sError, "payload") != NULL);
 
 	A8E_LibraryArchive_FreeEntries(pEntries, sEntryCount);
 
@@ -88,9 +112,10 @@ int main(void)
 		static const char aBadJson[] =
 			"{\"format\":\"a8e-library-export\",\"schemaVersion\":2,"
 			"\"libraryVersion\":7,\"createdAt\":\"2026-10-08T15:00:00Z\",\"library\":[]}";
-		REQUIRE(!A8E_LibraryPackage_ValidateManifest(
+		REQUIRE(A8E_LibraryPackage_ValidateManifestWithSchema(
 			(const uint8_t *)aBadJson, (uint32_t)(sizeof(aBadJson) - 1),
-			NULL, sError, sizeof(sError)));
+			&lSchemaVersion, &lLibraryVersion, sError, sizeof(sError)));
+		REQUIRE(lSchemaVersion == 2 && lLibraryVersion == 7);
 	}
 	printf("library_package_probe passed\n");
 	return 0;

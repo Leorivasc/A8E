@@ -116,11 +116,14 @@ static void A8E_PrintHelp(void)
 		"  Click D1: through D8:   Mount an entry, or unmount it when already selected.\n"
 		"  Right-click a mounted  Toggle its write-protection state.\n"
 		"  Click an ATR name       Open its read-only directory and geometry view.\n"
-		"  Enter                   Preview the selected ATR file as text or hexadecimal.\n"
+		"  Up/Down/Page/Home/End  Navigate the list; Enter opens folders or ATR entries.\n"
+		"  Enter (ATR view)        Preview the selected ATR file as text or hexadecimal.\n"
 		"  D                       Download the selected ATR file to a typed path.\n"
 		"  I                       Import an .a8e library package.\n"
 		"  E                       Export the current library as an .a8e package.\n"
+		"  Y                       Promote a retained revision ID to active content.\n"
 		"  N                       Create a blank writable ATR.\n"
+		"  B/R/P                   Open trash; restore or purge the selected entry.\n"
 		"  Delete                  Delete the selected unmounted library entry.\n"
 		"  Esc                     Return from ATR view or close the Library window.\n"
 		"\n"
@@ -360,6 +363,8 @@ int main(int argc, char *argv[])
 	llCycles = CYCLES_PER_LINE *
 		(eVideoStandard == ATARI_VIDEO_NTSC ? LINES_PER_SCREEN_NTSC : LINES_PER_SCREEN_PAL);
 	{
+		Uint32 lLastLibraryAutosave = SDL_GetTicks();
+	{
 		u32 lCpuHz = eVideoStandard == ATARI_VIDEO_NTSC
 			? ATARI_CPU_HZ_NTSC
 			: ATARI_CPU_HZ_PAL;
@@ -394,6 +399,11 @@ int main(int argc, char *argv[])
 				(eVideoStandard == ATARI_VIDEO_NTSC ? LINES_PER_SCREEN_NTSC : LINES_PER_SCREEN_PAL);
 		}
 		AtariIoDrawScreen(pAtariContext, pScreenSurface, lAtariScreenWidth, lAtariScreenHeight);
+		if(SDL_GetTicks() - lLastLibraryAutosave >= 5000u)
+		{
+			A8E_LibraryWindow_SaveDirty(&tLibraryWindow);
+			lLastLibraryAutosave = SDL_GetTicks();
+		}
 
 		SDL_UpdateTexture(pScreenTexture, NULL, pScreenSurface->pixels, pScreenSurface->pitch);
 		SDL_RenderClear(pRenderer);
@@ -494,6 +504,7 @@ int main(int argc, char *argv[])
 		}
 
 		lLastTicks = SDL_GetTicks();
+	}
 	}
 
 Exit:
