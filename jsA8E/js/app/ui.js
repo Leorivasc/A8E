@@ -1885,7 +1885,7 @@
       joystickState.fire = next;
       if (fireButton) fireButton.classList.toggle("active", next);
       if (!app || !app.onKeyDown || !app.onKeyUp) return;
-      const ev = makeJoystickEvent("Alt", "AltLeft", 308, "joy:fire");
+      const ev = makeJoystickEvent("Control", "ControlLeft", 306, "joy:fire");
       if (next) app.onKeyDown(ev);
       else app.onKeyUp(ev);
     }

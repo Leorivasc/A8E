@@ -755,6 +755,10 @@
       return debugRuntime.setBreakpoints(addresses);
     }
 
+    function setDebugMode(enabled) {
+      return debugRuntime.setDebugMode(enabled);
+    }
+
     function stepInstruction() {
       return debugRuntime.stepInstruction();
     }
@@ -1505,6 +1509,7 @@
       setKeyboardMappingMode: setKeyboardMappingMode,
       getKeyboardMappingMode: function () { return keyboardMappingMode; },
       getVideoStandard: getVideoStandard,
+      setDebugMode: setDebugMode,
       setBreakpoints: setBreakpoints,
       stepInstruction: stepInstruction,
       stepInstructionAsync: stepInstructionAsync,

@@ -1279,6 +1279,7 @@
         p: (raw.p | 0) & 0xff,
         cycleCounter: raw.cycleCounter >>> 0,
         instructionCounter: raw.instructionCounter >>> 0,
+        debugMode: !!raw.debugMode,
         breakpointHit:
           typeof raw.breakpointHit === "number"
             ? (raw.breakpointHit | 0) & 0xffff
@@ -1680,6 +1681,10 @@
           addresses: Array.isArray(addresses) ? addresses.slice(0) : [],
         });
       },
+      setDebugMode: function (enabled) {
+        sendCommand("setDebugMode", { enabled: !!enabled });
+        return !!enabled;
+      },
       stepInstruction: function () {
         sendCommand("stepInstruction");
         return true;
@@ -1971,6 +1976,8 @@
       };}
     if (app && typeof app.setBreakpoints !== "function")
       {app.setBreakpoints = function () {};}
+    if (app && typeof app.setDebugMode !== "function")
+      {app.setDebugMode = function () { return false; };}
     if (app && typeof app.stepInstruction !== "function")
       {app.stepInstruction = function () { return false; };}
     if (app && typeof app.stepOver !== "function")
