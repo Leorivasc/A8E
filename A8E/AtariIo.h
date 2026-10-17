@@ -350,6 +350,11 @@ u8 AtariIoIsDiskDirty(
 	_6502_Context_t *pContext,
 	u32 lDrive);
 
+/* Marks a successfully persisted mounted image clean without unmounting it. */
+void AtariIoClearDiskDirty(
+	_6502_Context_t *pContext,
+	u32 lDrive);
+
 void AtariIoSetDiskWritable(
 	_6502_Context_t *pContext,
 	u32 lDrive,

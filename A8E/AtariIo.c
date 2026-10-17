@@ -6345,6 +6345,16 @@ u8 AtariIoIsDiskDirty(
 	return pIoData->abDiskDirty[lDrive];
 }
 
+void AtariIoClearDiskDirty(
+	_6502_Context_t *pContext,
+	u32 lDrive)
+{
+	IoData_t *pIoData;
+	if(!pContext || lDrive >= 8u) return;
+	pIoData = (IoData_t *)pContext->pIoData;
+	pIoData->abDiskDirty[lDrive] = 0u;
+}
+
 void AtariIoSetDiskWritable(
 	_6502_Context_t *pContext,
 	u32 lDrive,

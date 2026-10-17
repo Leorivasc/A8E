@@ -212,6 +212,9 @@ static int RunStatusLatchContract(_6502_Context_t *pContext)
 		REQUIRE(ReceiveSioByte(pContext) == 'A', "PUT missing data ACK");
 		REQUIRE(ReceiveSioByte(pContext) == 'C', "PUT missing Complete");
 	}
+	REQUIRE(AtariIoIsDiskDirty(pContext, 0u), "PUT did not mark disk dirty");
+	AtariIoClearDiskDirty(pContext, 0u);
+	REQUIRE(!AtariIoIsDiskDirty(pContext, 0u), "persisted disk stayed dirty");
 	SendSioFrame(pContext, aStatusFrame);
 	REQUIRE(ReceiveSioByte(pContext) == 'A', "post-write STATUS missing ACK");
 	REQUIRE(ReceiveSioByte(pContext) == 'C', "post-write STATUS missing Complete");
