@@ -1,5 +1,11 @@
 # NOTES.md
 
+- 2026-10-17: remapped the keyboard joystick triggers from Alt to Control in
+  native A8E, jsA8E, and the legacy native input path. Left Control now drives
+  TRIG0 and Right Control drives TRIG2; the browser UI, automation joystick
+  events, README mappings, and the joystick regression test use the same
+  mapping. Alt no longer activates a joystick trigger.
+
 - 2026-10-17: fixed the browser recoverable-Trash view when jsA8E uses the
   Worker backend. The Worker snapshot now transports trash records and the
   proxy exposes `listTrash`, restore, and purge operations, so the UI can

@@ -226,12 +226,8 @@
           return true;
         }
 
-        if (sym === 308) {
-          setTriggerPressed(0, true);
-          return true;
-        }
         if (sym === 306) {
-          // C/SDL parity: Ctrl is a keyboard modifier, not a joystick trigger.
+          setTriggerPressed(0, true);
           return true;
         }
         if (sym === 307) {
@@ -304,12 +300,8 @@
           }
           return true;
         }
-        if (sym === 308) {
-          setTriggerPressed(0, false);
-          return true;
-        }
         if (sym === 306) {
-          // C/SDL parity: Ctrl is a keyboard modifier, not a joystick trigger.
+          setTriggerPressed(0, false);
           return true;
         }
         if (sym === 307) {

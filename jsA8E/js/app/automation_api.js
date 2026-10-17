@@ -10,7 +10,7 @@
   const SDLK_OPTION = 283;
   const SDLK_SELECT = 284;
   const SDLK_START = 285;
-  const SDLK_TRIGGER_0 = 308;
+  const SDLK_TRIGGER_0 = 306;
   const hwApi =
     window.A8EHw && typeof window.A8EHw.createApi === "function"
       ? window.A8EHw.createApi()
@@ -1835,7 +1835,7 @@
         ["down", !!next.down, { key: "ArrowDown", code: "ArrowDown", sdlSym: SDLK_DOWN }],
         ["left", !!next.left, { key: "ArrowLeft", code: "ArrowLeft", sdlSym: SDLK_LEFT }],
         ["right", !!next.right, { key: "ArrowRight", code: "ArrowRight", sdlSym: SDLK_RIGHT }],
-        ["trigger", !!next.trigger, { key: "Alt", code: "AltLeft", sdlSym: SDLK_TRIGGER_0 }],
+        ["trigger", !!next.trigger, { key: "Control", code: "ControlLeft", sdlSym: SDLK_TRIGGER_0 }],
       ];
       for (let i = 0; i < operations.length; i++) {
         const entry = operations[i];
