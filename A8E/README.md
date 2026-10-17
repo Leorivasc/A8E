@@ -123,13 +123,31 @@ For standard keyboard, joystick, and console mappings, please see the [main READ
 **Library Window (F9):**
 
 - Click an ATR name to inspect its read-only directory and geometry.
+- Click a folder or `..` to navigate the native library folders.
 - Press **Enter** to preview the selected ATR file as ATASCII or hexadecimal.
+- Press **V** to run a read-only integrity check on the selected ATR.
 - Press **D** to download the selected ATR file to a typed path.
-- Press **I** / **E** / **N** to import, export, or create a blank ATR.
+- Press **F** to create a folder, **R** to rename the selected folder or entry,
+  and **M** to move the selected entry into the current folder.
+- Press **I** / **E** / **W** / **N** to import, export the complete library,
+  export only the mounted workspace, or create a blank ATR in the current
+  folder.
+- Press **Y** and type a retained revision ID to promote that revision to the
+  active content; the current content is retained in history first.
 - Click a `D1:` through `D8:` cell to mount or unmount an entry.
 - Right-click a mounted drive cell to toggle write protection.
-- Type to filter entries; **Delete** removes an unmounted entry; **Esc** returns
-  from the ATR view or closes the Library window.
+- Drop an ATR/XEX file or a directory onto the Library window to import it;
+  nested directories are recreated under the current folder. Dropped `.a8e`
+  files import as complete packages.
+- Type to filter entries; **Backspace** returns to the parent folder when the
+  search field is empty; **Delete** removes an unmounted entry or an empty
+  folder; **T** cycles ATR/XEX type filtering; **Q** cycles mounted/unmounted
+  filtering; **S** cycles name/type/size/modified sorting; **H** reports native
+  storage capacity; **B** opens recoverable trash, **R** restores the selected
+  trash entry, **P** purges it, and **A** prompts for an age in days before
+  purging older trash; **Esc** returns from the ATR view
+  or closes the Library window. **Up/Down**, **PageUp/PageDown**, **Home/End**
+  and **Enter** provide keyboard navigation and activation of folders/images.
 
 ---
 

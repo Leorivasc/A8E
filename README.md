@@ -44,6 +44,37 @@ The legacy-style per-color-clock rendering pass is implemented in both cores. Th
 
 For the current verification checklist and signoff notes, see [legacy/COLOR_CLOCK_ACCURACY.md](legacy/COLOR_CLOCK_ACCURACY.md).
 
+### AHRM Alignment and Validation Scope
+
+The native and browser cores implement the documented AHRM behavior for the
+covered POKEY, SIO, ANTIC, and GTIA paths, but this must be read as
+**AHRM-aligned and contract-tested**, not as a blanket certification of every
+Atari hardware behavior.
+
+The directly AHRM-based changes include:
+
+- POKEY serial holding/shift-register timing, `SERIN`/`SEROUT` event order,
+  `DATA NEEDED`, `TRANSMISSION DONE`, and `DATA READY` handling;
+- SIO command/response phases, checksums, `ACK`/`COMPLETE`/`NAK` sequencing,
+  sector geometry, `STATUS`, `FORMAT`, write verification, and the supported
+  US Doubler timing paths (AHRM sections 5.6, 5.10, and 9–10);
+- ANTIC/GTIA scanline, DMA, `CHBASE`, player/missile priority, collision, and
+  GTIA Mode 10 composition behavior (AHRM sections 4.4, 4.8, 4.11, 4.13,
+  4.14, and 6.5).
+
+Mounting `D1:`–`D8:`, writable/dirty state, disk activity indicators, XEX
+conversion, persistence, diagnostic tracing, and Full Library packages are
+emulator integration features. They are intentionally kept outside the claim
+of hardware-level AHRM compliance.
+
+The current tests verify the shared native/JavaScript timing and protocol
+contracts, and the AHRM-07 synthetic PMG/GTIA diagnostic is certified for its
+stated scope. Full hardware-equivalence validation remains open for broader
+real-title and PAL/NTSC comparisons, analog POKEY calibration, and the
+accepted jsA8E P1 CPU/POKEY phase follow-up. See the [color-clock accuracy
+scope](legacy/COLOR_CLOCK_ACCURACY.md) and the [implementation notes](implementation/NOTES.md)
+for the detailed boundaries.
+
 ### Extended Memory
 
 The native and browser implementations support the AHRM memory-map profiles below. The native version selects them on the command line; the browser version exposes them in the Memory selector and through the automation API.
@@ -87,6 +118,42 @@ the selectors and API.
 At mobile widths, the browser presentation uses a compact lifecycle toolbar,
 a fixed bottom action bar, and focused overlays for the existing tool panels so
 the screen remains the primary view.
+
+### Full Library
+
+The native and browser implementations share a dependency-free Full Library
+model for managing disk images and files. In the browser, open **Disk Library**;
+in the native emulator, press **F9**. Both interfaces support folders, ATR/XEX
+files, D1:-D8: workspace mounts, filtering and sorting, revisions, and
+read-only ATR inspection with integrity diagnostics.
+
+Library packages use the `.a8e` format: a `library.json` manifest plus
+content-addressed files in `blobs/`. Import shows a preview and validates the
+manifest, schema, paths, hashes, and configurable size limits before changing
+the library. Export, progress reporting, cancellation, and package summaries
+are available in both implementations. Deleted entries move to Trash and can
+be restored or purged, including an age-based purge.
+
+Imports are non-destructive. If an incoming item conflicts with an existing
+item in the same destination folder, the incoming name receives the usual
+filesystem suffix: `file.atr`, `file(1).atr`, `file(2).atr`, and so on. The
+same content is deduplicated; different ATR/XEX content is preserved as a
+separate entry. No generic binary merge is attempted.
+
+The focused Full Library checks are included in the normal project test
+commands:
+
+```sh
+cd jsA8E
+npm run test:automation
+cd ..
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build -j
+ctest --test-dir build -R 'library_(archive|package|repository|image)' --output-on-failure
+```
+
+For native key bindings and the complete package workflow, see the [native
+README](A8E/README.md) and [Full Library implementation notes](implementation/full_library.md).
 
 ### Regression Tests
 

@@ -1,5 +1,238 @@
 # NOTES.md
 
+- 2026-10-16: documented the explicit AHRM alignment boundary for the current
+  POKEY, SIO, ANTIC, and GTIA updates. Serial holding/shift-register timing,
+  SIO response phases and supported high-speed paths, sector geometry,
+  `STATUS`/`FORMAT`/write verification, ANTIC/GTIA DMA and priority behavior,
+  and the `CHBASE` delay are AHRM-based and covered by native/JavaScript
+  contract tests. Mounting D1:-D8:, dirty/activity state, XEX conversion,
+  persistence, tracing, and Full Library behavior are emulator integration,
+  not hardware-compliance claims. AHRM-07 is certified only for its stated
+  synthetic PMG/GTIA scope; broader real-title and PAL/NTSC comparisons,
+  analog POKEY calibration, and the accepted jsA8E P1 CPU/POKEY phase remain
+  open validation work.
+
+- 2026-10-15: completed explicit age-based trash purge in browser and native
+  Full Library surfaces. Both implementations accept a caller-selected cutoff,
+  require confirmation in the UI, purge only older recoverable records, and
+  keep automatic retention policy optional; native repository regression
+  coverage verifies the cutoff and purged-count contract.
+
+- 2026-10-15: hardened the native age-based trash UI for narrow `time_t`
+  platforms by clamping pre-epoch cutoffs before age arithmetic, preserving
+  the same no-match behavior as the browser implementation for very large
+  retention ages.
+
+- 2026-10-15: clarified the Full Library conflict-status documentation. The
+  browser and native paths now explicitly document their implemented
+  non-destructive conflict classification and preservation, while leaving
+  local/imported/merged interactive choice open as a product decision because
+  ATR/XEX payloads have no generic safe three-way merge.
+
+- 2026-10-15: aligned imported name-collision handling with ordinary
+  filesystem suffixes in both Full Library implementations. A colliding
+  `file.atr` now becomes `file(1).atr`, then `file(2).atr`, scoped to the
+  destination folder and preserving the original extension; JavaScript and
+  native package regressions cover the policy.
+
+- 2026-10-15: recorded the explicit conflict policy for Full Library imports:
+  divergent binary ATR/XEX content is always kept on both sides, with the
+  incoming copy receiving the filesystem-style numeric name suffix. This
+  avoids an unsafe generic three-way merge while retaining every payload.
+
+- 2026-10-15: completed the package-operation progress/cancellation contract
+  in both Full Library implementations. Browser export, preview, and import
+  report phase/item progress and honor AbortSignal or callback cancellation;
+  the panel exposes a Stop action. Native keeps the original package APIs,
+  adds callback variants for complete/workspace export and import, reports
+  validation/merge progress, and cancels before staged repository commits;
+  the focused native Library window now maps Escape to that callback.
+  Regression coverage verifies callback delivery, cancellation errors, and
+  unchanged native repository state after a canceled import.
+
+- 2026-10-15: completed the cross-surface revision summary in the Library
+  status bars. Browser selection shows preferred revision, history count,
+  modification time, dirty state, and mounted device; native repository
+  records now parse retained-revision metadata and the SDL window shows the
+  same compact information for library and ATR views.
+
+- 2026-10-15: completed the native package preview/confirmation path. The
+  repository exposes a non-mutating `.a8e` summary API; SDL keyboard imports
+  and package drops now show new, duplicate, conflict, folder, payload, and
+  restorable-workspace counts before asking for confirmation, including
+  newer/older/concurrent revision categories and name collisions. Both paths
+  reuse the staged non-destructive merge, warn when the package library
+  version is newer, and restore workspace mounts only after a successful
+  commit; canceling the confirmation leaves dirty local media unflushed.
+  Native preview folder/name counts now resolve the mapped nested hierarchy
+  by parent/name, matching the actual merge even when package and local IDs
+  differ; the repository probe covers that case.
+
+- 2026-10-15: aligned the browser package confirmation with the native
+  preview summary. The browser prompt now includes new folders, renamed
+  entries, transported revisions, unique payloads, and restorable mounts;
+  package planning counts the content-addressed payload paths and regression
+  coverage verifies the count for both ordinary and revision-bearing exports.
+
+- 2026-10-15: completed configurable package-size guards in both surfaces.
+  `.a8e` readers and writers now enforce archive, manifest, per-payload, and
+  aggregate-payload limits before import or export; browser callers use the
+  four `max*Bytes` options and native callers use
+  `A8E_LibraryPackageLimits_t` through the package/repository `WithLimits`
+  APIs. Default limits and rejection regressions are covered natively and in
+  the JavaScript package test.
+
+- 2026-10-15: completed forward-compatible schema handling for additive
+  package fields. Both readers now accept schema versions newer than v1 when
+  the known required structure remains valid, preserve the non-destructive
+  import path, and expose a warning that unknown fields are ignored; invalid
+  older/zero schema versions remain rejected. Browser and native regressions
+  cover the warning/version reporting.
+
+- 2026-10-15: aligned browser package-import name conflict handling with the
+  folder-scoped native policy. Equal names in different folders now remain
+  valid; only collisions within the mapped destination folder are renamed.
+  The package regression covers both the preserved nested name and a root
+  collision.
+
+- 2026-10-15: completed non-destructive native package merging. Existing local
+  records and folders now survive `.a8e` imports; equal hashes deduplicate,
+  divergent stable IDs become recoverable imported conflict copies, folder
+  hierarchies are remapped beneath sibling-safe IDs, referenced payloads are
+  staged atomically, and unoccupied workspace slots may be restored. The SDL
+  window now unmounts old media only after a successful import, so a failed
+  package leaves the active workspace intact. The native repository probe
+  covers local preservation, a divergent same-ID import, and a nested imported
+  folder.
+
+- 2026-10-15: completed native SDL drag-and-drop ingestion for direct ATR/XEX
+  files, complete `.a8e` packages, and recursive directories. Dropped folders
+  recreate nested repository folders, preserve folder-scoped duplicate checks,
+  import content-addressed blobs atomically, and do not traverse POSIX symbolic
+  links. `library_repository_probe` now covers empty-directory initialization,
+  direct image import, payload identity, and duplicate rejection.
+
+- 2026-10-15: completed explicit retained-revision promotion in both Library
+  surfaces. Browser history actions select a retained revision transactionally;
+  native `Y` accepts a revision ID, unmounts affected media, preserves the
+  displaced current bytes in history, updates `preferredRevisionId`, and
+  reloads the repository. Native repository probes cover payload/hash checks,
+  metadata promotion, and persistence.
+
+- 2026-10-15: added compact keyboard navigation to the native Library list.
+  Up/Down, PageUp/PageDown, Home/End, and Enter now move through filtered
+  folder/trash rows and activate folders or ATR entries without requiring a
+  mouse; the existing keyboard action shortcuts remain unchanged.
+
+- 2026-10-15: added crash-loss mitigation for mounted native Library media.
+  Dirty mounted images are now persisted at a five-second cadence as well as
+  on eject and shutdown, and the AtariIo dirty latch is cleared only after a
+  successful repository commit. Browser debounced flushes and IndexedDB
+  transactions remain the corresponding browser-side recovery path.
+
+- 2026-10-15: completed the recoverable trash workflow in both Library
+  implementations. Browser deletes atomically move entries into a dedicated
+  IndexedDB trash store; the UI provides a trash view, restore actions, and
+  purge-all. Native deletes move records into the optional manifest `trash`
+  array; `B` opens it, `R` restores to the current folder, and `P` purges the
+  selected record. Restores guard name collisions and purges remove payloads
+  only after all active and retained-revision references disappear. Package
+  exports strip trash records and blobs in both implementations.
+
+- 2026-10-15: added read-only storage-capacity reporting to both Library
+  surfaces. Browser exposes `getStorageEstimate()` and a database toolbar
+  action using the StorageManager estimate when available; native exposes `H`
+  and reports free/used space for the `library` volume using the platform
+  filesystem API. Unsupported/unavailable estimates leave library contents
+  unchanged.
+
+- 2026-10-15: completed native size/modified sorting for the Full Library
+  compact list. `S` now cycles name, type, ascending payload size, and newest
+  modification time while retaining deterministic name tie-breaks. The
+  repository parser carries optional `modifiedAt` metadata from schema-v1
+  records, with an empty fallback for older manifests.
+
+- 2026-10-15: completed native compact-list sorting with `S` for name/type,
+  alongside the existing `T` type and `Q` mount-state filters. Sorting is
+  applied after folder/search filtering and keeps folder rows at the top.
+
+- 2026-10-15: completed the native side of the Library type/status filter
+  slice. `T` cycles all/ATR/XEX and `Q` cycles all/mounted/unmounted while
+  preserving folder navigation and search; the browser already exposes the
+  equivalent selectors. Both filters are read-only and reset the list scroll.
+
+- 2026-10-15: import planning now merges previously unseen revision records
+  into an existing same-ID/same-content entry inside the same IndexedDB
+  transaction. Divergent content still remains a separate conflict copy, and
+  the preview counts history updates as transported revisions.
+
+- 2026-10-15: enriched browser import previews with newer/older/concurrent
+  conflict counts and the number of transported revisions. The confirmation
+  dialog now exposes those categories before the atomic commit; the existing
+  non-destructive conflict-copy policy is unchanged.
+
+- 2026-10-15: browser directory uploads now recreate `webkitRelativePath`
+  subfolders beneath the current library folder instead of flattening them.
+  Folder-scoped duplicate checks now match native behavior, so equal display
+  names are allowed in different folders while sibling collisions remain
+  guarded. Existing single-file uploads and replacements retain their prior
+  behavior.
+
+- 2026-10-15: added portable schema-v1-compatible revision history. Browser
+  entries now retain revision bytes and parent/preferred IDs across IndexedDB
+  persistence, flushes, replacements, exports, and imports; packages validate
+  and deduplicate revision blobs, and native working-copy saves retain the old
+  content as a revision blob in the manifest instead of deleting it. Native
+  removal now prunes all unreferenced historical blobs. Stable-ID conflicts
+  therefore remain recoverable on both sides; explicit revision promotion is
+  now covered by the browser and native surfaces. Interactive three-way
+  merging remains future work. Package, disk library, and native repository
+  tests cover the round trip.
+
+- 2026-10-15: connected native ATR integrity diagnostics to the SDL Library
+  window with `V` for the selected ATR. The browser and native user surfaces
+  now both expose the same non-destructive verification operation; XEX rows
+  are explicitly rejected by the ATR-only action.
+
+- 2026-10-15: added browser Full Library sorting and type/status filters.
+  The persistent list now exposes ATR/XEX, mounted/dirty/clean filters and
+  name/type/size/modified ordering while retaining folder search and selection
+  behavior. The native SDL list already reports type and mount state in its
+  compact rows; its keyboard surface remains intentionally small.
+
+- 2026-10-15: added a separate workspace export path to the Full Library
+  package model. Browser `exportWorkspacePackage` and the native
+  `A8E_LibraryRepository_ExportWorkspacePackageFile` include only entries
+  assigned to D1:-D8:, their referenced blobs, the required folder ancestry,
+  and the existing workspace assignment. The browser marks these packages
+  with `scope: "workspace"` and defaults the filename to `workspace.a8e`;
+  complete-library exports remain unchanged. The browser package and disk
+  library tests and the native repository probe pass.
+
+- 2026-10-15: completed the Full Library diagnostic ATR integrity slice in
+  both implementations. `jsA8E` and native A8E now expose the same read-only
+  verification model: ATR geometry, DOS 2.x/MyDOS VTOC limits, active
+  directory records, reserved/out-of-range sectors, complete sector-chain
+  termination, cycles, duplicate allocation, and used-byte limits are
+  checked without modifying the image. Unknown filesystems remain usable but
+  report a warning. The browser library exposes `verifyFile` and `verifyLibrary`
+  and the ATR rows provide a shield action; native A8E exposes
+  `A8E_LibraryImage_VerifyAtr` and its report structure. The JavaScript ATR and
+  disk-library tests plus the native image probe pass.
+
+- 2026-10-15: completed the first native Full Library folder-editing slice.
+  The native repository now loads schema-v1 `folders` records, supplies
+  persistent create/rename/delete-empty-folder operations, moves and renames
+  entries while preserving stable IDs, and keeps older manifests without a
+  `folders` array compatible by treating them as the `root` folder. The SDL
+  Library window now navigates child folders and `..`, creates folders with
+  `F`, renames the selected folder or entry with `R`, moves the selected entry
+  into the current folder with `M`, and deletes only empty folders. Blank ATR
+  creation also places the new entry in the current folder. The native
+  repository probe covers the folder round trip, name changes, moves, and
+  guarded deletion; the four native library probes, complete native target,
+  and JavaScript automation suite pass.
+
 - 2026-10-13: opened `ATR/prince_of_persia.md` for a reproducible Prince of
   Persia intro graphics regression. The presentation with music was observed
   as distorted after rebuilding from `main` on Windows and again after
@@ -259,10 +492,10 @@ Simple implementation notes for this repository.
   incremented `libraryVersion`, and commits imported entries plus metadata in a
   single IndexedDB transaction. The Disk Library panel now exposes complete
   Export Library and Import Library actions. Native A8E adds an SDL-independent
-  staged package store that replaces its visible snapshot only after complete
-  package validation; native multi-drive repository merge and persistence are
-  still pending. JS and native regressions cover conflicts, invalid-package
-  rollback, and unchanged state after a failed import.
+  staged package store that validates complete packages and merges them into the
+  persistent repository without replacing local records. JS and native
+  regressions cover conflicts, invalid-package rollback, and unchanged state
+  after a failed import.
 
 - 2026-10-09: manually validated the browser workflow on the Full Library
   branch: export the complete library, remove the local contents, and import
@@ -393,9 +626,9 @@ Simple implementation notes for this repository.
   creation. The SDL Library accepts `I` (import), `E` (export), and `N` (new
   blank ATR), with a dependency-free path/name prompt confirmed by Enter and
   cancelled by Escape. Package import validates the complete archive before
-  replacing the local `library/` directory; export uses the same canonical
-  `library.json` plus content-addressed blobs used by jsA8E. A fresh native
-  installation can create its first schema-v1 library from a blank ATR.
+  merging it into the local `library/` directory; export uses the same
+  canonical `library.json` plus content-addressed blobs used by jsA8E. A fresh
+  native installation can create its first schema-v1 library from a blank ATR.
 
 - 2026-10-09: made native entry deletion clean persisted workspace references
   as well as the library record and now require the native repository probe to

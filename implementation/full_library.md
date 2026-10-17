@@ -1,11 +1,14 @@
 # Full Library Management
 
-Status: implementation in progress; the portable package baseline, browser
-navigation view, native SDL Library MVP, and native read-only ATR contents
-viewer are implemented. Native folder navigation/editing remains follow-up
-work.
+Status: current baseline implemented in both jsA8E and native A8E. The portable
+package contract, browser and native library views, folder editing, read-only
+ATR inspection and integrity diagnostics, recoverable trash, retained revision
+selection, non-destructive conflict preservation, and package-operation
+progress/cancellation are implemented. Binary conflicts use the explicit
+keep-both filesystem policy. Format-aware repair, remote synchronization, and
+broader real-image validation remain deferred projects.
 
-Date: 2026-10-09
+Date: 2026-10-16
 
 ## Purpose
 
@@ -18,13 +21,15 @@ makes the collection useful as a working Atari setup: folders, metadata,
 working copies, modification times, revisions, and disk assignments such as
 `atariwriter.atr` in `D1:` and `docs.atr` in `D2:`.
 
-This document records the library model and the user experience discussed for
-the future implementation. It is intentionally a design document; it does not
-authorize unrelated changes outside the Full Library project.
+This document records the canonical library model, the behavior already
+implemented, and the intentionally deferred extensions. Requirements that are
+still phrased as design guidance are labeled by the implementation-status
+sections below; they do not authorize unrelated changes outside the Full
+Library project.
 
 ## Implemented baseline
 
-The first implementation slice now exists in both applications:
+The implemented baseline exists in both applications:
 
 - the dependency-free ZIP method-0 codec reads and writes standard `.a8e`
   archives;
@@ -38,18 +43,24 @@ The first implementation slice now exists in both applications:
 - shared regression coverage checks the same package contract in JavaScript and
   native CTest.
 
-The current import operation now has a complete browser transaction path:
+The import operation now has a complete browser transaction path:
 `jsA8E` previews the package, deduplicates equal hashes, preserves differing
 stable-ID content as an imported conflict copy, increments `libraryVersion`,
 and commits all new records plus metadata in one IndexedDB transaction. A8E
 has the matching backend staging store: it validates and decodes a complete
-package before replacing its visible package snapshot. Folder records, richer
-revision merging, and the remaining native Library editing actions remain
-subsequent phases. The native SIO backend now has independent D1:-D8: media
+package before merging new folders, deduplicated records, conflict copies,
+payloads, and available workspace assignments into the local snapshot. Folder
+records and native folder navigation/editing are implemented; revision
+blobs and preferred revision metadata are preserved across browser/native save
+and package conflict copies, and both surfaces can promote an explicitly
+selected retained revision while retaining the displaced current content.
+Interactive selection of local content, imported content, or a merged binary
+remains intentionally deferred. The native SIO backend now has independent
+D1:-D8: media
 slots and Device ID selection, the repository adapter persists the shared
 directory contract, and the initial SDL UI mounts entries through that backend.
 
-The first compact browser navigation slice is now implemented. jsA8E stores
+The browser navigation view is implemented. jsA8E stores
 folders in IndexedDB, migrates older entries to the `Library` root, supports
 the current-folder path and parent navigation, creates folders, uploads into
 the open folder, displays the classic D1:-D4: controls, and provides per-file
@@ -68,7 +79,7 @@ in both applications. A short green `*` identifies a read and a yellow `*`
 identifies a write or format; the indicator is transient and independent from
 the persistent dirty and write-protection state.
 
-The native repository phase has now started. Native A8E can load and save the
+The native repository implementation can load and save the
 same application-owned `library.json` and `blobs/` directory used by the
 shared schema. Loading stages the manifest and every referenced blob, then
 validates the complete set before replacing the visible snapshot; saving
@@ -84,13 +95,20 @@ by the command-line path. A command-line D1: image remains the fallback when
 the repository has no workspace assignment. Dirty mounted working copies are
 flushed back into updated manifest revisions on eject and emulator exit.
 
-The first native SDL adapter is now available through F9. It presents the
+The package layer now also has a separate workspace export. It includes only
+the entries currently assigned to D1:-D8:, their content-addressed blobs, the
+folder ancestry needed to retain their paths, and the workspace assignment.
+Browser callers use `exportWorkspacePackage` and native callers use
+`A8E_LibraryRepository_ExportWorkspacePackageFile`; complete-library exports
+continue to include every entry.
+
+The native SDL adapter is available through F9. It presents the
 repository entries in a compact list with ATR/XEX type labels and D1:-D8:
 mount cells. Clicking a drive cell mounts the selected entry, clicking the
 same occupied cell unmounts it, and moving an entry to another drive first
 ejects its previous logical mount.
 
-That native editing slice is now implemented as well. Typing in the Library
+The native editing workflow is implemented. Typing in the Library
 window filters names case-insensitively by substring; Delete removes an
 unmounted entry; right-clicking a mounted drive cell toggles runtime write
 protection; and dirty working copies are saved on eject and emulator exit. A
@@ -98,7 +116,16 @@ working-copy save creates or reuses the content-addressed blob, updates the
 entry path, size, hash, modification time, and `libraryVersion`, then reloads
 the repository only after the directory save succeeds. Native package
 import/export and blank ATR creation are available through the typed SDL
-prompt; folder editing remains a separate follow-up operation.
+prompt. The native window also supports the initial folder editing slice:
+create with `F`, rename the selected folder or entry with `R`, move the
+selected entry to the current folder with `M`, navigate with folder rows and
+`..`, and delete only empty folders.
+Both implementations now expose a read-only ATR integrity check. It verifies
+geometry and, for DOS 2.x/MyDOS images, VTOC bounds, directory records,
+reserved sectors, complete sector chains, cycles, sector sharing, and payload
+length markers. Unknown filesystems remain inspectable and produce a warning;
+the browser exposes the check from each ATR row, the native window exposes it
+with `V`, and the native API is `A8E_LibraryImage_VerifyAtr`.
 When a native XEX working copy is modified, its converted ATR bytes are
 persisted as an ATR entry so a later mount never attempts to parse that
 working image as XEX.
@@ -116,6 +143,13 @@ filename. Results are presented as a virtual folder, include their original
 folder path, and retain the normal mount and file actions without changing the
 physical folder of an entry.
 
+The browser list provides ATR/XEX and mounted/dirty/clean filters plus
+name/type/size/modified ordering; the native window provides ATR/XEX and
+mounted/unmounted cycles with `T` and `Q`, plus name/type sorting with `S`.
+Directory uploads preserve each file's
+`webkitRelativePath` by creating the nested folders below the current folder;
+single-file drops continue to target the current folder.
+
 ## Project parity
 
 Every new capability in this project must be implemented and tested in both
@@ -127,7 +161,11 @@ but the applications must preserve:
 - equivalent user-visible behavior;
 - matching regression fixtures for package validation and conflict handling.
 
-The feature is incomplete while it exists in only one application.
+The shared package, folder, workspace, integrity, trash, retained-revision,
+and non-destructive keep-both conflict baseline now exists in both
+applications. Explicit revision selection is available in both surfaces;
+format-aware three-way merge is intentionally unsupported for binary ATR/XEX
+payloads.
 
 ## Interchange format decision
 
@@ -396,6 +434,28 @@ The default policy is **keep newest with history**:
 This permits recovery when the same disk was modified in two browsers. It is
 not destructive last-write-wins behavior.
 
+The implemented schema-v1 extension stores revision objects under an entry's
+optional `revisions` array. Each object has an `id`, content-addressed `path`,
+`size`, `sha256`, UTC `createdAt`/`modifiedAt`, and optional `parentId`; the
+entry may identify `preferredRevisionId`. Revision blobs are validated and
+deduplicated just like current entry blobs. The browser persists their bytes
+in IndexedDB, while native working-copy saves retain prior referenced blobs in
+the manifest. Browser and native surfaces can promote a chosen retained
+revision; the displaced active bytes are first retained as another revision.
+The older single-revision manifest remains valid.
+
+Deleted entries now move to a local recoverable trash collection in both
+applications. Browser trash is stored in its own IndexedDB object store and
+native trash is represented by the optional `trash` array in `library.json`;
+restore checks folder/name collisions, while purge removes the entry and any
+now-unreferenced payloads. Full-library and workspace exports intentionally
+omit trash records and their blobs.
+
+Both surfaces also support an explicit age-based purge. The user supplies a
+retention age in days, receives a destructive-operation confirmation, and only
+trash records with `deletedAt` older than the computed cutoff are purged. No
+fixed retention policy is imposed by the library.
+
 ## File-system model
 
 The logical library is organized into folders. The initial visual design does
@@ -550,9 +610,12 @@ follow the normal revision and working-copy rules and must never silently
 discard a local dirty copy. Files with the same name in different folders are
 allowed.
 
-The first implementation accepts files, not recursive directory drops. A
-future directory-drop enhancement may preserve a relative folder hierarchy,
-but it must use the same folder IDs and validation rules as ordinary uploads.
+Browser directory uploads and native SDL directory drops preserve their
+relative folder hierarchy beneath the folder currently open in the navigation
+panel. Native drops also accept complete `.a8e` packages; direct ATR/XEX drops
+use the same content-addressed storage, duplicate-name checks, folder IDs, and
+validation rules as ordinary uploads. Symbolic links are not traversed by the
+native recursive importer.
 
 ### Create a blank ATR
 
@@ -579,9 +642,11 @@ preserving their stable IDs, revisions, timestamps, tags, and mount identity.
 
 Moving an entry that is mounted must update its displayed path without
 changing the active device assignment. Moving or renaming a dirty entry must
-not discard its working copy. Name collisions in the destination folder must
-offer an explicit rename, replace, or cancel choice and must follow the normal
-revision/conflict rules.
+not discard its working copy. Imported name collisions in the destination
+folder use filesystem-style numeric suffixes: `file.atr`, `file(1).atr`,
+`file(2).atr`, with case-insensitive matching and the extension preserved.
+Explicit replace/cancel choices for interactive local edits remain outside the
+non-destructive package-import path.
 
 ### ATR contents view
 
@@ -733,6 +798,11 @@ Revision rev-002  |  3 revisions  |  Modified 2026-10-08 14:45 UTC  |  MyDOS
 The status bar must remain concise and should summarize multiple selected files
 instead of creating a separate details pane.
 
+This revision summary is now implemented in both surfaces. A single selected
+entry shows its preferred revision (or retained-history count), modification
+timestamp, dirty/clean state, and mounted device; multiple selections keep the
+compact count summary.
+
 ### Mounted-devices panel
 
 A persistent panel above the navigation list should show, for every occupied
@@ -799,7 +869,8 @@ The import flow should be transactional from the user's perspective:
 3. Match stable IDs and content hashes against local records.
 4. Add new entries and revisions without overwriting local content.
 5. Select the preferred revision using the default conflict policy.
-6. Resolve name collisions with a suffix or explicit user choice.
+6. Resolve name collisions with a numeric suffix (`file(1).atr`,
+   `file(2).atr`, and so on) without replacing local content.
 7. Restore mount assignments only after all referenced entries exist.
 8. Report duplicates, conflicts, skipped records, and restored devices.
 
@@ -823,6 +894,20 @@ Validation still runs for every payload before confirmation, and confirmation
 must commit the validated plan atomically. Canceling the preview must leave the
 local library unchanged.
 
+The browser preview now reports newer, older, and concurrent stable-ID
+conflicts separately, together with the transported revision count, before
+the confirmation prompt. The current default conflict handling is
+non-destructive: an imported divergent entry is retained as a separate
+recoverable copy. Choosing local content, imported content, or a merged
+revision interactively remains a follow-up because ATR/XEX bytes do not have
+a safe generic three-way merge operation.
+
+Native A8E now provides the matching non-mutating package preview summary for
+keyboard and drag-and-drop imports. Its SDL confirmation reports new entries,
+duplicates, divergent conflicts, new folders, payloads, and available
+workspace assignments before the existing staged merge runs; the staged merge
+retains divergent imported content without replacing the local entry.
+
 ## Import/export security and integrity
 
 The importer must:
@@ -835,6 +920,14 @@ The importer must:
 - preserve old content until the import transaction is complete;
 - avoid executing an imported XEX without explicit user confirmation.
 
+Both package implementations now enforce bounded defaults before exposing
+archive contents: 256 MiB per archive, 16 MiB for `library.json`, 64 MiB per
+payload, and 256 MiB total payload bytes. The JavaScript package API accepts
+`maxPackageBytes`, `maxManifestBytes`, `maxPayloadBytes`, and
+`maxPayloadTotal`; native callers can pass the equivalent
+`A8E_LibraryPackageLimits_t` to the `WithLimits` package and repository APIs.
+Zero-valued native fields retain the defaults.
+
 Exports must never include authentication tokens, passwords, browser-specific
 paths, or private repository credentials.
 
@@ -843,6 +936,14 @@ paths, or private repository credentials.
 Full-library import and export must expose progress and cancellation for large
 collections. The UI should report at least the current phase, completed item
 count, total item count when known, and the current filename or payload.
+
+This contract is now implemented in both surfaces. Browser package and disk
+library APIs accept progress/cancellation options, and the panel exposes a
+Stop action for export, preview, and import. Native repository APIs retain the
+original synchronous wrappers and add callback variants for full and
+workspace package operations; cancellation is checked before staged writes and
+the SDL window reports the current phase in its status line and cancels when
+the focused Library window's Escape key is held during the operation.
 
 Cancellation must stop the operation at a safe transaction boundary. It must
 not leave a partially imported entry, blob, revision, or mount mapping visible
@@ -861,6 +962,11 @@ If validation, migration, or required-field handling fails, the operation must
 abort atomically and show a popup with an actionable explanation. Successful
 best-effort imports should report fields or revisions that were ignored.
 
+The current readers accept a higher schema version when the known v1 required
+structure remains valid, ignore unknown additive fields, and warn in the
+browser/native import preview. Older or invalid schema versions remain
+rejected before any repository mutation.
+
 Every persisted library/workspace mutation increments `libraryVersion`, while
 runtime-only SIO activity does not. The increment and the associated content
 revision must be committed atomically.
@@ -869,20 +975,21 @@ revision must be committed atomically.
 
 The import/export portion of this project follows these phases:
 
-### Phase 1: portable workspace package
+### Phase 1: portable workspace package — complete
 
 - define `library.json` schema version 1;
 - export selected ATR/XEX files and current writable ATR copies;
 - restore `D1:` through `D8:` assignments and write protection;
 - validate hashes and file formats during import.
 
-The first browser transaction path is implemented. Its preview/commit API is
+The browser transaction path is implemented. Its preview/commit API is
 available through the disk library and the browser panel now exposes Export
 Library and Import Library actions. Native A8E has the corresponding staged
-package store; its merge with a persistent native multi-drive repository is
-deferred until that repository exists.
+package store and merges validated package contents with its persistent
+multi-drive repository atomically, while failed imports leave the active
+workspace mounted and unchanged.
 
-### Phase 2: complete library migration
+### Phase 2: complete library migration — complete
 
 - export all library entries and their metadata;
 - preserve stable IDs, timestamps, tags, folders, and descriptions;
@@ -891,11 +998,16 @@ deferred until that repository exists.
 
 ### Phase 3: revisions and conflicts
 
-- add parent hashes and revision identifiers;
-- preserve concurrent working copies;
-- report conflicts and allow selection of local, imported, newest, or both.
+- add parent hashes and revision identifiers; **baseline complete** through
+  optional `revisions`, parent IDs, and preferred revision IDs;
+- preserve concurrent working copies; **baseline complete** for browser and
+  native package/save paths;
+- report conflicts and preserve both local and imported content;
+  **complete** through explicit retained-revision selection and filesystem
+  numeric naming for incoming copies. A generic three-way merge is not
+  attempted for binary ATR/XEX payloads.
 
-### Phase 4: remote repository integration
+### Phase 4: remote repository integration — deferred
 
 - reuse `library.json` and content-addressed payloads for remote storage;
 - treat local IndexedDB or native files as a cache/local working store;
@@ -916,47 +1028,59 @@ phases.
 
 ## Implementation order
 
-The recommended order is:
+The following list is retained as a traceable implementation history. Items
+1–12 describe the current baseline; items 13–14 remain deferred:
 
 1. finalize the common manifest, `schemaVersion`, `libraryVersion`, and
-   validation rules;
+   validation rules; **complete**;
 2. implement content-addressed package creation/loading with progress and
-   cancellation;
+   cancellation; **complete**;
 3. export/import complete ATR/XEX library entries and current ATR working
-   copies, including compatibility warnings and atomic migration;
+   copies, including compatibility warnings and atomic migration; **complete**;
 4. add folder metadata, the compact navigation view, Upload, drag/drop, and
-   Create blank ATR;
+   Create blank ATR; **complete**;
 5. add create/rename/move operations for folders and library entries;
-6. add interactive global search as a virtual-folder view;
+   **complete**;
+6. add interactive global search as a virtual-folder view; **complete**;
 7. add the ATR viewer, filesystem detection, status-bar type reporting, and
-   the read-only sector fallback;
-8. add internal-file extraction and ATASCII-aware previews;
+   the read-only sector fallback; **complete**;
+8. add internal-file extraction and ATASCII-aware previews; **complete**;
 9. add the RW column, D1–D8 mounted-devices panel, mount exclusivity, and SIO
-   activity indicators;
+   activity indicators; **complete**;
 10. add per-file and complete-library Download/Delete actions plus revision
-   information in the status bar;
-11. add diagnostic integrity verification and later explicit repair support;
-12. add the import preview and confirmation workflow;
+   information in the status bar; **complete**;
+11. add diagnostic integrity verification; **complete**. Explicit repair
+   support remains deferred;
+12. add the import preview and confirmation workflow; **complete**;
 13. add the final desirable real-image fixture and differential validation
-    phase;
-14. extend the same package model to remote repositories later.
+    phase; **deferred**;
+14. extend the same package model to remote repositories later; **deferred**.
 
 ## Post-initial-implementation backlog
 
 The following ideas are intentionally deferred until the first implementation
 is stable:
 
-- sorting and type/status filters;
-- a recoverable trash/purge workflow;
-- recovery of pending working copies after an unexpected shutdown;
-- keyboard shortcuts and full Midnight-Commander-style keyboard navigation;
-- browser quota and native storage-capacity reporting;
-- broader directory-drop support that recreates nested folders;
+- richer sorting beyond the implemented native name/type/size/modified cycle
+  and browser direction toggling remains optional;
+- richer trash policy (recoverable trash, restore, purge, and explicit
+  age-based purge are implemented; automatic retention remains optional);
+- recovery of pending working copies after an unexpected shutdown (browser
+  debounced/transactional persistence and native five-second autosave are
+  implemented; a user-facing recovery chooser remains optional);
+- full Midnight-Commander-style keyboard navigation (compact native
+  Up/Down/Page/Home/End/Enter navigation is implemented; panel-wide focus and
+  command-key parity remain optional);
+- browser quota and native storage-capacity reporting (implemented through the
+  browser storage estimate action and native `H` status action);
+- broader directory-drop variants (the current browser and native paths
+  recreate nested folders, and native SDL accepts direct ATR/XEX files and
+  complete `.a8e` packages);
 - richer repair operations after diagnostic verification;
 - remote repository synchronization.
 
-Each phase must have corresponding jsA8E and native A8E tests before it is
-considered complete.
+Any new phase or extension must have corresponding jsA8E and native A8E tests
+before it is considered complete.
 
 ## Non-goals
 

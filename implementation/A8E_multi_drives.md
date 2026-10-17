@@ -44,8 +44,8 @@ The native application currently:
 - has a persistent native repository adapter for `library.json` plus `blobs/`,
   and startup restores workspace assignments into the corresponding slots;
 - has a native D1:-D8: mounting interface through the SDL Library window;
-- exposes native package import/export and blank ATR creation through the SDL
-  Library window, while folder navigation/editing remains pending.
+- exposes native package import/export, blank ATR creation, folder navigation,
+  and folder-scoped entry editing through the SDL Library window.
 
 The current implementation therefore cannot reproduce the multi-disk workflow
 available in jsA8E, such as AtariWriter in D1: with a documents disk in D2:.
@@ -57,8 +57,7 @@ legacy D1: command-line buffer remains compatible. The repository adapter can
 load and save a complete validated local snapshot, startup restores workspace
 assignments, and the SDL Library window provides initial mount/eject controls.
 Runtime dirty-copy persistence, workspace persistence, package interchange,
-and blank ATR creation are implemented; folder navigation/editing remains
-pending.
+blank ATR creation, and folder navigation/editing are implemented.
 
 ## Current SIO bus implementation
 
@@ -194,8 +193,8 @@ Library is complete:
 - SIO buffers, indexes, and pending-command state are static globals rather
   than per-emulator or per-drive state;
 - the SDL Library window exposes repository, search, mount/eject, delete, and
-  runtime write-protection controls, package import/export, and blank ATR
-  creation; folder navigation/editing remains pending;
+  runtime write-protection controls, package import/export, blank ATR creation,
+  and folder navigation/editing;
 - `$3F` recognizes D1: through D8: and returns the generic US Doubler divisor
   `$0A`. High-speed response bytes use the AHRM 10.5 drive-side timing model;
   unsupported Turbo, XF551, Indus GT, and other device-specific protocols
@@ -642,9 +641,9 @@ mount/eject clicks through the AtariIo media API. Delete is guarded while an
 entry is mounted, right-click toggles runtime write protection, and dirty
 working copies are saved on eject and emulator exit. Runtime workspace changes
 are persisted immediately. Native package import, upload, and folder editing
-are now covered by the dependency-free `I`/`E` package prompt and the `N`
-blank-ATR action; file upload still uses package import and folder editing
-remains pending.
+are now covered by the dependency-free `I`/`E` package prompt, SDL drop
+handling, and the `N` blank-ATR action. Complete `.a8e` packages remain
+available for portable multi-drive transfers.
 
 ## UI and dependency constraints
 
