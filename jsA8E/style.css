@@ -638,7 +638,7 @@ button:active:not(:disabled) {
 
 .layout[data-layout-scheme="work"],
 .layout[data-layout-scheme="development"] {
-  grid-template-columns: minmax(240px, 0.38fr) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 0.45fr) minmax(0, 1fr);
   grid-template-areas:
     "tools screen"
     "input input";
@@ -2047,7 +2047,12 @@ canvas.crtEnabled {
   border: 1px solid var(--sub-panel-inner-border);
   color: var(--sub-panel-btn-idle);
   border-radius: var(--sub-panel-btn-radius);
-  padding: 3px 8px;
+  padding: 4px 7px;
+  min-width: 30px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
   white-space: nowrap;
@@ -2337,6 +2342,15 @@ canvas.crtEnabled {
   font-weight: 600;
   color: var(--text);
 }
+.disklib-current-path {
+  margin-left: 8px;
+  color: var(--text);
+  font-family: monospace;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .disklib-status {
   margin-left: auto;
   font-size: var(--fs-xs);
@@ -2355,14 +2369,125 @@ canvas.crtEnabled {
   padding: 5px 8px;
   background: var(--sub-panel-toolbar-bg);
   border-bottom: 1px solid var(--sub-panel-inner-border);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.disklib-atr-view {
+  display: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+.disklibPanel.disklib-atr-view-mode .disklib-mounted-panel,
+.disklibPanel.disklib-atr-view-mode > .disklib-toolbar,
+.disklibPanel.disklib-atr-view-mode > .disklib-drop-zone,
+.disklibPanel.disklib-atr-view-mode > .disklib-searchbar,
+.disklibPanel.disklib-atr-view-mode > .disklib-statusbar {
+  display: none;
+}
+.disklibPanel.disklib-atr-view-mode .disklib-atr-view {
+  display: flex;
+}
+.disklib-atr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: var(--sub-panel-toolbar-bg);
+  border-bottom: 1px solid var(--sub-panel-inner-border);
+}
+.disklib-atr-title {
+  color: var(--text);
+  font-family: monospace;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.disklib-atr-info {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  color: var(--sub-panel-dim);
+  font-size: var(--fs-xs);
+  border-bottom: 1px solid var(--sub-panel-inner-border);
+}
+.disklib-atr-content {
+  flex: 1 1 auto;
+  min-height: 96px;
+  overflow: auto;
+}
+.disklib-atr-cols-header,
+.disklib-atr-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 72px 72px 80px 58px;
+  align-items: center;
+  column-gap: 8px;
+  padding: 4px 10px;
+  min-width: 500px;
+}
+.disklib-atr-cols-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--sub-panel-statusbar-bg);
+  border-bottom: 1px solid var(--sub-panel-inner-border);
+  color: var(--sub-panel-dim);
+  font-size: var(--fs-xs);
+}
+.disklib-atr-row {
+  color: var(--text);
+  font-family: monospace;
+  font-size: var(--fs-xs);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.disklib-atr-row:hover {
+  background: rgba(92, 200, 255, 0.05);
+}
+.disklib-atr-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.disklib-atr-actions {
+  white-space: nowrap;
+}
+.disklib-atr-raw {
+  padding: 10px;
+  color: var(--sub-panel-dim);
+  font: 11px/1.45 monospace;
+  white-space: pre;
+}
+.disklib-atr-preview {
+  flex: 0 1 220px;
+  min-height: 0;
+  max-height: 220px;
+  border-top: 1px solid var(--sub-panel-inner-border);
+  background: var(--sub-panel-toolbar-bg);
+  overflow: auto;
+}
+.disklib-atr-preview[hidden] {
+  display: none !important;
+}
+.disklib-atr-preview-title {
+  padding: 4px 10px;
+  color: var(--sub-panel-label);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.disklib-atr-preview-text {
+  margin: 0;
+  padding: 4px 10px 10px;
+  color: var(--text);
+  font: 11px/1.4 monospace;
+  white-space: pre;
 }
 .disklib-btn {
   background: transparent;
   border: 1px solid var(--sub-panel-inner-border);
   color: var(--sub-panel-btn-idle);
   border-radius: var(--sub-panel-btn-radius);
-  padding: 3px 8px;
+  padding: 4px 8px;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
   white-space: nowrap;
@@ -2396,6 +2521,72 @@ canvas.crtEnabled {
   margin: 0 3px;
   flex-shrink: 0;
 }
+.disklib-mounted-panel {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  background: var(--sub-panel-bg);
+  border-bottom: 1px solid var(--sub-panel-inner-border);
+}
+.disklib-mounted-title {
+  color: var(--sub-panel-label);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.disklib-mounted-title i {
+  color: var(--accent);
+  margin-right: 4px;
+}
+.disklib-mounted-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.disklib-mounted-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 18px 18px max-content;
+  align-items: center;
+  column-gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+}
+.disklib-mounted-unit {
+  color: var(--accent);
+  font-family: monospace;
+  font-weight: 700;
+}
+.disklib-mounted-path {
+  min-width: 0;
+  color: var(--text);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.disklib-mounted-rw {
+  min-width: 18px;
+  text-align: center;
+  font-weight: 700;
+}
+.disklib-mounted-activity {
+  min-width: 18px;
+  color: transparent;
+  font-weight: 700;
+  text-align: center;
+}
+.disklib-mounted-activity.active {
+  color: #5ee58a;
+  animation: disk-activity-blink 180ms steps(1, end) 4;
+}
+.disklib-mounted-activity.disklib-activity-write.active {
+  color: #f2d35e;
+}
+.disklib-mounted-empty {
+  color: var(--sub-panel-dim);
+  font-size: var(--fs-xs);
+  font-style: italic;
+}
 .disklib-drop-zone {
   display: flex;
   flex-direction: column;
@@ -2422,7 +2613,7 @@ canvas.crtEnabled {
 .disklib-cols-header,
 .disklib-row {
   display: grid;
-  grid-template-columns: 28px minmax(150px, 1fr) 78px repeat(4, 48px) 34px;
+  grid-template-columns: 28px minmax(150px, 1fr) 32px repeat(4, 42px) 112px;
   align-items: center;
   column-gap: 4px;
   padding: 3px 6px;
@@ -2432,12 +2623,12 @@ canvas.crtEnabled {
   border-bottom: 1px solid var(--sub-panel-inner-border);
   color: var(--sub-panel-dim);
   font-size: var(--fs-xs);
-  min-width: 580px;
+  min-width: 544px;
   flex-shrink: 0;
 }
 .disklib-list {
   flex: 1 1 auto;
-  min-width: 580px;
+  min-width: 544px;
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 96px;
@@ -2478,13 +2669,42 @@ canvas.crtEnabled {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.disklib-search-mode .disklib-col-name {
+  grid-template-columns: max-content minmax(0, 2fr) minmax(0, 1fr) max-content;
+}
+.disklib-source-path {
+  min-width: 0;
+  color: var(--sub-panel-dim);
+  font-family: sans-serif;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .disklib-col-size {
   text-align: right;
   color: var(--sub-panel-dim);
   font-size: var(--fs-xs);
 }
+.disklib-col-rw {
+  text-align: center;
+}
+.disklib-rw {
+  font-family: sans-serif;
+  font-weight: bold;
+  font-size: 16px;
+}
+.disklib-rw-writable {
+  color: #70d090;
+}
+.disklib-folder-icon {
+  color: #e0b84f;
+  font-size: 13px;
+}
+.disklib-folder-row .disklib-name {
+  color: var(--text);
+}
 .disklib-col-actions {
-  text-align: right;
 }
 .disklib-type {
   min-width: 28px;
@@ -2548,6 +2768,50 @@ canvas.crtEnabled {
 .disklib-drop-zone.drag-over .disklib-drop-hint {
   color: var(--accent);
 }
+.disklib-searchbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--sub-panel-bg);
+  border-top: 1px solid var(--sub-panel-inner-border);
+}
+.disklib-searchbar > i {
+  color: var(--sub-panel-dim);
+  font-size: var(--fs-xs);
+}
+.disklib-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--sub-panel-toolbar-bg);
+  border: 1px solid var(--sub-panel-inner-border);
+  border-radius: var(--sub-panel-btn-radius);
+  color: var(--text);
+  font: inherit;
+  padding: 3px 6px;
+  outline: none;
+}
+.disklib-search-input:focus {
+  border-color: var(--accent);
+}
+.disklib-filter-type,
+.disklib-filter-status,
+.disklib-sort {
+  flex: 0 0 auto;
+  min-width: 88px;
+  background: var(--sub-panel-toolbar-bg);
+  border: 1px solid var(--sub-panel-inner-border);
+  border-radius: var(--sub-panel-btn-radius);
+  color: var(--text);
+  font: inherit;
+  padding: 3px 5px;
+  outline: none;
+}
+.disklib-filter-type:focus,
+.disklib-filter-status:focus,
+.disklib-sort:focus {
+  border-color: var(--accent);
+}
 .disklib-statusbar {
   padding: 4px 10px;
   background: var(--sub-panel-statusbar-bg);
@@ -2558,6 +2822,13 @@ canvas.crtEnabled {
 .disklib-stat-sel {
   color: var(--accent);
   font-weight: 600;
+}
+.disklib-stat-info {
+  min-width: 0;
+  max-width: 52%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .disklib-flex {
   flex: 1;
@@ -2675,7 +2946,12 @@ canvas.crtEnabled {
   border: 1px solid var(--sub-panel-inner-border);
   color: var(--sub-panel-btn-idle);
   border-radius: var(--sub-panel-btn-radius);
-  padding: 3px 8px;
+  padding: 4px 7px;
+  min-width: 30px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
   white-space: nowrap;
@@ -3157,7 +3433,12 @@ canvas.crtEnabled {
   border: 1px solid var(--sub-panel-inner-border);
   color: var(--sub-panel-btn-idle);
   border-radius: var(--sub-panel-btn-radius);
-  padding: 3px 8px;
+  padding: 4px 7px;
+  min-width: 30px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
   white-space: nowrap;

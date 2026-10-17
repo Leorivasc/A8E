@@ -16,6 +16,8 @@
     const serialOutputClockAvailable = cfg.serialOutputClockAvailable;
     const serialOutputClockPeriod = cfg.serialOutputClockPeriod;
     const serialOutputClockNextCycle = cfg.serialOutputClockNextCycle;
+    const serialInputClockPeriod = cfg.serialInputClockPeriod;
+    const serialCommandSpeedSupported = cfg.serialCommandSpeedSupported;
     const traceSerialEvent = cfg.traceSerialEvent;
 
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
@@ -26,7 +28,8 @@
 
     const DISK_HEADER_SIZE = 16;
     const DISK_SECTOR_SIZE_SINGLE = 128;
-    const DISK_SECTOR_SIZE_ENHANCED = 256;
+    const DISK_SECTOR_SIZE_DOUBLE = 256;
+    const DISK_SECTOR_SIZE_LARGE = 512;
     const DISK_BOOT_SECTORS = 3;
 
     const CHAR_ACK = "A".charCodeAt(0);
@@ -71,6 +74,17 @@
       return true;
     }
 
+    function serialInputByteDelay(ctx) {
+      if (typeof serialInputClockPeriod === "function") {
+        const period = serialInputClockPeriod(ctx) | 0;
+        // AHRM 10.5: drive-side transmit timing is independent from the
+        // computer's POKEY receive clock. Model the generic US Doubler byte
+        // interval explicitly while retaining the standard timing fallback.
+        if (period > 0 && period <= 20) return 220;
+      }
+      return SERIAL_INPUT_DATA_READY_CYCLES;
+    }
+
     function scheduleSerialOutput(ctx, now, scheduleNeed, scheduleDone) {
       const io = ctx.ioData;
       if (!serialOutputIsAvailable(ctx)) {
@@ -110,6 +124,67 @@
       return true;
     }
 
+    function queueSerialOutput(ctx, now) {
+      const io = ctx.ioData;
+      if (!serialOutputIsAvailable(ctx)) {
+        io.serialOutputBytePending = false;
+        io.serialOutputNeedDataCycle = CYCLE_NEVER;
+        io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
+        if (ctx.ram && IO_IRQEN_IRQST !== undefined)
+          ctx.ram[IO_IRQEN_IRQST] &= ~0x08;
+        cycleTimedEventUpdate(ctx);
+        return false;
+      }
+
+      io.serialOutputBytePending = true;
+      // The first byte waits for the next output-clock load edge.  Once the
+      // shift register is active, a write only replaces the one-byte holding
+      // register; it cannot create an earlier DATA NEEDED event.
+      if (!io.serialOutputShiftActive &&
+          (io.serialOutputNeedDataCycle === CYCLE_NEVER ||
+           io.serialOutputNeedDataCycle <= now)) {
+        scheduleSerialOutput(ctx, now, true, true);
+      }
+      return true;
+    }
+
+    function serialOutputDataNeeded(ctx) {
+      const io = ctx.ioData;
+      if (!io.serialOutputBytePending) return false;
+      io.serialOutputShiftValue = io.serialOutputRegisterValue & 0xff;
+      io.serialOutputBytePending = false;
+      io.serialOutputShiftActive = true;
+      return true;
+    }
+
+    function serialOutputTransmissionDone(ctx, eventCycle) {
+      const io = ctx.ioData;
+      if (!io.serialOutputShiftActive) return false;
+
+      transmitSioByte(ctx, io.serialOutputShiftValue & 0xff);
+      if (!io.serialOutputBytePending) {
+        io.serialOutputShiftActive = false;
+        return false;
+      }
+
+      io.serialOutputShiftValue = io.serialOutputRegisterValue & 0xff;
+      io.serialOutputBytePending = false;
+      io.serialOutputShiftActive = true;
+      const period = serialOutputDelay(ctx, SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES);
+      io.serialOutputTransmissionDoneCycle =
+        (eventCycle | 0) + period * 20;
+      cycleTimedEventUpdate(ctx);
+      return true;
+    }
+
+    function serialOutputTransmitNow(ctx) {
+      const io = ctx.ioData;
+      if (!io.serialOutputShiftActive) serialOutputDataNeeded(ctx);
+      io.serialOutputNeedDataCycle = CYCLE_NEVER;
+      io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
+      return serialOutputTransmissionDone(ctx, effectiveEventCycle(ctx));
+    }
+
     function setSioCommandLine(ctx, level) {
       const io = ctx.ioData;
       if (io && typeof io.piaSetControlLine === "function")
@@ -123,21 +198,76 @@
       io.sioInIndex = 0;
       io.sioInSize = 0;
       io.sioPendingReadSize = 0;
+      io.sioPendingWriteResult = 0;
+      io.sioInReady = false;
+    }
+
+    function traceSio(ctx, event, fields) {
+      const io = ctx && ctx.ioData;
+      if (io) {
+        const sp = ctx.cpu && Number.isFinite(ctx.cpu.sp)
+          ? ctx.cpu.sp & 0xff
+          : null;
+        const stack = sp === null || !ctx.ram
+          ? null
+          : Array.from({ length: 8 }, function (_, index) {
+              return ctx.ram[0x100 + ((sp + 1 + index) & 0xff)] & 0xff;
+            });
+        const trace = Array.isArray(io.sioTrace) ? io.sioTrace : (io.sioTrace = []);
+        const record = Object.assign({
+          event: event,
+          cycle: ctx.cycleCounter,
+          pc: Number.isFinite(ctx.currentInstructionPc)
+            ? (ctx.currentInstructionPc & 0xffff)
+            : null,
+          sp: sp,
+          stack: stack,
+        }, fields || {});
+        trace.push(record);
+        if (trace.length > 128) trace.splice(0, trace.length - 128);
+      }
+      if (typeof traceSerialEvent === "function")
+        traceSerialEvent(ctx, event, fields);
     }
 
     function queueSerinResponse(ctx, now, size) {
       const io = ctx.ioData;
       io.sioInSize = size | 0;
       io.sioInIndex = 0;
+      io.sioInReady = false;
       io.serialInputDataReadyCycle = now + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+      traceSio(ctx, "SIO_RESPONSE_QUEUED", {
+        size: io.sioInSize,
+        firstByte: io.sioBuffer[0] & 0xff,
+        pendingReadSize: io.sioPendingReadSize | 0,
+        pendingWriteResult: io.sioPendingWriteResult | 0,
+      });
       cycleTimedEventUpdate(ctx);
+    }
+
+    function serialInputReady(ctx) {
+      const io = ctx.ioData;
+      if ((io.sioInSize | 0) <= 0 || io.sioInReady) return false;
+
+      // A completed serial byte is copied into SERIN before POKEY asserts
+      // the serial-input IRQ. The CPU reads this holding register afterward.
+      ctx.ram[IO_SEROUT_SERIN] =
+        io.sioBuffer[io.sioInIndex & 0xffff] & 0xff;
+      io.sioInIndex = (io.sioInIndex + 1) & 0xffff;
+      io.sioInSize = (io.sioInSize - 1) | 0;
+      io.sioInReady = true;
+      return true;
     }
 
     function diskSectorSize(disk) {
       let s = DISK_SECTOR_SIZE_SINGLE;
       if (disk && disk.length >= 6) {
         s = (disk[4] & 0xff) | ((disk[5] & 0xff) << 8);
-        if (s !== DISK_SECTOR_SIZE_SINGLE && s !== DISK_SECTOR_SIZE_ENHANCED) {
+        if (
+          s !== DISK_SECTOR_SIZE_SINGLE &&
+          s !== DISK_SECTOR_SIZE_DOUBLE &&
+          s !== DISK_SECTOR_SIZE_LARGE
+        ) {
           s = DISK_SECTOR_SIZE_SINGLE;
         }
       }
@@ -146,13 +276,24 @@
 
     function sectorBytesAndOffset(sectorIndex, sectorSize) {
       if (sectorIndex <= 0) return null;
+      // AHRM 10.1/10.3: only 256-byte DD media exposes the first three
+      // logical sectors as 128-byte boot transfers. Larger-sector devices
+      // transfer their native size for every sector.
+      const shortBootSectors = sectorSize === DISK_SECTOR_SIZE_DOUBLE;
+      const bootBytes = shortBootSectors
+        ? DISK_SECTOR_SIZE_SINGLE
+        : sectorSize;
       const bytes =
-        sectorIndex <= DISK_BOOT_SECTORS ? DISK_SECTOR_SIZE_SINGLE : sectorSize;
+        shortBootSectors && sectorIndex <= DISK_BOOT_SECTORS
+          ? bootBytes
+          : sectorSize;
       const index =
-        sectorIndex <= DISK_BOOT_SECTORS
-          ? (sectorIndex - 1) * DISK_SECTOR_SIZE_SINGLE
-          : (sectorIndex - (DISK_BOOT_SECTORS + 1)) * sectorSize +
-            DISK_SECTOR_SIZE_SINGLE * DISK_BOOT_SECTORS;
+        shortBootSectors && sectorIndex <= DISK_BOOT_SECTORS
+          ? (sectorIndex - 1) * bootBytes
+          : shortBootSectors
+            ? (sectorIndex - (DISK_BOOT_SECTORS + 1)) * sectorSize +
+              DISK_BOOT_SECTORS * bootBytes
+            : (sectorIndex - 1) * sectorSize;
       const offset = DISK_HEADER_SIZE + index;
       return { bytes: bytes | 0, offset: offset | 0 };
     }
@@ -216,6 +357,15 @@
       return true;
     }
 
+    function queuePendingWriteResult(ctx, now) {
+      const io = ctx.ioData;
+      const result = io.sioPendingWriteResult | 0;
+      if (result === 0) return false;
+      io.sioPendingWriteResult = 0;
+      queueSingleByteResponse(ctx, now, result);
+      return true;
+    }
+
     function canAccessSector(disk, diskSize, sectorInfo) {
       return (
         !!disk &&
@@ -259,6 +409,21 @@
       }
 
       return null;
+    }
+
+    // AHRM 10.2: STATUS byte +1 normally reports the (inverted) FDC status
+    // from the last sector operation.  It is controller state, not a property
+    // of the ATR header or a constant "media ready" flag.  Keep it per drive
+    // so that a STATUS issued before the first sector command observes the
+    // reset latch, while a completed read can update the value independently.
+    function diskFdcStatus(io, deviceSlot) {
+      if (!io.sioDiskFdcStatus) io.sioDiskFdcStatus = new Uint8Array(DISK_DEVICE_COUNT);
+      return io.sioDiskFdcStatus[deviceSlot & 7] & 0xff;
+    }
+
+    function setDiskFdcStatus(io, deviceSlot, value) {
+      if (!io.sioDiskFdcStatus) io.sioDiskFdcStatus = new Uint8Array(DISK_DEVICE_COUNT);
+      io.sioDiskFdcStatus[deviceSlot & 7] = value & 0xff;
     }
 
     // Application-layer observers may persist a disk image after a successful
@@ -310,15 +475,16 @@
             return;
           }
           buf.set(disk.subarray(si.offset, si.offset + si.bytes), 2);
+          // The virtual drive completed a data read without an FDC error.
+          // Report that result on a later STATUS request (AHRM 10.2).
+          setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
           queueAckData(ctx, now, 2, si.bytes);
           notifyDiskActivity(io, mounted, "read");
           return;
         }
 
         if (cmd === CMD_HIGH_SPEED_INDEX) {
-          // AHRM 10.3: a disk drive may answer this command with the
-          // US Doubler divisor. Type 1 polls using $3F are filtered before
-          // reaching this disk handler and receive no response instead.
+          // AHRM 10.3: generic US Doubler divisor.
           buf[2] = 0x0a;
           queueAckData(ctx, now, 2, 1);
           return;
@@ -332,6 +498,15 @@
 
         if (cmd === CMD_STATUS) {
           // STATUS
+          // AHRM 10.3: 1050 Turbo marks high-speed commands with bit 7 of
+          // DAUX2. This generic drive does not implement Turbo mode. Reject
+          // its STATUS probe instead of treating the marker as a normal
+          // status request; otherwise MyPicoDOS can select Turbo mode and
+          // later reinterpret the marker as the high sector-number bit.
+          if (aux2 & 0x80) {
+            queueDeviceNack(ctx, now);
+            return;
+          }
           if (!disk || !disk.length || disk[0] === 0) {
             queueDeviceNack(ctx, now);
             return;
@@ -339,17 +514,29 @@
           writeAckComplete(buf);
           if (sectorSize === DISK_SECTOR_SIZE_SINGLE) {
             buf[2] = 0x10;
-            buf[3] = 0x00;
-            buf[4] = 0x01;
+            buf[3] = diskFdcStatus(io, mounted.deviceSlot);
+            // AHRM 10.2: this is the format timeout, not the normal
+            // command timeout. Keep it in the range used by real drives so
+            // DOS does not reuse an unrealistically short value for another
+            // drive's FORMAT command.
+            buf[4] = 0xe0;
             buf[5] = 0x00;
-            buf[6] = 0x11;
+          } else if (sectorSize === DISK_SECTOR_SIZE_LARGE) {
+            // AHRM 10.1: 512-byte media does not use the DD boot-sector
+            // exception. Use the TOMS-compatible 512-byte status marker.
+            buf[2] = 0x50;
+            buf[3] = diskFdcStatus(io, mounted.deviceSlot);
+            buf[4] = 0xe0;
+            buf[5] = 0x00;
           } else {
             buf[2] = 0x30;
-            buf[3] = 0x00;
-            buf[4] = 0x01;
+            buf[3] = diskFdcStatus(io, mounted.deviceSlot);
+            buf[4] = 0xe0;
             buf[5] = 0x00;
-            buf[6] = 0x31;
           }
+          // This checksum belongs to the status payload, not to a density
+          // template.  The latched FDC status is allowed to vary by command.
+          buf[6] = sioChecksum(buf.subarray(2, 6), 4);
           queueSerinResponse(ctx, now, 7);
           notifyDiskActivity(io, mounted, "status");
           return;
@@ -374,6 +561,7 @@
           io.sioPendingCmd = cmd & 0xff;
           io.sioPendingSector = sectorIndex2 & 0xffff;
           io.sioPendingBytes = si2.bytes | 0;
+          io.sioPendingWriteResult = 0;
 
           // ACK command frame; host will then send the data frame.
           queueSingleByteResponse(ctx, now, CHAR_ACK);
@@ -381,15 +569,25 @@
         }
 
         if (cmd === CMD_FORMAT) {
-          // FORMAT: clear data area (very minimal).
+          // FORMAT: clear the data area and return the sector-sized bad-sector
+          // list required by the disk protocol. An empty list is terminated
+          // by $FFFF (AHRM 10.4, Format).
           if (!disk || !diskSize || diskSize <= DISK_HEADER_SIZE) {
             queueDeviceNack(ctx, now);
             return;
           }
           disk.fill(0, DISK_HEADER_SIZE);
+          buf.fill(0, 2, 2 + sectorSize);
+          buf[2] = 0xff;
+          buf[3] = 0xff;
+          buf[sectorSize + 2] = sioChecksum(
+            buf.subarray(2, sectorSize + 2),
+            sectorSize,
+          );
+          setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
           notifyDiskMediaChanged(io, mounted);
           notifyDiskActivity(io, mounted, "format");
-          queueAckComplete(ctx, now);
+          queueAckData(ctx, now, 2, sectorSize);
           return;
         }
 
@@ -422,6 +620,14 @@
           !canAccessSector(disk, diskSize, si) ||
           si.bytes !== payloadBytes
         ) {
+          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
+            command: cmd,
+            payloadBytes: payloadBytes | 0,
+            sector: io.sioPendingSector | 0,
+            calculatedChecksum: calculated,
+            providedChecksum: providedCrc & 0xff,
+            result: CHAR_NACK,
+          });
           queueDeviceNack(ctx, now);
           return;
         }
@@ -438,8 +644,15 @@
               break;
             }
           }
-          writeAckStatus(buf, ok ? CHAR_COMPLETE : CHAR_ERROR);
-          queueSerinResponse(ctx, now, 2);
+          setDiskFdcStatus(io, mounted.deviceSlot, ok ? 0xff : 0x00);
+          io.sioPendingWriteResult = ok ? CHAR_COMPLETE : CHAR_ERROR;
+          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
+            command: cmd,
+            payloadBytes: payloadBytes | 0,
+            sector: io.sioPendingSector | 0,
+            result: io.sioPendingWriteResult,
+          });
+          queueSingleByteResponse(ctx, now, CHAR_ACK);
           if (ok) notifyDiskActivity(io, mounted, "verify");
           return;
         }
@@ -448,7 +661,41 @@
         disk.set(buf.subarray(payloadOffset, payloadOffset + si.bytes), si.offset);
         notifyDiskMediaChanged(io, mounted);
         notifyDiskActivity(io, mounted, "write");
-        queueAckComplete(ctx, now);
+        if (cmd === CMD_WRITE_SECTOR) {
+          // AHRM 10.4: WRITE includes a drive-side readback verification.
+          // The emulated media is memory-backed, so no wall-clock delay is
+          // needed; the data is nevertheless re-read before reporting the
+          // final result.
+          let verified = true;
+          for (let vi = 0; vi < si.bytes; vi++) {
+            if (
+              (disk[si.offset + vi] & 0xff) !==
+              (buf[payloadOffset + vi] & 0xff)
+            ) {
+              verified = false;
+              break;
+            }
+          }
+          setDiskFdcStatus(io, mounted.deviceSlot, verified ? 0xff : 0x00);
+          io.sioPendingWriteResult = verified ? CHAR_COMPLETE : CHAR_ERROR;
+          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
+            command: cmd,
+            payloadBytes: payloadBytes | 0,
+            sector: io.sioPendingSector | 0,
+            result: io.sioPendingWriteResult,
+          });
+          queueSingleByteResponse(ctx, now, CHAR_ACK);
+        } else {
+          setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
+          io.sioPendingWriteResult = CHAR_COMPLETE;
+          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
+            command: cmd,
+            payloadBytes: payloadBytes | 0,
+            sector: io.sioPendingSector | 0,
+            result: CHAR_COMPLETE,
+          });
+          queueSingleByteResponse(ctx, now, CHAR_ACK);
+        }
       }
 
       return {
@@ -469,11 +716,16 @@
       const io = ctx.ioData;
       const now = effectiveEventCycle(ctx);
 
-      // CB2 is the active-low SIO command line. This electrical transition is
-      // intentionally independent of the response-byte state machine.
+      // SEROUT writes fill POKEY's one-byte holding register.  The SIO bus
+      // sees the byte only when the output shift register completes it.
       setSioCommandLine(ctx, 0);
+      io.serialOutputRegisterValue = value & 0xff;
+      queueSerialOutput(ctx, now);
+    }
 
-      scheduleSerialOutput(ctx, now, true, true);
+    function transmitSioByte(ctx, value) {
+      const io = ctx.ioData;
+      const now = effectiveEventCycle(ctx);
 
       const buf = io.sioBuffer;
 
@@ -486,8 +738,6 @@
 
         const expected = (io.sioPendingBytes | 0) + 1; // data + checksum
         if (dataIndex !== expected) return;
-
-        scheduleSerialOutput(ctx, now, false, true);
 
         const dataBytes = io.sioPendingBytes | 0;
         const provided = buf[SIO_DATA_OFFSET + dataBytes] & 0xff;
@@ -532,16 +782,63 @@
       setSioCommandLine(ctx, 1);
 
       if (sioChecksum(buf, 4) !== (buf[4] & 0xff)) {
-        queueDeviceNack(ctx, now);
+        // AHRM 9.1 normally keeps checksum errors silent so devices cannot
+        // interfere with one another. AHRM 5.10 also documents the XL/XE OS
+        // first-byte race, where real disk drives answer an addressed,
+        // mounted disk with NAK so the OS can retry the command. Apply that
+        // compatibility rule only to an addressed virtual disk; absent IDs
+        // remain electrically silent.
+        const invalidDevice = buf[0] & 0xff;
+        const invalidCommand = buf[1] & 0xff;
+        const invalidAux1 = buf[2] & 0xff;
+        const invalidAux2 = buf[3] & 0xff;
+        const calculatedChecksum = sioChecksum(buf, 4);
+        const providedChecksum = buf[4] & 0xff;
+        if (
+          invalidDevice >= DISK_DEVICE_ID_BASE &&
+          invalidDevice < DISK_DEVICE_ID_BASE + DISK_DEVICE_COUNT &&
+          getMountedDiskForDevice(io, invalidDevice)
+        ) {
+          queueDeviceNack(ctx, now);
+        }
+        traceSio(ctx, "SIO_COMMAND_DROPPED", {
+          device: invalidDevice,
+          command: invalidCommand,
+          aux1: invalidAux1,
+          aux2: invalidAux2,
+          calculatedChecksum: calculatedChecksum,
+          providedChecksum: providedChecksum,
+          reason: "invalid-command-checksum",
+        });
         return;
       }
-
-      scheduleSerialOutput(ctx, now, false, true);
 
       const dev = buf[0] & 0xff;
       const cmd2 = buf[1] & 0xff;
       const aux1 = buf[2] & 0xff;
       const aux2 = buf[3] & 0xff;
+
+      if (
+        typeof serialCommandSpeedSupported === "function" &&
+        !serialCommandSpeedSupported(ctx, dev)
+      ) {
+        traceSio(ctx, "SIO_COMMAND_DROPPED", {
+          device: dev,
+          command: cmd2,
+          aux1: aux1,
+          aux2: aux2,
+          reason: "unsupported-device-speed",
+        });
+        return;
+      }
+
+      traceSio(ctx, "SIO_COMMAND_RECEIVED", {
+        device: dev,
+        command: cmd2,
+        aux1: aux1,
+        aux2: aux2,
+        checksum: buf[4] & 0xff,
+      });
       const handler2 = sioDeviceHandlers[dev];
       if (handler2 && handler2.onCommandFrame) {
         handler2.onCommandFrame(ctx, now, cmd2, aux1, aux2);
@@ -561,18 +858,30 @@
 
     function serinRead(ctx) {
       const io = ctx.ioData;
-      if ((io.sioInSize | 0) > 0) {
-        const b = io.sioBuffer[io.sioInIndex & 0xffff] & 0xff;
-        io.sioInIndex = (io.sioInIndex + 1) & 0xffff;
-        io.sioInSize = (io.sioInSize - 1) | 0;
-        ctx.ram[IO_SEROUT_SERIN] = b;
+      if (io.sioInReady) {
+        io.sioInReady = false;
+        const b = ctx.ram[IO_SEROUT_SERIN] & 0xff;
+        traceSio(ctx, "SIO_RESPONSE_READ", {
+          value: b,
+          remaining: io.sioInSize | 0,
+          pendingReadSize: io.sioPendingReadSize | 0,
+          pendingWriteResult: io.sioPendingWriteResult | 0,
+        });
         if ((io.sioInSize | 0) > 0) {
           io.serialInputDataReadyCycle =
-            effectiveEventCycle(ctx) + SERIAL_INPUT_DATA_READY_CYCLES;
+            effectiveEventCycle(ctx) + serialInputByteDelay(ctx);
           cycleTimedEventUpdate(ctx);
         } else {
           io.sioInIndex = 0;
-          queuePendingReadData(ctx, effectiveEventCycle(ctx));
+          const now = effectiveEventCycle(ctx);
+          if (!queuePendingReadData(ctx, now))
+            queuePendingWriteResult(ctx, now);
+          traceSio(ctx, "SIO_RESPONSE_PHASE_COMPLETE", {
+            pendingReadSize: io.sioPendingReadSize | 0,
+            pendingWriteResult: io.sioPendingWriteResult | 0,
+            nextSize: io.sioInSize | 0,
+            nextFirstByte: io.sioInSize > 0 ? io.sioBuffer[0] & 0xff : null,
+          });
         }
       }
       return ctx.ram[IO_SEROUT_SERIN] & 0xff;
@@ -580,6 +889,10 @@
 
     return {
       seroutWrite: seroutWrite,
+      serialOutputTransmitNow: serialOutputTransmitNow,
+      serialOutputDataNeeded: serialOutputDataNeeded,
+      serialOutputTransmissionDone: serialOutputTransmissionDone,
+      serialInputReady: serialInputReady,
       serinRead: serinRead,
     };
   }

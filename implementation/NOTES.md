@@ -1,8 +1,741 @@
 # NOTES.md
 
+- 2026-10-17: fixed `publish-tauri.yml` so the rolling `tauri-latest` release
+  no longer force-moves a shared Git tag. The release action now updates the
+  existing prerelease assets in place with `overwrite_files: true`; the tag is
+  created only on first release creation and remains immutable. The release
+  body continues to record the exact `GITHUB_SHA` used to build the packages.
+  This prevents local clones from receiving conflicting `tauri-latest` tag
+  updates during normal synchronization.
+
+- 2026-10-16: opened the separate real-hardware validation project in
+  `implementation/REAL_HARDWARE_VALIDATION.md`. It is a session handoff for
+  PAL/NTSC Atari 800 XL measurements covering POKEY/SIO, ANTIC/GTIA, raster
+  effects, audio, and representative ATR/XEX software. It records the required
+  hardware/capture setup, existing AHRM-07/AHRM-08 fixtures, evidence format,
+  and signoff criteria. Until that project is completed, public status remains
+  “AHRM-aligned and contract-tested,” not fully hardware-certified.
+
+- 2026-10-16: documented the explicit AHRM alignment boundary for the current
+  POKEY, SIO, ANTIC, and GTIA updates. Serial holding/shift-register timing,
+  SIO response phases and supported high-speed paths, sector geometry,
+  `STATUS`/`FORMAT`/write verification, ANTIC/GTIA DMA and priority behavior,
+  and the `CHBASE` delay are AHRM-based and covered by native/JavaScript
+  contract tests. Mounting D1:-D8:, dirty/activity state, XEX conversion,
+  persistence, tracing, and Full Library behavior are emulator integration,
+  not hardware-compliance claims. AHRM-07 is certified only for its stated
+  synthetic PMG/GTIA scope; broader real-title and PAL/NTSC comparisons,
+  analog POKEY calibration, and the accepted jsA8E P1 CPU/POKEY phase remain
+  open validation work.
+
+- 2026-10-15: completed explicit age-based trash purge in browser and native
+  Full Library surfaces. Both implementations accept a caller-selected cutoff,
+  require confirmation in the UI, purge only older recoverable records, and
+  keep automatic retention policy optional; native repository regression
+  coverage verifies the cutoff and purged-count contract.
+
+- 2026-10-15: hardened the native age-based trash UI for narrow `time_t`
+  platforms by clamping pre-epoch cutoffs before age arithmetic, preserving
+  the same no-match behavior as the browser implementation for very large
+  retention ages.
+
+- 2026-10-15: clarified the Full Library conflict-status documentation. The
+  browser and native paths now explicitly document their implemented
+  non-destructive conflict classification and preservation, while leaving
+  local/imported/merged interactive choice open as a product decision because
+  ATR/XEX payloads have no generic safe three-way merge.
+
+- 2026-10-15: aligned imported name-collision handling with ordinary
+  filesystem suffixes in both Full Library implementations. A colliding
+  `file.atr` now becomes `file(1).atr`, then `file(2).atr`, scoped to the
+  destination folder and preserving the original extension; JavaScript and
+  native package regressions cover the policy.
+
+- 2026-10-15: recorded the explicit conflict policy for Full Library imports:
+  divergent binary ATR/XEX content is always kept on both sides, with the
+  incoming copy receiving the filesystem-style numeric name suffix. This
+  avoids an unsafe generic three-way merge while retaining every payload.
+
+- 2026-10-15: completed the package-operation progress/cancellation contract
+  in both Full Library implementations. Browser export, preview, and import
+  report phase/item progress and honor AbortSignal or callback cancellation;
+  the panel exposes a Stop action. Native keeps the original package APIs,
+  adds callback variants for complete/workspace export and import, reports
+  validation/merge progress, and cancels before staged repository commits;
+  the focused native Library window now maps Escape to that callback.
+  Regression coverage verifies callback delivery, cancellation errors, and
+  unchanged native repository state after a canceled import.
+
+- 2026-10-15: completed the cross-surface revision summary in the Library
+  status bars. Browser selection shows preferred revision, history count,
+  modification time, dirty state, and mounted device; native repository
+  records now parse retained-revision metadata and the SDL window shows the
+  same compact information for library and ATR views.
+
+- 2026-10-15: completed the native package preview/confirmation path. The
+  repository exposes a non-mutating `.a8e` summary API; SDL keyboard imports
+  and package drops now show new, duplicate, conflict, folder, payload, and
+  restorable-workspace counts before asking for confirmation, including
+  newer/older/concurrent revision categories and name collisions. Both paths
+  reuse the staged non-destructive merge, warn when the package library
+  version is newer, and restore workspace mounts only after a successful
+  commit; canceling the confirmation leaves dirty local media unflushed.
+  Native preview folder/name counts now resolve the mapped nested hierarchy
+  by parent/name, matching the actual merge even when package and local IDs
+  differ; the repository probe covers that case.
+
+- 2026-10-15: aligned the browser package confirmation with the native
+  preview summary. The browser prompt now includes new folders, renamed
+  entries, transported revisions, unique payloads, and restorable mounts;
+  package planning counts the content-addressed payload paths and regression
+  coverage verifies the count for both ordinary and revision-bearing exports.
+
+- 2026-10-15: completed configurable package-size guards in both surfaces.
+  `.a8e` readers and writers now enforce archive, manifest, per-payload, and
+  aggregate-payload limits before import or export; browser callers use the
+  four `max*Bytes` options and native callers use
+  `A8E_LibraryPackageLimits_t` through the package/repository `WithLimits`
+  APIs. Default limits and rejection regressions are covered natively and in
+  the JavaScript package test.
+
+- 2026-10-15: completed forward-compatible schema handling for additive
+  package fields. Both readers now accept schema versions newer than v1 when
+  the known required structure remains valid, preserve the non-destructive
+  import path, and expose a warning that unknown fields are ignored; invalid
+  older/zero schema versions remain rejected. Browser and native regressions
+  cover the warning/version reporting.
+
+- 2026-10-15: aligned browser package-import name conflict handling with the
+  folder-scoped native policy. Equal names in different folders now remain
+  valid; only collisions within the mapped destination folder are renamed.
+  The package regression covers both the preserved nested name and a root
+  collision.
+
+- 2026-10-15: completed non-destructive native package merging. Existing local
+  records and folders now survive `.a8e` imports; equal hashes deduplicate,
+  divergent stable IDs become recoverable imported conflict copies, folder
+  hierarchies are remapped beneath sibling-safe IDs, referenced payloads are
+  staged atomically, and unoccupied workspace slots may be restored. The SDL
+  window now unmounts old media only after a successful import, so a failed
+  package leaves the active workspace intact. The native repository probe
+  covers local preservation, a divergent same-ID import, and a nested imported
+  folder.
+
+- 2026-10-15: completed native SDL drag-and-drop ingestion for direct ATR/XEX
+  files, complete `.a8e` packages, and recursive directories. Dropped folders
+  recreate nested repository folders, preserve folder-scoped duplicate checks,
+  import content-addressed blobs atomically, and do not traverse POSIX symbolic
+  links. `library_repository_probe` now covers empty-directory initialization,
+  direct image import, payload identity, and duplicate rejection.
+
+- 2026-10-15: completed explicit retained-revision promotion in both Library
+  surfaces. Browser history actions select a retained revision transactionally;
+  native `Y` accepts a revision ID, unmounts affected media, preserves the
+  displaced current bytes in history, updates `preferredRevisionId`, and
+  reloads the repository. Native repository probes cover payload/hash checks,
+  metadata promotion, and persistence.
+
+- 2026-10-15: added compact keyboard navigation to the native Library list.
+  Up/Down, PageUp/PageDown, Home/End, and Enter now move through filtered
+  folder/trash rows and activate folders or ATR entries without requiring a
+  mouse; the existing keyboard action shortcuts remain unchanged.
+
+- 2026-10-15: added crash-loss mitigation for mounted native Library media.
+  Dirty mounted images are now persisted at a five-second cadence as well as
+  on eject and shutdown, and the AtariIo dirty latch is cleared only after a
+  successful repository commit. Browser debounced flushes and IndexedDB
+  transactions remain the corresponding browser-side recovery path.
+
+- 2026-10-15: completed the recoverable trash workflow in both Library
+  implementations. Browser deletes atomically move entries into a dedicated
+  IndexedDB trash store; the UI provides a trash view, restore actions, and
+  purge-all. Native deletes move records into the optional manifest `trash`
+  array; `B` opens it, `R` restores to the current folder, and `P` purges the
+  selected record. Restores guard name collisions and purges remove payloads
+  only after all active and retained-revision references disappear. Package
+  exports strip trash records and blobs in both implementations.
+
+- 2026-10-15: added read-only storage-capacity reporting to both Library
+  surfaces. Browser exposes `getStorageEstimate()` and a database toolbar
+  action using the StorageManager estimate when available; native exposes `H`
+  and reports free/used space for the `library` volume using the platform
+  filesystem API. Unsupported/unavailable estimates leave library contents
+  unchanged.
+
+- 2026-10-15: completed native size/modified sorting for the Full Library
+  compact list. `S` now cycles name, type, ascending payload size, and newest
+  modification time while retaining deterministic name tie-breaks. The
+  repository parser carries optional `modifiedAt` metadata from schema-v1
+  records, with an empty fallback for older manifests.
+
+- 2026-10-15: completed native compact-list sorting with `S` for name/type,
+  alongside the existing `T` type and `Q` mount-state filters. Sorting is
+  applied after folder/search filtering and keeps folder rows at the top.
+
+- 2026-10-15: completed the native side of the Library type/status filter
+  slice. `T` cycles all/ATR/XEX and `Q` cycles all/mounted/unmounted while
+  preserving folder navigation and search; the browser already exposes the
+  equivalent selectors. Both filters are read-only and reset the list scroll.
+
+- 2026-10-15: import planning now merges previously unseen revision records
+  into an existing same-ID/same-content entry inside the same IndexedDB
+  transaction. Divergent content still remains a separate conflict copy, and
+  the preview counts history updates as transported revisions.
+
+- 2026-10-15: enriched browser import previews with newer/older/concurrent
+  conflict counts and the number of transported revisions. The confirmation
+  dialog now exposes those categories before the atomic commit; the existing
+  non-destructive conflict-copy policy is unchanged.
+
+- 2026-10-15: browser directory uploads now recreate `webkitRelativePath`
+  subfolders beneath the current library folder instead of flattening them.
+  Folder-scoped duplicate checks now match native behavior, so equal display
+  names are allowed in different folders while sibling collisions remain
+  guarded. Existing single-file uploads and replacements retain their prior
+  behavior.
+
+- 2026-10-15: added portable schema-v1-compatible revision history. Browser
+  entries now retain revision bytes and parent/preferred IDs across IndexedDB
+  persistence, flushes, replacements, exports, and imports; packages validate
+  and deduplicate revision blobs, and native working-copy saves retain the old
+  content as a revision blob in the manifest instead of deleting it. Native
+  removal now prunes all unreferenced historical blobs. Stable-ID conflicts
+  therefore remain recoverable on both sides; explicit revision promotion is
+  now covered by the browser and native surfaces. Interactive three-way
+  merging remains future work. Package, disk library, and native repository
+  tests cover the round trip.
+
+- 2026-10-15: connected native ATR integrity diagnostics to the SDL Library
+  window with `V` for the selected ATR. The browser and native user surfaces
+  now both expose the same non-destructive verification operation; XEX rows
+  are explicitly rejected by the ATR-only action.
+
+- 2026-10-15: added browser Full Library sorting and type/status filters.
+  The persistent list now exposes ATR/XEX, mounted/dirty/clean filters and
+  name/type/size/modified ordering while retaining folder search and selection
+  behavior. The native SDL list already reports type and mount state in its
+  compact rows; its keyboard surface remains intentionally small.
+
+- 2026-10-15: added a separate workspace export path to the Full Library
+  package model. Browser `exportWorkspacePackage` and the native
+  `A8E_LibraryRepository_ExportWorkspacePackageFile` include only entries
+  assigned to D1:-D8:, their referenced blobs, the required folder ancestry,
+  and the existing workspace assignment. The browser marks these packages
+  with `scope: "workspace"` and defaults the filename to `workspace.a8e`;
+  complete-library exports remain unchanged. The browser package and disk
+  library tests and the native repository probe pass.
+
+- 2026-10-15: completed the Full Library diagnostic ATR integrity slice in
+  both implementations. `jsA8E` and native A8E now expose the same read-only
+  verification model: ATR geometry, DOS 2.x/MyDOS VTOC limits, active
+  directory records, reserved/out-of-range sectors, complete sector-chain
+  termination, cycles, duplicate allocation, and used-byte limits are
+  checked without modifying the image. Unknown filesystems remain usable but
+  report a warning. The browser library exposes `verifyFile` and `verifyLibrary`
+  and the ATR rows provide a shield action; native A8E exposes
+  `A8E_LibraryImage_VerifyAtr` and its report structure. The JavaScript ATR and
+  disk-library tests plus the native image probe pass.
+
+- 2026-10-15: completed the first native Full Library folder-editing slice.
+  The native repository now loads schema-v1 `folders` records, supplies
+  persistent create/rename/delete-empty-folder operations, moves and renames
+  entries while preserving stable IDs, and keeps older manifests without a
+  `folders` array compatible by treating them as the `root` folder. The SDL
+  Library window now navigates child folders and `..`, creates folders with
+  `F`, renames the selected folder or entry with `R`, moves the selected entry
+  into the current folder with `M`, and deletes only empty folders. Blank ATR
+  creation also places the new entry in the current folder. The native
+  repository probe covers the folder round trip, name changes, moves, and
+  guarded deletion; the four native library probes, complete native target,
+  and JavaScript automation suite pass.
+
+- 2026-10-13: opened `ATR/prince_of_persia.md` for a reproducible Prince of
+  Persia intro graphics regression. The presentation with music was observed
+  as distorted after rebuilding from `main` on Windows and again after
+  compiling A8E on openSUSE 16. Windows inspection found the expected static
+  SDL2 `2.32.10#1` package from vcpkg, and the generated `main` project did not
+  link the stale Full Library object files that remained in the shared build
+  directory. The cross-platform reproduction therefore makes an external
+  Windows library/backend mismatch unlikely and moves the investigation to a
+  common ANTIC/GTIA/CHBASE/CPU timing regression. A clean isolated build,
+  exact platform/profile capture, and title-level raster comparison remain
+  pending; no fix or title-specific workaround was added.
+
 > Hardware emulation reference: Before implementing any Atari 800 XL PAL/NTSC hardware emulation, use the [AHRM](/AHRM/index.md) as reference.
 
 Simple implementation notes for this repository.
+
+- 2026-10-12: corrected native A8E SIO command-phase sequencing. The host
+  now raises the active-low CB2 command line immediately after the fifth
+  command byte and before checksum/parameter handling, matching AHRM 9.1 and
+  the already aligned jsA8E bus model. This is a generic SIO electrical-state
+  correction used by all addressed devices, not a Last Squadron-specific
+  workaround. A native diagnostic run with Last Squadron also completed the
+  previously failing sector-657 read and continued issuing valid reads
+  without a Disk Error or unsupported-command response.
+
+- 2026-10-12: command-line ATR/XEX boot media now take precedence over the
+  persisted library workspace. When a positional image is supplied, the
+  library no longer restores its D1: assignment over that image; D2:-D8:
+  continue to restore normally, and the explicit medium is kept outside the
+  library panel's mounted-entry bookkeeping.
+
+- 2026-10-12: aligned native GTIA mode 10 playfield/PMG composition with
+  jsA8E and the AHRM priority model. The native per-pixel priority buffer is
+  now 16-bit, mode 10 colors retain their PM0/PM1/PM2/PM3 pseudo-priority
+  bits, and player/missile masks include those bits when PRIOR selects a
+  mode-10 interaction. Background and clipped-border rendering preserve
+  mode-10 PMG pixels instead of treating them as ordinary background. This
+  is a generic GTIA representation change, not a Last Squadron-specific
+  condition.
+
+- 2026-10-12: aligned native A8E CHBASE raster timing with jsA8E and AHRM
+  4.4. The pending character-base latch now starts two color clocks after
+  the final 6502 bus cycle of the write, rather than from the beginning of
+  the instruction. This preserves rasterized character-set changes used by
+  programs such as Last Squadron.
+
+- 2026-10-12: aligned native A8E and jsA8E SIO transmission with the AHRM
+  5.6 POKEY output holding/shift-register model. SEROUT writes now queue one
+  byte, DATA NEEDED loads the shift register, and the virtual SIO device sees
+  the byte only when its ten-bit transmission completes. This preserves the
+  one-byte replacement behavior and resets the pending output state when
+  POKEY enters initialization. Also handled the XL/XE first-byte checksum
+  race documented in AHRM 5.10: an invalid command addressed to a mounted
+  virtual disk receives NAK so the OS can retry, while invalid frames for
+  absent device IDs remain silent as required by AHRM 9.1. Last Squadron was
+  exercised for 120 million jsA8E cycles without a dropped command; native
+  compilation remains pending because the local MSBuild FileTracker fails
+  with Access denied before compilation.
+
+- 2026-10-12: native Library package import now resolves a relative input
+  path from the process working directory first and then from the executable
+  directory. This lets `library.a8e` be imported when it is beside A8E even
+  when Windows starts the executable with a different working directory.
+
+- 2026-10-12: native Library package open failures now include the exact path
+  passed to `fopen`, and also log that path to stderr. This distinguishes a
+  missing package/path-resolution problem from a later package validation
+  error during desktop import.
+
+- 2026-10-12: native Library path commands now discard the command key's
+  queued SDL text-input event. Pressing `I`, `E`, `N`, or ATR-view `D` no
+  longer prefixes the user-provided path or filename with that command letter.
+
+- 2026-10-12: expanded the native Library window's 5x5 glyph table with a
+  real blank-space glyph and common filename punctuation. Previously every
+  unsupported character, including spaces, was rendered as `?`, which made
+  imported library names and status text appear corrupted.
+
+- 2026-10-12: widened the native Library filename column by compacting and
+  moving the drive columns, and added ellipsis truncation at the filename
+  boundary. Long names no longer draw over the type or drive cells.
+
+- 2026-10-12: optimized native workspace persistence. Mount, unmount, and
+  write-protection changes now atomically rewrite only `library.json`; they no
+  longer reload or rewrite every ATR/XEX blob in the repository.
+
+- 2026-10-12: extended native `A8E -h` output with the Atari console-key
+  mappings: F1 HELP, F2 OPTION, F3 SELECT, F4 START, and F5 RESET.
+
+- 2026-10-12: aligned the native ATR directory headers and values by using
+  shared explicit positions for SECT, START, and STATE instead of relying on
+  manual spaces in one header string.
+
+- 2026-10-12: added a three-pixel gap before the ATR SECT column and shifted
+  the following directory columns together, keeping their headers and values
+  aligned while separating them from filenames.
+
+- 2026-10-12: increased the ATR directory-column offset by another three
+  pixels after visual verification, preserving the shared header/value spacing.
+
+- 2026-10-12: corrected the native Library 5x5 `A` glyph's second row from
+  `0x05` to `0x11`, restoring the symmetric `#...#` diagonal pattern.
+
+- 2026-10-12: added a native `A8E -h`/`A8E --help` path that exits before
+  SDL or emulator initialization. The help output documents all command-line
+  arguments, function/system keys, and the native Library window controls.
+
+- 2026-10-12: connected the native A8E floating Library window to the shared
+  ATR inspection core. Clicking an ATR opens a read-only directory/geometry
+  view; Enter previews a selected DOS 2.x/MyDOS file as ATASCII or hexadecimal,
+  D downloads it to a typed path, and unrecognized filesystems expose a raw
+  hexadecimal view. No ATR bytes are modified by this UI path.
+
+- 2026-10-11: completed the jsA8E Assembler Editor icon-only toolbar update by
+  removing the dynamic Pause/Continue text from the shared debug button while
+  retaining its state-specific tooltip and ARIA label.
+
+- 2026-10-11: compacted the jsA8E HostFS, Assembler Editor, and Snapshots
+  toolbar buttons to icon-only controls, matching the Disk Library treatment.
+  Existing hover titles remain the visible function help and explicit ARIA
+  labels preserve accessible names without changing any action handlers.
+
+- 2026-10-11: aligned native A8E STATUS response queuing with jsA8E. The
+  native virtual drive now resets the SERIN response index and schedules the
+  complete seven-byte STATUS frame through the common response helper. This
+  preserves the same response-phase behavior used by PicoDOS while keeping
+  the AHRM 9.1/10.2 drive contract unchanged.
+
+- 2026-10-11: aligned native A8E's `$3F` high-speed index response with AHRM
+  9.1 and jsA8E. The disk read command now returns `ACK` first and queues the
+  separate `Complete + divisor + checksum` data phase, instead of exposing all
+  four bytes as one response. This preserves the SIO phase boundary used by
+  MyPicoDOS during automatic high-speed negotiation.
+
+- 2026-10-11: fixed native A8E window shutdown. SDL reports the operating
+  system close-button action as `SDL_WINDOWEVENT_CLOSE`, not necessarily as
+  `SDL_QUIT`; the main window now exits through the normal cleanup path while
+  the separate Library window continues to close without terminating A8E.
+
+- 2026-10-10: aligned the native and JavaScript virtual drives with AHRM
+  10.1/10.2 for non-DD geometries and controller status. 512-byte-sector
+  media now uses native-size transfers from sector 1 in both implementations,
+  with the matching status marker; successful PUT, WRITE, VERIFY, and FORMAT
+  operations update the per-drive inverted FDC status latch. Added native and
+  JavaScript regressions for the geometry and post-write STATUS behavior.
+
+- 2026-10-10: kept jsA8E Disk Library mounted-device rows on one horizontal
+  grid row after adding separate activity, read/write, and unmount controls.
+  This is presentation-only and does not affect SIO behavior or the library
+  package contract.
+
+- 2026-10-10: corrected generic US Doubler response timing in native A8E and
+  jsA8E. AHRM 10.5 specifies drive-side transmit timing independently from
+  the computer's POKEY receive clock; high-speed response bytes now use the
+  approximately 220-cycle US Doubler byte interval instead of the POKEY
+  receive period. The `$0A` capability remains advertised only for the generic
+  divisor supported by both implementations.
+
+- 2026-10-10: constrained automatic high-speed SIO detection to the generic
+  protocol implemented by the virtual drives. AHRM 10 distinguishes the US
+  Doubler timing from device-specific Turbo, XF551, and other protocols; the
+  native and JavaScript implementations now answer only the standard divisor
+  `$28` and US Doubler divisor `$0A` when Timer 3+4 are linked. Unsupported
+  probe timings remain silent. This prevents MyPicoDOS from classifying a
+  standard drive as 1050 Turbo and using `DAUX2` bit 7 as a sector bit on
+  disks larger than 32,768 sectors.
+
+- 2026-10-10: corrected the remaining MyPicoDOS 4.05 detection path. AHRM
+  10.3 defines bit 7 of `DAUX2` as the 1050 Turbo high-speed marker, while
+  normal 16-bit sector numbers use that same bit only on sector commands.
+  Native A8E and jsA8E now NAK a Turbo-marked `STATUS` probe because the
+  generic virtual drive does not implement Turbo mode. This prevents the
+  detector from selecting Turbo and subsequently reading sector 360 as
+  sector 33128, without restricting valid standard reads above sector 32767.
+
+- 2026-10-10: aligned native and JavaScript SIO response timing for drives that
+  advertise US Doubler high speed. AHRM 5.6 defines a serial byte as twenty
+  half-bit clock periods; response bytes now use the active POKEY Timer 4
+  divisor instead of a fixed 900-cycle interval. Native A8E also flushes its
+  virtual SIO transaction state when SKCTL enters POKEY initialization, matching
+  jsA8E and preventing stale bytes from surviving a PicoDOS speed negotiation.
+
+- 2026-10-10: corrected native A8E handling of unsupported disk commands.
+  The `$48` Happy-drive extension is not part of the standard virtual disk
+  command set; AHRM 9.1 requires a recognized drive to return `NAK` for such
+  a command. A8E previously logged `Unsupported SIO command $48!` and stayed
+  silent, which made DOS wait for its timeout and report a disk error. Native
+  and JavaScript regressions now cover the immediate NAK behavior.
+
+- 2026-10-10: connected mounted-library activity indicators to real SIO
+  operations in both applications. jsA8E now shows a short green `*` for
+  reads and yellow `*` for writes/formats beside each mounted device. Native
+  A8E records the same operation state per D1:-D8: slot with a bounded visual
+  lifetime and colors the mounted drive marker accordingly. The activity
+  state is UI-only and does not alter SIO timing, dirty persistence, or the
+  library package contract.
+
+- 2026-10-09: generalized jsA8E's logical SIO sector geometry. DD ATR media
+  uses 128-byte transfers only for logical sectors 1-3 and 256-byte transfers
+  thereafter through sector 65535; 512-byte logical devices retain their
+  native transfer size even for sector 1. This follows AHRM 10.1/10.3 and is
+  covered by direct 16MB DD and 512-byte-sector regressions.
+
+- 2026-10-09: `jsA8E/js/core/pokey_sio.js` now records an opt-in
+  `SIO_COMMAND_DROPPED` trace event whenever a command frame has an invalid
+  checksum. The device remains electrically silent as required by AHRM 9.1;
+  the trace includes the frame fields, calculated checksum, received checksum,
+  and reason solely to diagnose boot-time framing failures. The SIO regression
+  verifies both the silence and the diagnostic record.
+
+- 2026-10-09: exposed the bounded SIO diagnostic trace through the browser
+  app proxy and Worker debug API. It retains the latest 128 SIO events and is
+  observational only, allowing remote boot investigation without changing
+  SIO responses or media state. Valid command frames include their source CPU
+  PC and a bounded 6502 stack snapshot, which distinguishes the XL/XE OS's
+  normal post-boot Type 3 poll from a disk protocol failure and identifies the
+  SIOV caller even when output is serviced by an IRQ handler.
+
+- 2026-10-09: corrected jsA8E STATUS handling per AHRM 10.2. Byte +1 is now
+  a per-drive, inverted FDC-status latch rather than a fixed media-ready
+  value: it begins in the reset state and changes after a completed sector
+  operation. The four-byte status payload checksum is calculated from that
+  live state. The format timeout remains `$E0`, as required for realistic
+  FORMAT behavior. This restores boot compatibility without misreporting a
+  successful FDC transfer before one has occurred.
+
+- 2026-10-10: mirrored the AHRM 10.2 STATUS controller-state model in native
+  A8E. Its per-drive FDC latch resets when media is mounted or unmounted,
+  records a successful sector read, and is checksummed as part of the live
+  STATUS payload. This keeps native A8E aligned with jsA8E and restores the
+  same boot compatibility without lowering the `$E0` format timeout.
+
+- 2026-10-08: started the Full Library implementation on branch `FullLibrary`.
+  Added a dependency-free ZIP method-0 archive codec to both `jsA8E` and
+  native A8E for the frozen `library.json` v1 package contract. The codec
+  validates UTF-8 paths, CRC-32, central-directory consistency, duplicate and
+  unsafe paths, and corruption. A shared deterministic ZIP fixture is read and
+  produced by both implementations. The JS suite, full native A8E target, and
+  all 13 native CTest probes pass in an isolated Visual Studio/NMake build.
+  The pre-existing `build/msvc` solution still has an environment-specific
+  MSBuild `FileTracker` `Access denied` failure during its incremental build.
+
+- 2026-10-08: added the first portable package layer on top of the ZIP codec.
+  Both applications validate the frozen manifest contract, compute SHA-256
+  content identities, and read/write `library.json` plus content-addressed
+  `blobs/` entries. jsA8E disk-library instances can export their current
+  records and inspect packages through both main-thread and Worker paths;
+  native A8E exposes the matching package API and CTest probe. Import is still
+  validation-only and does not mutate storage until the atomic migration layer
+  is implemented. Also corrected the native ZIP writer's central-directory
+  size calculation, which had been measured after the end record began.
+
+- 2026-10-09: implemented the next Full Library import slice in both
+  applications. jsA8E now separates non-mutating preview from commit, detects
+  equal-hash duplicates, preserves differing stable-ID content as renamed
+  conflict copies, restores available D1:-D8: assignments, persists the
+  incremented `libraryVersion`, and commits imported entries plus metadata in a
+  single IndexedDB transaction. The Disk Library panel now exposes complete
+  Export Library and Import Library actions. Native A8E adds an SDL-independent
+  staged package store that validates complete packages and merges them into the
+  persistent repository without replacing local records. JS and native
+  regressions cover conflicts, invalid-package rollback, and unchanged state
+  after a failed import.
+
+- 2026-10-09: manually validated the browser workflow on the Full Library
+  branch: export the complete library, remove the local contents, and import
+  the exported package again. The library was restored successfully, providing
+  the first practical end-to-end confirmation of the package flow.
+
+- 2026-10-09: implemented the first compact navigation slice in jsA8E.
+  IndexedDB now has a folder store with a root-folder migration for older
+  entries; the package manifest can carry optional folders and entry
+  `folderId` values; the Worker proxy carries folder snapshots and folder
+  mutations; and the Disk Library UI supports the current path, `..`,
+  clickable folders, new folders, upload-to-current-folder, classic D1:-D4:
+  controls, and per-file download/delete actions. The core continues to retain
+  D1:-D8: for package and newer-software compatibility, while D5:-D8: remain
+  hidden in this DOS-oriented view. The native package probe accepts the same
+  optional folder metadata. The complete JavaScript automation suite and
+  folder/package regressions pass. Native incremental compilation could not be
+  rerun in this session because `build/msvc-nmake` lacks `nmake`; the existing
+  `build/msvc` environment still has the unrelated MSBuild FileTracker access
+  failure.
+
+- 2026-10-09: refined the compact navigation layout so the parent-folder
+  action is represented only by the `..` row inside the file table. The current
+  path remains visible in the panel header, with no separate folder-up row
+  between the header and toolbar.
+
+- 2026-10-09: exposed the folder organization operations in the jsA8E view.
+  Files can be moved to a selected folder without changing their stable ID,
+  bytes, mount state, or metadata; folder rows support rename and safe deletion
+  only when empty. The existing core/proxy/Worker move path is now reachable
+  from the UI through the per-file folder action.
+
+- 2026-10-09: removed right alignment from the Disk Library action column so
+  the per-file action icons, including the trash button, remain fully visible.
+
+- 2026-10-09: simplified the visible Disk Library panel title to `Disk
+  Library`; drive support remains represented by the D1:-D4: columns and the
+  internal D1:-D8: model.
+
+- 2026-10-09: added the jsA8E mounted-devices panel above the navigation list.
+  It derives occupied D1:-D8: slots from the library snapshot, displays each
+  mounted folder/file path, and provides an `Unmount` action. Live green/yellow
+  SIO activity indicators remain a subsequent integration step.
+
+- 2026-10-09: added interactive global search to the jsA8E Disk Library.
+  Typing filters all ATR/XEX names case-insensitively by substring, presents
+  matches as a virtual-folder view, shows each original folder path, and keeps
+  the normal mount/download/move/delete actions available.
+
+- 2026-10-09: placed the mounted-devices panel before the library action
+  toolbar, so the panel order is header, mounted devices, actions, and file
+  navigation.
+
+- 2026-10-09: compacted the jsA8E Disk Library toolbar to icon-only controls.
+  The existing hover titles remain available as native tooltips and every
+  control now exposes an explicit ARIA label. The toolbar stays on one row and
+  scrolls horizontally when the panel is narrower than the complete action set.
+
+- 2026-10-09: added the first cross-application ATR inspection core for Full
+  Library. jsA8E and native A8E now validate ATR geometry, inspect the DOS 2.x /
+  MyDOS-compatible VTOC and directory layout without modifying image bytes,
+  enumerate active directory entries, follow standard DOS sector chains for
+  read-only file extraction, and decode basic ATASCII text. The browser worker
+  loads the same inspector, and synthetic DOS-directory regressions cover both
+  recognized and unrecognized ATR images.
+
+- 2026-10-09: connected the read-only ATR inspection core to the jsA8E Disk
+  Library. Clicking an ATR name or its open action changes the same panel to a
+  contents view with Back, image download, geometry/filesystem status, DOS
+  directory entries, internal-file download, ATASCII preview, and hexadecimal
+  fallback for unrecognized images. The native A8E floating Library window
+  still requires its platform-specific UI adapter.
+
+- 2026-10-09: constrained the ATR file preview to one reusable, shrinkable
+  panel with internal scrolling and an explicit hidden-state display rule. Repeated
+  previews no longer reserve cumulative page space.
+
+- 2026-10-09: began the native A8E multi-drive backend required by the
+  floating Library window. IoData now owns independent D1:-D8: media slots,
+  writable/dirty state, names, and mount/unmount/access APIs; native SIO
+  selects the addressed slot from the command Device ID and enforces the
+  slot's write-protection state. The D1 command-line compatibility buffer is
+  preserved. Persistent native repository loading and the SDL Library window
+  remain pending, and native compilation could not be run because this
+  environment has no C compiler in PATH.
+
+- 2026-10-09: added the native persistent Full Library repository adapter.
+  A8E now loads and saves the documented `library.json` plus
+  content-addressed `blobs/` directory, stages a complete snapshot before
+  replacing the visible repository, and reuses the portable package validator
+  for SHA-256, size, path, and schema checks. The repository probe covers a
+  save/load round trip. The SDL Library window and its connection to mounted
+  IoData slots remain pending; native compilation is still unavailable in this
+  environment.
+
+- 2026-10-09: connected the native repository snapshot to A8E startup. When
+  `library/library.json` exists, the native application validates and loads
+  it, restores the workspace D1:-D8: assignments, applies per-device write
+  protection, and leaves the command-line D1: path as the fallback when no
+  workspace assignment is present. Native library XEX entries are converted
+  to the same bootable ATR working image used by the command-line loader.
+  Dirty working-copy flush and the SDL Library controls remain pending.
+
+- 2026-10-09: added the first native SDL Library window adapter. F9 toggles a
+  floating, dependency-free repository view; the window lists ATR/XEX entries,
+  shows D1:-D8: mount cells, restores the startup workspace map, and lets the
+  user click a drive cell to mount or unmount an entry. A logical entry is
+  automatically removed from any previous drive before a new mount, preserving
+  the single-device invariant. Import/delete/search controls and dirty-copy
+  persistence remain subsequent UI slices.
+
+- 2026-10-09: completed the first native editing slice. The SDL Library now
+  supports case-insensitive substring search, keyboard Delete with mounted
+  media protection, right-click runtime write-protection toggling, and dirty
+  working-copy saves on eject and emulator exit. The repository updates the
+  content-addressed blob, manifest path/size/hash, modification timestamp, and
+  libraryVersion through a staged save/reload path. A8E XEX mounts continue to
+  use the shared bootable ATR conversion path.
+
+- 2026-10-09: persisted native runtime workspace changes. Mount, eject, and
+  write-protection changes in the SDL Library now update the schema-v1
+  `workspace.devices` and `workspace.writeProtected` maps through a staged
+  repository save/reload, while enforcing the one-entry/one-device invariant.
+  The native delete path also preserves the entry name before repository
+  reload, avoiding a stale-record access when reporting the result.
+
+- 2026-10-09: connected native `.a8e` package interchange and blank-disk
+  creation. The SDL Library accepts `I` (import), `E` (export), and `N` (new
+  blank ATR), with a dependency-free path/name prompt confirmed by Enter and
+  cancelled by Escape. Package import validates the complete archive before
+  merging it into the local `library/` directory; export uses the same
+  canonical `library.json` plus content-addressed blobs used by jsA8E. A fresh
+  native installation can create its first schema-v1 library from a blank ATR.
+
+- 2026-10-09: made native entry deletion clean persisted workspace references
+  as well as the library record and now require the native repository probe to
+  verify that the deleted D1: assignment is absent after reload.
+
+- 2026-10-09: normalized native XEX working copies when they are modified.
+  Because an XEX is mounted through the shared bootable-ATR conversion path,
+  the first dirty flush now changes its manifest type/path to `atr` instead of
+  writing converted ATR bytes under an `.xex` blob name that would be parsed
+  incorrectly on the next mount.
+
+- 2026-10-09: adjusted the native SDL Library empty-state layout. Search input
+  and package controls no longer overlap at the compact bitmap-font scale, and
+  an empty repository now explains that `I` imports a package or `N` creates a
+  blank ATR.
+
+- 2026-10-09: tightened the native Library header/first-row spacing and
+  shortened the empty-state marker to `EMPTY`, preventing it from spanning
+  across the TYPE and drive columns at the fixed bitmap-font scale.
+
+- 2026-10-09: widened normal Disk Library filename presentation by removing
+  the unused search-path column from its layout and slightly reducing the
+  visible D1:-D4: column widths. Search results retain a separate source-path
+  column.
+
+- 2026-10-09: recorded the new Full Library requirement for a `Create blank
+  ATR` action. It belongs in the current-folder navigation toolbar and must
+  create a valid writable ATR without replacing existing entries. The action
+  is documented but not implemented yet.
+
+- 2026-10-09: implemented `Create blank ATR` in jsA8E and added the matching
+  native ATR image helper. The action creates a standard writable 90 KiB ATR
+  (720 x 128-byte sectors) in the current folder, proposes a non-conflicting
+  filename, persists it through the Worker/IndexedDB path, and makes it
+  immediately mountable and exportable. Regression coverage verifies the ATR
+  header and exact image size.
+
+- 2026-10-09: corrected the SIO `$21` Format response in both jsA8E and
+  native A8E. Formatting still clears the ATR data area, but now returns the
+  required sector-sized bad-sector list after the command ACK; a healthy disk
+  reports an empty list terminated by `$FFFF` (AHRM 10.4). This fixes DOS
+  error 138, which was caused by the previous response ending before DOS could
+  receive the format result. Added a jsA8E regression for the ACK/data phases.
+
+- 2026-10-09: corrected two AHRM disk-protocol issues exposed by DOS 2.5
+  `DUPLICATE DISK`. Both jsA8E and native A8E now report `$E0` as the STATUS
+  format timeout instead of the invalid short value `$01`, preventing DOS
+  from entering long retry waits when it formats another drive. `$57` WRITE
+  now performs an in-memory readback verification before returning Complete
+  or Error. Documented the observed approximately 20-second pauses as a
+  protocol timeout symptom rather than normal disk latency.
+
+- 2026-10-09: corrected the remaining AHRM write data-phase sequencing issue
+  in both jsA8E and native A8E. PUT, VERIFY, and WRITE now return the data-frame
+  ACK first and queue Complete/Error as a separate response after that ACK is
+  consumed. This matches AHRM 9.1. The JS SIO regression now covers WRITE, PUT,
+  VERIFY, and silent handling of invalid command checksums; the multi-drive
+  design document was
+  corrected to show the separate phases.
+  The JavaScript automation suite passes; native build validation remains
+  blocked before compilation by the existing MSBuild `FileTracker` access
+  error in `ZERO_CHECK`.
+
+- 2026-10-09: Chrome tracing of a clean jsA8E Worker during DOS 2.5
+  `DUPLICATE DISK` isolated the remaining approximately 16-20 second pauses.
+  Successful writes show `ACK -> valid data frame -> ACK -> Complete`; the
+  paused attempts receive a data-frame `NAK` for `$57`, followed by the DOS
+  retry timeout. AHRM 5.10 documents the corresponding Atari OS race: the
+  first transmitted byte can precede `CHKSUM` initialization, allowing a SIO
+  IRQ or VBI to corrupt the checksum; the drive correctly NAKs the frame and
+  the older OS can wait through a long retry delay. This is therefore a
+  documented guest timing/firmware behavior, not an ATR geometry mismatch or
+  normal disk latency. Do not hide it by accepting bad checksums or by
+  inventing a shorter device timeout. A remaining optional investigation is
+  an AHRM-08 cycle-level comparison against Altirra/hardware to determine why
+  the race frequency differs between hosts.
+
+- 2026-10-09: marked the DOS 2.5 duplicate-disk pause investigation as
+  pending while Full Library is completed. The complete evidence record is in
+  `implementation/A8E_multi_drives.md`: FORMAT response, STATUS timeout,
+  WRITE verification, and separate write ACK/Complete phases are fixed and
+  tested; the remaining pauses are guest SIO checksum-race retries documented
+  by AHRM 5.10. Any future timing correction must be cycle-level, AHRM-08
+  based, and implemented in both jsA8E and native A8E.
+
+- 2026-10-09: fixed Full Library export for distinct entries with identical
+  binary content. Because blobs are content-addressed, those entries share
+  one `blobs/<sha256>.<type>` payload; manifest validation and native package
+  reading now accept repeated references while archive storage remains
+  deduplicated. Added a jsA8E export/import regression and documented the
+  shared-blob rule in the frozen library schema.
 
 - 2026-10-07: corrected the generic jsA8E XEX preflight bank-map analysis. The
   Self-test window now follows the AHRM dependency on OS ROM being enabled, and
@@ -15,6 +748,12 @@ Simple implementation notes for this repository.
   Native Self-test state now requires both PB7 clear and PB0 set, including
   the initial state derived from PORTB. Added a memory-expansion probe
   regression covering the OS-off transition.
+
+- 2026-10-08: established cross-application parity as a project requirement.
+  Every new capability must be implemented and tested in both `jsA8E` and
+  native A8E. Platform-specific adapters are allowed, but shared behavior,
+  data contracts, and regression coverage must remain aligned; a feature is
+  incomplete while it exists in only one application.
 
 - 2026-09-30: added an origin-scoped IndexedDB ROM library for user-provided
   Atari OS (16 KiB) and BASIC (8 KiB) files. Browser startup prefers optional

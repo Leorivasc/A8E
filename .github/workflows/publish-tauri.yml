@@ -47,13 +47,6 @@ jobs:
       - name: Build DEB, RPM, and AppImage
         run: ./scripts/build-tauri-linux.sh
 
-      - name: Move rolling release tag to this build
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git tag --force --annotate tauri-latest --message 'Latest automated Tauri build' "$GITHUB_SHA"
-          git push --force origin refs/tags/tauri-latest
-
       - name: Publish rolling prerelease assets
         uses: softprops/action-gh-release@v3
         with:
@@ -62,6 +55,7 @@ jobs:
           name: jsA8E Tauri latest
           prerelease: true
           generate_release_notes: false
+          overwrite_files: true
           body: |
             Automatic build from branch `Tauri`.
             Commit: ${{ github.sha }}

@@ -13,6 +13,14 @@ accuracy. The legacy renderer (`legacy/A8E_experimental/Atari.c`) remains a
 useful secondary reference for implementation patterns, but any conflict
 between the legacy code and the AHRM is resolved in favor of the AHRM.
 
+This document records AHRM alignment, not a blanket certification of every
+Atari hardware behavior. The AHRM-07 synthetic PMG/GTIA diagnostic is certified
+only for its stated scope. Broader title-level and PAL/NTSC comparisons,
+analog POKEY calibration, and the accepted jsA8E P1 CPU/POKEY phase follow-up
+remain separate validation work. Emulator integration features such as disk
+mounting, dirty state, activity indicators, XEX conversion, and library
+persistence are outside this hardware-compliance claim.
+
 The key AHRM sections that govern color-clock accuracy are:
 
 - [4.2 Display timing](../AHRM/4.%20ANTIC/2.%20Display%20timing.md) — 114
@@ -85,6 +93,10 @@ These items are implemented in both modern ports:
 
 The remaining task is verification against real content and the AHRM timing
 charts, not another large renderer rewrite.
+
+The hardware-measurement and cross-platform comparison work has been split into
+the separate [Real Hardware Validation Project](../implementation/REAL_HARDWARE_VALIDATION.md)
+so it can be resumed independently from the implementation merge.
 
 ### 1. Regression sweep against raster-effect content
 

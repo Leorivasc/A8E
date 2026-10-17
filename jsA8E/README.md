@@ -135,6 +135,43 @@ Behavior:
   can request another side; use **Full Reset** when you want to boot from the
   current D1 image. Standby auto-start waits until the Atari OS ROM is loaded.
 
+## Full Library
+
+Open **Disk Library** from the browser workspace to manage ATR and XEX media
+without restarting the emulator. The library supports folders, nested uploads,
+global search, per-file download/move/delete actions, blank ATR creation, and
+mounting or unmounting entries in the D1:-D8: workspace. The mounted-devices
+panel shows the logical path and current state of each occupied drive.
+
+The toolbar also provides:
+
+- ATR/XEX and mounted/dirty/clean filters, plus name/type/size/modified sorting;
+- complete-library export and mounted-workspace export as `.a8e` packages;
+- package import with validation preview, confirmation, progress, and
+  cancellation;
+- recoverable Trash with restore, permanent purge, and age-based purge;
+- browser storage-capacity reporting.
+
+Selecting an ATR opens a read-only contents view. Recognized DOS 2.x/MyDOS
+images expose their directory and internal-file download, ATASCII preview, and
+hexadecimal fallback. The ATR integrity action checks geometry, VTOC bounds,
+directory records, sector chains, sharing, cycles, and payload lengths. Unknown
+filesystems remain usable and are reported as unrecognized rather than being
+modified.
+
+Packages use the dependency-free `.a8e` format: `library.json` plus
+content-addressed payloads in `blobs/`. Imports validate paths, hashes,
+formats, schema compatibility, and configurable size limits before the
+transaction commits. Equal content is deduplicated. Divergent content is
+preserved non-destructively; an incoming name collision in the same folder is
+renamed with filesystem-style suffixes such as `file(1).atr` and
+`file(2).atr`. No generic binary merge is attempted for ATR/XEX files.
+
+The browser library is backed by IndexedDB and preserves folders, revisions,
+preferred revisions, metadata, and workspace assignments between sessions.
+For the shared package contract and native parity details, see the [Full
+Library implementation notes](../implementation/full_library.md).
+
 ## Controls
 
 See the [root README](../README.md#controls) for the shared keyboard, joystick, and console key mappings.

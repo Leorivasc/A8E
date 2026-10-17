@@ -2060,7 +2060,13 @@ void Pokey_EnterInitialization(_6502_Context_t *pContext)
 	pIoData->llTimer2Cycle = CYCLE_NEVER;
 	pIoData->llTimer4Cycle = CYCLE_NEVER;
 	pIoData->llPokeyTimerResetCycle = CYCLE_NEVER;
+	pIoData->llSerialOutputNeedDataCycle = CYCLE_NEVER;
+	pIoData->llSerialOutputTransmissionDoneCycle = CYCLE_NEVER;
 	pIoData->cSerialOutputClockHigh = 0;
+	pIoData->bSerialOutputBytePending = 0;
+	pIoData->bSerialOutputShiftActive = 0;
+	pIoData->cSerialOutputRegisterValue = 0;
+	pIoData->cSerialOutputShiftValue = 0;
 	AtariIoCycleTimedEventUpdate(pContext);
 }
 
@@ -2153,7 +2159,9 @@ static u8 aSioBuffer[1024];
 static u16 cSioOutIndex = 0;
 static u16 sSioInIndex = 0;
 static u16 sSioInSize = 0;
+static u8 sSioInReady = 0;
 static u16 sSioPendingReadSize = 0;
+static u8 sSioPendingWriteResult = 0;
 
 /* SIO data phase state (for WRITE/PUT/VERIFY commands) */
 #define SIO_DATA_OFFSET 32
@@ -2162,6 +2170,75 @@ static u16 sSioDataIndex = 0;
 static u8 cSioPendingCmd = 0;
 static u16 sSioPendingSector = 0;
 static u16 sSioPendingBytes = 0;
+static u8 sSerialOutputBusTransmission = 0;
+
+static void Pokey_ResetSioState(void)
+{
+	cSioOutIndex = 0;
+	sSioInIndex = 0;
+	sSioInSize = 0;
+	sSioInReady = 0;
+	sSioPendingReadSize = 0;
+	sSioPendingWriteResult = 0;
+	cSioOutPhase = 0;
+	sSioDataIndex = 0;
+	cSioPendingCmd = 0;
+	sSioPendingSector = 0;
+	sSioPendingBytes = 0;
+	sSerialOutputBusTransmission = 0;
+}
+
+/* AHRM 10.5: drive transmit timing is independent from the computer's POKEY
+ * receive clock. Keep standard responses near the existing 900-cycle model;
+ * the US Doubler transmitter sends a high-speed byte in about 220 Atari-side
+ * cycles. */
+static u64 Pokey_SerialInputByteDelay(_6502_Context_t *pContext)
+{
+	u64 period = Pokey_TimerPeriodCpuCycles(pContext, 4);
+	return period > 0 && period <= 20 ? 220ull : SERIAL_INPUT_DATA_READY_CYCLES;
+}
+
+/* MyPicoDOS probes several incompatible high-speed protocols.  This virtual
+ * drive implements the generic US Doubler divisor $0A in addition to standard
+ * $28.  A linked Timer 3+4 configuration at any other divisor is a probe for
+ * another drive type and must not be answered. */
+static u8 Pokey_SioCommandSpeedSupported(_6502_Context_t *pContext)
+{
+	u8 cAudctl = SRAM[IO_AUDCTL_ALLPOT];
+
+	if((cAudctl & 0x28) == 0x28 && SRAM[IO_AUDF4_POT6] == 0)
+	{
+		u8 cDivisor = SRAM[IO_AUDF3_POT4];
+		return cDivisor == 0x28 || cDivisor == 0x0A;
+	}
+
+	/* Keep compatibility with standard non-linked POKEY configurations. */
+	return 1;
+}
+
+static u8 *Pokey_SioCurrentDisk(IoData_t *pIoData)
+{
+	if(!pIoData || pIoData->cSioDriveIndex >= 8u) return NULL;
+	return pIoData->apDisk[pIoData->cSioDriveIndex];
+}
+
+static u32 Pokey_SioCurrentDiskSize(IoData_t *pIoData)
+{
+	if(!pIoData || pIoData->cSioDriveIndex >= 8u) return 0u;
+	return pIoData->alDiskSize[pIoData->cSioDriveIndex];
+}
+
+static u8 Pokey_SioCurrentFdcStatus(IoData_t *pIoData)
+{
+	if(!pIoData || pIoData->cSioDriveIndex >= 8u) return 0u;
+	return pIoData->abSioDiskFdcStatus[pIoData->cSioDriveIndex];
+}
+
+static void Pokey_SioSetCurrentFdcStatus(IoData_t *pIoData, u8 cStatus)
+{
+	if(!pIoData || pIoData->cSioDriveIndex >= 8u) return;
+	pIoData->abSioDiskFdcStatus[pIoData->cSioDriveIndex] = cStatus;
+}
 
 /* AHRM 5.6: modes 010 and 100 use timer 4; modes 110-111 use timer 2.
  * Modes 000/001/011/101 do not provide a usable output clock here: the first
@@ -2302,8 +2379,15 @@ static void Pokey_SioQueueSerinResponse(_6502_Context_t *pContext, u16 size)
 
 	sSioInSize = size;
 	sSioInIndex = 0;
+	sSioInReady = 0;
 	pIoData->llSerialInputDataReadyCycle =
 		llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+	#ifdef SIO_DIAG
+	fprintf(stderr, "DBG_QUEUE_IN cycle=%llu size=%u first=%llu pendingRead=%u pendingWrite=%02X\\n",
+		(unsigned long long)llNow, size,
+		(unsigned long long)pIoData->llSerialInputDataReadyCycle,
+		sSioPendingReadSize, sSioPendingWriteResult);
+	#endif
 	AtariIoCycleTimedEventUpdate(pContext);
 }
 
@@ -2327,24 +2411,109 @@ static void Pokey_SioQueuePendingReadData(_6502_Context_t *pContext)
 
 	llNow = PokeyMasterReferenceCycle(pContext);
 	sSioInIndex = 0;
+	sSioInReady = 0;
 	sSioInSize = sBytesToRead + 2;
 	pIoData->llSerialInputDataReadyCycle =
 		llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
 	AtariIoCycleTimedEventUpdate(pContext);
 }
 
+void Pokey_SerialInputReady(_6502_Context_t *pContext)
+{
+	if(sSioInSize == 0 || sSioInReady) return;
+
+	/* A completed byte reaches SERIN before the serial-input IRQ is
+	 * asserted. The CPU reads the holding register afterward. */
+	RAM[IO_SEROUT_SERIN] = aSioBuffer[sSioInIndex++];
+	sSioInSize--;
+	sSioInReady = 1;
+	#ifdef SIO_DIAG
+	fprintf(stderr, "DBG_IN_READY cycle=%llu value=%02X remaining=%u\\n",
+		(unsigned long long)PokeyMasterReferenceCycle(pContext),
+		RAM[IO_SEROUT_SERIN], sSioInSize);
+	#endif
+}
+
+void Pokey_SerialOutputDataNeeded(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	if(!pIoData->bSerialOutputBytePending) return;
+
+	/* The SEROUT holding register has now moved into the shift register. */
+	pIoData->cSerialOutputShiftValue = pIoData->cSerialOutputRegisterValue;
+	pIoData->bSerialOutputBytePending = 0;
+	pIoData->bSerialOutputShiftActive = 1;
+}
+
+u8 Pokey_SerialOutputTransmissionDone(_6502_Context_t *pContext,
+									  u64 llEventCycle)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	if(!pIoData->bSerialOutputShiftActive)
+	{
+		return 0;
+	}
+
+	/* The peripheral sees a byte only after POKEY has completed its ten-bit
+	 * frame.  This keeps the SIO bus behind the output shift register instead
+	 * of treating a CPU write to SEROUT as an instantaneous bus transition. */
+	sSerialOutputBusTransmission = 1;
+	{
+		u8 cValue = pIoData->cSerialOutputShiftValue;
+		Pokey_SEROUT_SERIN(pContext, &cValue);
+	}
+	sSerialOutputBusTransmission = 0;
+
+	if(!pIoData->bSerialOutputBytePending)
+	{
+		pIoData->bSerialOutputShiftActive = 0;
+		return 0;
+	}
+
+	/* A queued SEROUT byte reloads immediately at the end of the active
+	 * frame.  Keep XMTDONE inactive and schedule the next ten-bit frame. */
+	pIoData->cSerialOutputShiftValue = pIoData->cSerialOutputRegisterValue;
+	pIoData->bSerialOutputBytePending = 0;
+	pIoData->bSerialOutputShiftActive = 1;
+	pIoData->llSerialOutputTransmissionDoneCycle =
+		llEventCycle + Pokey_SerialOutputClockPeriod(pContext) * 20;
+	AtariIoCycleTimedEventUpdate(pContext);
+	return 1;
+}
+
+static void Pokey_SioQueuePendingWriteResult(_6502_Context_t *pContext)
+{
+	u8 cResult = sSioPendingWriteResult;
+
+	if(cResult == 0) return;
+
+	sSioPendingWriteResult = 0;
+	aSioBuffer[0] = cResult;
+	Pokey_SioQueueSerinResponse(pContext, 1);
+}
+
 static void Pokey_SioSectorBytesAndOffset(u16 sSectorIndex, u16 sSectorSize,
 										  u16 *pBytesToRead, u32 *pOffset)
 {
-	if(sSectorIndex < 4)
+	if(sSectorIndex == 0)
+	{
+		*pBytesToRead = 0;
+		*pOffset = 0;
+	}
+	else if(sSectorSize == 256 && sSectorIndex < 4)
 	{
 		*pBytesToRead = 128;
 		*pOffset = (u32)(sSectorIndex - 1) * 128;
 	}
-	else
+	else if(sSectorSize == 256)
 	{
 		*pBytesToRead = sSectorSize;
 		*pOffset = (u32)(sSectorIndex - 4) * sSectorSize + 128 * 3;
+	}
+	else
+	{
+		*pBytesToRead = sSectorSize;
+		*pOffset = (u32)(sSectorIndex - 1) * sSectorSize;
 	}
 }
 
@@ -2362,6 +2531,9 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		u64 llNow = PokeyMasterReferenceCycle(pContext);
 		u8 cClockAvailable = Pokey_SerialOutputClockAvailable(pContext);
 		u64 llSerialClockPeriod = Pokey_SerialOutputClockPeriod(pContext);
+		if(!sSerialOutputBusTransmission)
+		{
+			pIoData->cSerialOutputRegisterValue = *pValue;
 #ifdef VERBOSE_SIO
 		printf("POKEY_TRACE SEROUT_WRITE cycle=%llu pc=%04X opcode=%02X value=%02X audctl=%02X audf4=%02X skctl=%02X timer=%u timer2=%llu timer4=%llu level=%u\n",
 		       (unsigned long long)pContext->llCycleCounter,
@@ -2375,7 +2547,17 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		printf("             [%16llu] SEROUT ", pContext->llCycleCounter);
 		printf("(%02X)!\n", *pValue);
 #endif
-		if(cClockAvailable)
+		pIoData->bSerialOutputBytePending = 1;
+	#ifdef VERBOSE_SIO
+		fprintf(stderr, "DBG_WRITE cycle=%llu pc=%04X value=%02X ram=%02X en=%02X pending=%u shift=%u\\n",
+			(unsigned long long)llNow, pContext->tCpu.pc, *pValue,
+			RAM[IO_IRQEN_IRQST], SRAM[IO_IRQEN_IRQST],
+			pIoData->bSerialOutputBytePending,
+			pIoData->bSerialOutputShiftActive);
+	#endif
+		if(cClockAvailable && !pIoData->bSerialOutputShiftActive &&
+		   (pIoData->llSerialOutputNeedDataCycle == CYCLE_NEVER ||
+		    pIoData->llSerialOutputNeedDataCycle <= llNow))
 		{
 			u64 llNeedDataCycle = Pokey_SerialOutputClockNextCycle(pContext, llNow);
 			pIoData->llSerialOutputNeedDataCycle =
@@ -2398,8 +2580,9 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 			       (unsigned long long)pIoData->llSerialOutputTransmissionDoneCycle);
 #endif
 		}
-		else
+		else if(!cClockAvailable)
 		{
+			pIoData->bSerialOutputBytePending = 0;
 			pIoData->llSerialOutputNeedDataCycle = CYCLE_NEVER;
 			pIoData->llSerialOutputTransmissionDoneCycle = CYCLE_NEVER;
 			RAM[IO_IRQEN_IRQST] |= IRQ_SERIAL_OUTPUT_DATA_NEEDED;
@@ -2415,7 +2598,11 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 #endif
 		}
 
-		AtariIoCycleTimedEventUpdate(pContext);
+			AtariIoCycleTimedEventUpdate(pContext);
+			/* The SIO device receives the byte only from the timed
+			 * transmission-complete callback below. */
+			return &RAM[IO_SEROUT_SERIN];
+		}
 
 		/* --- Data phase (WRITE/PUT/VERIFY) --- */
 		if(cSioOutPhase == 1)
@@ -2428,29 +2615,34 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 			expected = sSioPendingBytes + 1; /* data + checksum */
 			if(sSioDataIndex == expected)
 			{
-				u16 sSectorSize = ((AtrHeader_t *)pIoData->pDisk1)->sSectorSize;
+				u8 *pDisk = Pokey_SioCurrentDisk(pIoData);
+				u32 lDiskSize = Pokey_SioCurrentDiskSize(pIoData);
+				u16 sSectorSize = pDisk ? ((AtrHeader_t *)pDisk)->sSectorSize : 128u;
 				u16 sBytesToRead;
 				u32 lOffset;
 				u8 provided = aSioBuffer[SIO_DATA_OFFSET + sSioPendingBytes];
 				u8 calculated = AtariIo_SioChecksum(&aSioBuffer[SIO_DATA_OFFSET], sSioPendingBytes);
 
-				if(cClockAvailable)
+				if(!sSerialOutputBusTransmission && cClockAvailable)
 				{
 					pIoData->llSerialOutputTransmissionDoneCycle =
 						llNow + Pokey_SerialOutputClockPeriod(pContext) * 20;
 				}
-				else
+				else if(!sSerialOutputBusTransmission)
 				{
 					pIoData->llSerialOutputTransmissionDoneCycle = CYCLE_NEVER;
 				}
-				AtariIoCycleTimedEventUpdate(pContext);
+				if(!sSerialOutputBusTransmission)
+					AtariIoCycleTimedEventUpdate(pContext);
 
 				Pokey_SioSectorBytesAndOffset(sSioPendingSector, sSectorSize, &sBytesToRead, &lOffset);
 
-				if(calculated != provided || !pIoData->pDisk1 ||
-				   sSioPendingSector == 0 || lOffset + 16 >= pIoData->lDiskSize ||
+				if(calculated != provided || !pDisk ||
+				   (cSioPendingCmd != 0x56 && !pIoData->abDiskWritable[pIoData->cSioDriveIndex]) ||
+				   sSioPendingSector == 0 || lOffset + 16 >= lDiskSize ||
 				   sBytesToRead != sSioPendingBytes)
 				{
+					sSioPendingWriteResult = 0;
 					aSioBuffer[0] = 'N';
 					Pokey_SioQueueSerinResponse(pContext, 1);
 				}
@@ -2461,23 +2653,45 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 
 					for(vi = 0; vi < sBytesToRead; vi++)
 					{
-						if(pIoData->pDisk1[16 + lOffset + vi] != aSioBuffer[SIO_DATA_OFFSET + vi])
+						if(pDisk[16 + lOffset + vi] != aSioBuffer[SIO_DATA_OFFSET + vi])
 						{
 							ok = 0;
 							break;
 						}
 					}
+					sSioPendingWriteResult = ok ? 'C' : 'E';
+					Pokey_SioSetCurrentFdcStatus(pIoData, ok ? 0xFFu : 0x00u);
+					AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
+						ATARI_IO_DISK_ACTIVITY_READ);
 					aSioBuffer[0] = 'A';
-					aSioBuffer[1] = ok ? 'C' : 'E';
-					Pokey_SioQueueSerinResponse(pContext, 2);
+					Pokey_SioQueueSerinResponse(pContext, 1);
 				}
 				else /* WRITE / PUT */
 				{
-					memcpy(pIoData->pDisk1 + 16 + lOffset,
+					u32 vi;
+					u8 cResult = 'C';
+
+					memcpy(pDisk + 16 + lOffset,
 						   &aSioBuffer[SIO_DATA_OFFSET], sBytesToRead);
+					if(cSioPendingCmd == 0x57) /* WRITE includes readback verify */
+					{
+						for(vi = 0; vi < sBytesToRead; vi++)
+						{
+							if(pDisk[16 + lOffset + vi] !=
+							   aSioBuffer[SIO_DATA_OFFSET + vi])
+							{
+								cResult = 'E';
+								break;
+							}
+						}
+					}
+					Pokey_SioSetCurrentFdcStatus(pIoData, cResult == 'C' ? 0xFFu : 0x00u);
+					pIoData->abDiskDirty[pIoData->cSioDriveIndex] = 1u;
+					AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
+						ATARI_IO_DISK_ACTIVITY_WRITE);
+					sSioPendingWriteResult = cResult;
 					aSioBuffer[0] = 'A';
-					aSioBuffer[1] = 'C';
-					Pokey_SioQueueSerinResponse(pContext, 2);
+					Pokey_SioQueueSerinResponse(pContext, 1);
 				}
 
 				/* Reset data phase state */
@@ -2504,11 +2718,27 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 
 			if(cSioOutIndex == 5)
 			{
+				/* AHRM 9.1: the host deasserts the command line before the
+				 * peripheral validates the frame and emits ACK/NAK. Keep this
+				 * transition ahead of device handling, matching the JS core and
+				 * allowing the PIA bus state to observe the response phase. */
+				cSioOutIndex = 0;
+				Pia_SetCb2Line(pContext, 1);
+			#ifdef SIO_DIAG
+				fprintf(stderr, "DBG_CMD cycle=%llu device=%02X cmd=%02X aux1=%02X aux2=%02X checksum=%02X valid=%u\\n",
+					(unsigned long long)llNow, aSioBuffer[0], aSioBuffer[1],
+					aSioBuffer[2], aSioBuffer[3], aSioBuffer[4],
+					AtariIo_SioChecksum(aSioBuffer, 4) == aSioBuffer[4]);
+			#endif
 				if(AtariIo_SioChecksum(aSioBuffer, 4) == aSioBuffer[4])
 				{
 					char aCaption[100];
 					u16 sSectorIndex;
-					u16 sSectorSize = ((AtrHeader_t *)pIoData->pDisk1)->sSectorSize;
+					pIoData->cSioDriveIndex = aSioBuffer[0] >= 0x31 && aSioBuffer[0] <= 0x38
+						? (u8)(aSioBuffer[0] - 0x31u) : 0xffu;
+					u8 *pDisk = Pokey_SioCurrentDisk(pIoData);
+					u32 lDiskSize = Pokey_SioCurrentDiskSize(pIoData);
+					u16 sSectorSize = pDisk ? ((AtrHeader_t *)pDisk)->sSectorSize : 128u;
 					u16 sBytesToRead;
 					u32 lOffset;
 #ifdef VERBOSE_SIO
@@ -2525,35 +2755,41 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						printf("\n");
 					}
 #endif
-					if(cClockAvailable)
+					if(!sSerialOutputBusTransmission && cClockAvailable)
 					{
 						pIoData->llSerialOutputTransmissionDoneCycle =
 							llNow + Pokey_SerialOutputClockPeriod(pContext) * 20;
 					}
-					else
+					else if(!sSerialOutputBusTransmission)
 					{
 						pIoData->llSerialOutputTransmissionDoneCycle = CYCLE_NEVER;
 					}
 
-					AtariIoCycleTimedEventUpdate(pContext);
+					if(!sSerialOutputBusTransmission)
+						AtariIoCycleTimedEventUpdate(pContext);
 
+					#ifdef SIO_DIAG
+					fprintf(stderr, "DBG_SPEED cycle=%llu device=%02X disk=%p audctl=%02X au3=%02X au4=%02X supported=%u\\n",
+						(unsigned long long)llNow, aSioBuffer[0], (void *)pDisk,
+						SRAM[IO_AUDCTL_ALLPOT], SRAM[IO_AUDF3_POT4],
+						SRAM[IO_AUDF4_POT6],
+						Pokey_SioCommandSpeedSupported(pContext));
+					#endif
+					if(pIoData->cSioDriveIndex >= 8u || !pDisk ||
+					   Pokey_SioCommandSpeedSupported(pContext))
 					switch(aSioBuffer[1])
 					{
 					case 0x3F: /* RETURN HIGH SPEED INDEX */
-						/* $3F is also the Type 1 Poll command. An absent
-						 * peripheral must remain silent. Only disk IDs D1-D8
-						 * use the high-speed query interpretation. */
-						if(aSioBuffer[0] >= 0x31 && aSioBuffer[0] <= 0x38)
+						/* AHRM 10.3: generic US Doubler divisor. */
+						if(aSioBuffer[0] >= 0x31 && aSioBuffer[0] <= 0x38 &&
+						   Pokey_SioCurrentDisk(pIoData))
 						{
-							/* AHRM 10.3: standard US Doubler divisor. */
 							aSioBuffer[0] = 'A';
-							aSioBuffer[1] = 'C';
 							aSioBuffer[2] = 0x0A;
-							aSioBuffer[3] = AtariIo_SioChecksum(aSioBuffer + 2, 1);
-							sSioInSize = 4;
-							pIoData->llSerialInputDataReadyCycle =
-								llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
-							AtariIoCycleTimedEventUpdate(pContext);
+							/* AHRM 9.1: a read command returns the command ACK
+							 * separately from the Complete/data/checksum phase. */
+							sSioPendingReadSize = 1;
+							Pokey_SioQueueSerinResponse(pContext, 1);
 						}
 						break;
 
@@ -2580,13 +2816,13 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 							Pokey_SioSectorBytesAndOffset(sSectorIndex, sSectorSize,
 														  &sBytesToRead, &lOffset);
 
-							if(lOffset + 16 >= pIoData->lDiskSize)
+							if(!pDisk || lOffset + 16 >= lDiskSize)
 							{
 								aSioBuffer[0] = 'N';
 								sSioInSize = 1;
 #ifdef VERBOSE_SIO
 								printf("Not accepted (sector %d, offset = %lu, disk size = %lu!\n",
-									   sSectorIndex, lOffset, pIoData->lDiskSize);
+									   sSectorIndex, lOffset, lDiskSize);
 #endif
 							}
 							else
@@ -2594,10 +2830,15 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 								aSioBuffer[0] = 'A';
 								aSioBuffer[1] = 'C';
 
-								memcpy(aSioBuffer + 2, pIoData->pDisk1 + 16 + lOffset, sBytesToRead);
+								memcpy(aSioBuffer + 2, pDisk + 16 + lOffset, sBytesToRead);
 
 								aSioBuffer[sBytesToRead + 2] = AtariIo_SioChecksum(aSioBuffer + 2, sBytesToRead);
 
+								/* AHRM 10.2: retain the inverted result of this completed
+								 * sector operation for a later STATUS command. */
+								Pokey_SioSetCurrentFdcStatus(pIoData, 0xFFu);
+								AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
+									ATARI_IO_DISK_ACTIVITY_READ);
 								sSioPendingReadSize = sBytesToRead;
 								Pokey_SioQueueSerinResponse(pContext, 1);
 #ifdef VERBOSE_SIO
@@ -2623,39 +2864,55 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						break;
 
 					case 0x53: /* STATUS */
+					#ifdef SIO_DIAG
+						fprintf(stderr, "DBG_STATUS cycle=%llu aux2=%02X sectorSize=%u disk0=%02X\\n",
+							(unsigned long long)llNow, aSioBuffer[3], sSectorSize,
+							pDisk ? pDisk[0] : 0u);
+					#endif
 						SDL_SetWindowTitle(g_pSdlWindow, APPLICATION_CAPTION "  [-]");
 #ifdef VERBOSE_SIO
 						printf("SIO get status\n");
 #endif
+						/* AHRM 10.3: 1050 Turbo marks high-speed commands with
+						 * bit 7 of DAUX2. This generic drive does not implement
+						 * Turbo mode. Reject its STATUS probe instead of treating
+						 * the marker as an ordinary status request; otherwise
+						 * MyPicoDOS can select Turbo mode and later reinterpret
+						 * the marker as the high sector-number bit. */
+						if(aSioBuffer[3] & 0x80u)
+						{
+							aSioBuffer[0] = 'N';
+							Pokey_SioQueueSerinResponse(pContext, 1);
+							break;
+						}
 						if(sSectorSize == 128)
 						{
 							aSioBuffer[0] = 'A';
 							aSioBuffer[1] = 'C';
 							aSioBuffer[2] = 0x10;
-							aSioBuffer[3] = 0x00;
-							aSioBuffer[4] = 0x01;
+							aSioBuffer[3] = Pokey_SioCurrentFdcStatus(pIoData);
+							/* AHRM 10.2: format timeout, not normal command timeout. */
+							aSioBuffer[4] = 0xE0;
 							aSioBuffer[5] = 0x00;
-							aSioBuffer[6] = 0x11;
 						}
-						else if(sSectorSize == 256)
+						else if(sSectorSize == 256 || sSectorSize == 512)
 						{
 							aSioBuffer[0] = 'A';
 							aSioBuffer[1] = 'C';
-							aSioBuffer[2] = 0x30;
-							aSioBuffer[3] = 0x00;
-							aSioBuffer[4] = 0x01;
+							aSioBuffer[2] = sSectorSize == 512 ? 0x50 : 0x30;
+							aSioBuffer[3] = Pokey_SioCurrentFdcStatus(pIoData);
+							aSioBuffer[4] = 0xE0;
 							aSioBuffer[5] = 0x00;
-							aSioBuffer[6] = 0x31;
 						}
+						/* The FDC latch is dynamic, so checksum the actual four-byte
+						 * STATUS payload instead of using a density template. */
+						aSioBuffer[6] = AtariIo_SioChecksum(aSioBuffer + 2, 4);
 
-						sSioInSize = 7;
-
-						if(pIoData->pDisk1[0] != 0)
+						if(Pokey_SioCurrentDisk(pIoData) && Pokey_SioCurrentDisk(pIoData)[0] != 0)
 						{
-							pIoData->llSerialInputDataReadyCycle =
-								llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
-
-							AtariIoCycleTimedEventUpdate(pContext);
+							/* Keep STATUS response framing identical to jsA8E: reset the
+							 * response index and schedule the first byte as one transaction. */
+							Pokey_SioQueueSerinResponse(pContext, 7);
 						}
 
 						break;
@@ -2680,7 +2937,8 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 							Pokey_SioSectorBytesAndOffset(sSectorIndex, sSectorSize,
 														  &sBytesToRead, &lOffset);
 
-							if(lOffset + 16 >= pIoData->lDiskSize)
+							if(!Pokey_SioCurrentDisk(pIoData) ||
+							   lOffset + 16 >= Pokey_SioCurrentDiskSize(pIoData))
 							{
 								aSioBuffer[0] = 'N';
 								Pokey_SioQueueSerinResponse(pContext, 1);
@@ -2693,6 +2951,7 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 								cSioPendingCmd = aSioBuffer[1];
 								sSioPendingSector = sSectorIndex;
 								sSioPendingBytes = sBytesToRead;
+								sSioPendingWriteResult = 0;
 
 								aSioBuffer[0] = 'A';
 								Pokey_SioQueueSerinResponse(pContext, 1);
@@ -2705,17 +2964,32 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 #ifdef VERBOSE_SIO
 						printf("SIO format\n");
 #endif
-						if(!pIoData->pDisk1 || pIoData->lDiskSize <= 16)
+						if(!Pokey_SioCurrentDisk(pIoData) || Pokey_SioCurrentDiskSize(pIoData) <= 16 ||
+						   !pIoData->abDiskWritable[pIoData->cSioDriveIndex])
 						{
 							aSioBuffer[0] = 'N';
 							Pokey_SioQueueSerinResponse(pContext, 1);
 						}
 						else
 						{
-							memset(pIoData->pDisk1 + 16, 0, pIoData->lDiskSize - 16);
+							memset(Pokey_SioCurrentDisk(pIoData) + 16, 0,
+							       Pokey_SioCurrentDiskSize(pIoData) - 16);
+							Pokey_SioSetCurrentFdcStatus(pIoData, 0xFFu);
+							pIoData->abDiskDirty[pIoData->cSioDriveIndex] = 1u;
+							AtariIoSetDiskActivity(pContext, pIoData->cSioDriveIndex,
+								ATARI_IO_DISK_ACTIVITY_WRITE);
+							/* AHRM 10.4: FORMAT returns a sector-sized bad-sector
+							 * list after the command ACK. A healthy disk returns an
+							 * empty list terminated by $FFFF. */
+							u16 sFormatBytes = sSectorSize;
+							memset(aSioBuffer + 2, 0, sFormatBytes);
+							aSioBuffer[2] = 0xFF;
+							aSioBuffer[3] = 0xFF;
+							aSioBuffer[sFormatBytes + 2] =
+								AtariIo_SioChecksum(aSioBuffer + 2, sFormatBytes);
+							sSioPendingReadSize = sFormatBytes;
 							aSioBuffer[0] = 'A';
-							aSioBuffer[1] = 'C';
-							Pokey_SioQueueSerinResponse(pContext, 2);
+							Pokey_SioQueueSerinResponse(pContext, 1);
 						}
 
 						break;
@@ -2731,36 +3005,57 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						break;
 
 					default:
-						printf("Unsupported SIO command $%02X!\n", aSioBuffer[1]);
-
+						/* AHRM 9.1: a recognized device must NAK an unsupported
+						 * command instead of remaining silent and causing a timeout. */
+						aSioBuffer[0] = 'N';
+						Pokey_SioQueueSerinResponse(pContext, 1);
 						break;
 					}
 				}
-#ifdef VERBOSE_SIO
 				else
 				{
-					u32 lIndex;
-
-					printf("Wrong SIO checksum (expected %02X): ",
-						   AtariIo_SioChecksum(aSioBuffer, 4));
-
-					for(lIndex = 0; lIndex < 5; lIndex++)
+					/* AHRM 5.10 documents the XL/XE OS first-byte race:
+					 * real disk drives NAK an addressed, mounted disk's bad
+					 * command frame so the OS can retry it.  Do not answer
+					 * invalid frames for absent IDs, which would interfere with
+					 * other SIO devices on the bus. */
+					if(aSioBuffer[0] >= 0x31 && aSioBuffer[0] <= 0x38 &&
+						pIoData->apDisk[aSioBuffer[0] - 0x31u] != NULL)
 					{
-						printf("%02X ", aSioBuffer[lIndex]);
+						aSioBuffer[0] = 'N';
+						Pokey_SioQueueSerinResponse(pContext, 1);
 					}
+#ifdef VERBOSE_SIO
+					{
+						u32 lIndex;
 
-					printf("\n");
-				}
+						printf("Wrong SIO checksum (expected %02X): ",
+							   AtariIo_SioChecksum(aSioBuffer, 4));
+
+						for(lIndex = 0; lIndex < 5; lIndex++)
+						{
+							printf("%02X ", aSioBuffer[lIndex]);
+						}
+
+						printf("\n");
+					}
 #endif
-				cSioOutIndex = 0;
-				Pia_SetCb2Line(pContext, 1);
+				}
 			}
 		}
 	}
 	else
 	{
-		RAM[IO_SEROUT_SERIN] = aSioBuffer[sSioInIndex++];
-		sSioInSize--;
+		if(!sSioInReady)
+			return &RAM[IO_SEROUT_SERIN];
+
+		sSioInReady = 0;
+	#ifdef SIO_DIAG
+		fprintf(stderr, "DBG_IN_READ cycle=%llu value=%02X remaining=%u pendingRead=%u pendingWrite=%02X\\n",
+			(unsigned long long)PokeyMasterReferenceCycle(pContext),
+			RAM[IO_SEROUT_SERIN], sSioInSize, sSioPendingReadSize,
+			sSioPendingWriteResult);
+	#endif
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIN ", pContext->llCycleCounter);
 		printf("(%02X, %d bytes left)!\n", RAM[IO_SEROUT_SERIN], sSioInSize);
@@ -2769,14 +3064,21 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		{
 			u64 llNow = PokeyMasterReferenceCycle(pContext);
 			pIoData->llSerialInputDataReadyCycle =
-				llNow + SERIAL_INPUT_DATA_READY_CYCLES;
+				llNow + Pokey_SerialInputByteDelay(pContext);
 
 			AtariIoCycleTimedEventUpdate(pContext);
 		}
 		else
 		{
 			sSioInIndex = 0;
-			Pokey_SioQueuePendingReadData(pContext);
+			if(sSioPendingReadSize != 0)
+			{
+				Pokey_SioQueuePendingReadData(pContext);
+			}
+			else
+			{
+				Pokey_SioQueuePendingWriteResult(pContext);
+			}
 		}
 	}
 
@@ -2886,6 +3188,10 @@ u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue)
 		SRAM[IO_SKCTL_SKSTAT] = *pValue;
 		if((cPreviousSkctl & 0x03) != 0 && (*pValue & 0x03) == 0)
 		{
+			/* AHRM 5.6: initialization interrupts and flushes the serial
+			 * shift/holding registers.  Clear the virtual SIO transaction too,
+			 * so changing speed cannot expose stale response bytes. */
+			Pokey_ResetSioState();
 			Pokey_EnterInitialization(pContext);
 		}
 		if((cPreviousSkctl & 0x03) == 0 && (*pValue & 0x03) != 0)

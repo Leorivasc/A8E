@@ -49,7 +49,15 @@
     diskLibraryUnmount: 15000,
     diskLibraryFlush: 15000,
     diskLibraryDownload: 30000,
+    diskLibraryExport: 60000,
+    diskLibraryInspect: 60000,
+    diskLibraryPreviewImport: 60000,
+    diskLibraryImport: 60000,
     diskLibraryDelete: 15000,
+    diskLibraryCreateBlankAtr: 15000,
+    diskLibraryFolderCreate: 15000,
+    diskLibraryFolderDelete: 15000,
+    diskLibraryMove: 15000,
   };
 
   function resolveAudioWorkletUrl() {
@@ -853,6 +861,7 @@
 
   function createDiskLibraryProxy(sendRequest) {
     const files = new Map();
+    const folders = new Map();
     const listeners = new Set();
     let ready = false;
 
@@ -868,8 +877,19 @@
 
     let mountsRestored = false;
 
-    function snapshotFromWire(items, isReady, isRestored) {
+    folders.set("root", { id: "root", name: "Library", parentId: null });
+
+    function snapshotFromWire(items, isReady, isRestored, folderItems) {
       files.clear();
+      folders.clear();
+      folders.set("root", { id: "root", name: "Library", parentId: null });
+      if (Array.isArray(folderItems)) {
+        for (let i = 0; i < folderItems.length; i++) {
+          const item = folderItems[i];
+          if (!item || !item.id) continue;
+          folders.set(String(item.id), Object.assign({}, item));
+        }
+      }
       if (Array.isArray(items)) {
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
@@ -882,14 +902,41 @@
       emitChange();
     }
 
-    function listFiles() {
+    function listFiles(folderId) {
       const result = [];
       files.forEach(function (entry) {
+        if (folderId && String(entry.folderId || "root") !== String(folderId)) return;
         result.push(Object.assign({}, entry));
       });
       result.sort(function (a, b) {
         return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
       });
+      return result;
+    }
+
+    function getFolder(id) {
+      return folders.get(String(id || "root")) || null;
+    }
+
+    function listFolders(parentId) {
+      const parent = String(parentId || "root");
+      const result = [];
+      folders.forEach(function (folder) {
+        if (folder.id !== "root" && String(folder.parentId || "root") === parent) result.push(Object.assign({}, folder));
+      });
+      result.sort(function (a, b) { return a.name.localeCompare(b.name, undefined, { sensitivity: "base" }); });
+      return result;
+    }
+
+    function getFolderPath(id) {
+      const result = [];
+      let current = getFolder(id) || getFolder("root");
+      const seen = new Set();
+      while (current && !seen.has(current.id)) {
+        seen.add(current.id);
+        result.unshift({ id: current.id, name: current.name });
+        current = current.parentId ? getFolder(current.parentId) : null;
+      }
       return result;
     }
 
@@ -912,11 +959,11 @@
       return mountsRestored;
     }
 
-    function addFile(name, data) {
+    function addFile(name, data, folderId) {
       const buffer = toArrayBuffer(data);
       return sendRequest(
         "diskLibraryAdd",
-        { name: String(name || ""), buffer: buffer },
+        { name: String(name || ""), buffer: buffer, folderId: String(folderId || "root") },
         [buffer],
       );
     }
@@ -969,20 +1016,117 @@
       return sendRequest("diskLibraryDelete", { id: String(id || "") });
     }
 
+    function createFolder(name, parentId) {
+      return sendRequest("diskLibraryFolderCreate", {
+        name: String(name || ""),
+        parentId: String(parentId || "root"),
+      });
+    }
+
+    function deleteFolder(id) {
+      return sendRequest("diskLibraryFolderDelete", { id: String(id || "") });
+    }
+
+    function moveFile(id, folderId) {
+      return sendRequest("diskLibraryMove", {
+        id: String(id || ""),
+        folderId: String(folderId || "root"),
+      });
+    }
+
+    function exportPackage(options) {
+      return sendRequest(
+        "diskLibraryExport",
+        options && typeof options === "object" ? options : {},
+        null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryExport },
+      ).then(function (result) {
+        if (result && result.buffer && isArrayBufferLike(result.buffer)) {
+          result.bytes = new Uint8Array(result.buffer);
+          delete result.buffer;
+        }
+        return result || null;
+      });
+    }
+
+    function inspectPackage(data) {
+      const buffer = toArrayBuffer(data);
+      return sendRequest(
+        "diskLibraryInspect",
+        { buffer: buffer },
+        [buffer],
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryInspect },
+      );
+    }
+
+    function suggestBlankAtrName(folderId) {
+      const targetFolder = String(folderId || "root");
+      const used = new Set();
+      files.forEach(function (entry) {
+        if (String(entry.folderId || "root") === targetFolder) used.add(String(entry.name || "").toUpperCase());
+      });
+      let number = 1;
+      let name = "blank.atr";
+      while (used.has(name.toUpperCase())) {
+        number++;
+        name = "blank-" + number + ".atr";
+      }
+      return name;
+    }
+
+    function createBlankAtr(name, folderId) {
+      return sendRequest("diskLibraryCreateBlankAtr", {
+        name: String(name || ""),
+        folderId: String(folderId || "root"),
+      });
+    }
+
+    function previewImport(data) {
+      const buffer = toArrayBuffer(data);
+      return sendRequest(
+        "diskLibraryPreviewImport",
+        { buffer: buffer },
+        [buffer],
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryPreviewImport },
+      );
+    }
+
+    function importPackage(data) {
+      const buffer = toArrayBuffer(data);
+      return sendRequest(
+        "diskLibraryImport",
+        { buffer: buffer },
+        [buffer],
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryImport },
+      );
+    }
+
     return {
       snapshotFromWire: snapshotFromWire,
       api: {
         listFiles: listFiles,
+        getFolder: getFolder,
+        listFolders: listFolders,
+        getFolderPath: getFolderPath,
         getFileInfo: getFileInfo,
         isReady: isReady,
         isRestored: isRestored,
         addFile: addFile,
+        suggestBlankAtrName: suggestBlankAtrName,
+        createBlankAtr: createBlankAtr,
         replaceFile: replaceFile,
         mountFile: mountFile,
         unmountFile: unmountFile,
         flush: flush,
         downloadFile: downloadFile,
         deleteFile: deleteFile,
+        createFolder: createFolder,
+        deleteFolder: deleteFolder,
+        moveFile: moveFile,
+        exportPackage: exportPackage,
+        inspectPackage: inspectPackage,
+        previewImport: previewImport,
+        importPackage: importPackage,
         onChange: onChange,
       },
     };
@@ -1321,6 +1465,7 @@
           data.files || [],
           !!data.ready,
           typeof data.restored === "boolean" ? data.restored : !!data.ready,
+          data.folders || [],
         );
         return;
       }
@@ -1504,6 +1649,9 @@
         return sendRequest("getTraceTail", {
           limit: limit | 0,
         });
+      },
+      getSioTrace: function () {
+        return sendRequest("getSioTrace");
       },
       runUntilPc: function (targetPc, opts) {
         const payload = Object.assign({}, opts || {});

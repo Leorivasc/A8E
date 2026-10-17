@@ -42,7 +42,7 @@
 #define A8E_BUILD_VERSION "dev"
 #endif
 
-#define APPLICATION_CAPTION "A8E " A8E_BUILD_VERSION " (c) Sascha Springer"
+#define APPLICATION_CAPTION "A8E " A8E_BUILD_VERSION " (c) Sascha Springer/Leo Rivas"
 
 #define PIXELS_PER_LINE 456
 #define LINES_PER_SCREEN_NTSC 262
@@ -58,6 +58,10 @@
 
 #define ATARI_CPU_HZ_NTSC 1789773u
 #define ATARI_CPU_HZ_PAL 1773447u
+
+#define ATARI_IO_DISK_ACTIVITY_NONE 0u
+#define ATARI_IO_DISK_ACTIVITY_READ 1u
+#define ATARI_IO_DISK_ACTIVITY_WRITE 2u
 
 typedef enum
 {
@@ -111,13 +115,13 @@ typedef struct
 	u32 lCurrentDisplayLine;
 
 	SDL_Surface *pSdlAtariSurface;
-	u8 *pPriorityData;
+	u16 *pPriorityData;
 } VideoData_t;
 
 typedef struct
 {
 	u8 *pDestination;
-	u8 *pPriorityData;
+	u16 *pPriorityData;
 	u16 sDisplayMemoryAddress;
 	u32 lBytesPerLine;
 	u8 cPlayfieldDmaStealCount;
@@ -161,6 +165,10 @@ typedef struct
 	u64 llPokeyTimerResetCycle;
 	u64 llPokeySlowClockOriginCycle;
 	u8 cSerialOutputClockHigh;
+	u8 bSerialOutputBytePending;
+	u8 bSerialOutputShiftActive;
+	u8 cSerialOutputRegisterValue;
+	u8 cSerialOutputShiftValue;
 	u8 bInDrawLine;
 	u8 cNmienEnabledByCycle7;
 	u8 cNmienEnabledByCycle8;
@@ -253,6 +261,19 @@ typedef struct
 	u8 aPotCharge[8]; /* residual charge, in POT-count equivalents */
 	u64 llPotChargeLastCycle;
 
+	/* Native library media slots. Slot zero remains mirrored by pDisk1 for
+	 * compatibility with the command-line boot path. */
+	u8 *apDisk[8];
+	u32 alDiskSize[8];
+	u8 abDiskWritable[8];
+	u8 abDiskDirty[8];
+	u8 abDiskActivity[8];
+	u64 allDiskActivityUntil[8];
+	/* AHRM 10.2: inverted FDC status reported by each virtual drive's
+	 * STATUS command. It is a controller latch, not ATR metadata. */
+	u8 abSioDiskFdcStatus[8];
+	u8 cSioDriveIndex;
+	char acDiskName[8][128];
 	u8 *pDisk1;
 	u32 lDiskSize;
 
@@ -306,5 +327,50 @@ void AtariIoDrawScreen(
 	u32 lScreenHeight);
 
 void AtariIoKeyboardEvent(_6502_Context_t *pContext, SDL_KeyboardEvent *pKeyboardEvent);
+
+/* Mounts a caller-owned copy of an ATR/XEX image in D1:-D8:. */
+int AtariIoMountDisk(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	const u8 *pBytes,
+	u32 lSize,
+	const char *pName,
+	u8 bWritable);
+
+int AtariIoUnmountDisk(
+	_6502_Context_t *pContext,
+	u32 lDrive);
+
+const u8 *AtariIoGetDiskBytes(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u32 *pSize);
+
+u8 AtariIoIsDiskDirty(
+	_6502_Context_t *pContext,
+	u32 lDrive);
+
+/* Marks a successfully persisted mounted image clean without unmounting it. */
+void AtariIoClearDiskDirty(
+	_6502_Context_t *pContext,
+	u32 lDrive);
+
+void AtariIoSetDiskWritable(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u8 bWritable);
+
+u8 AtariIoIsDiskWritable(
+	_6502_Context_t *pContext,
+	u32 lDrive);
+
+void AtariIoSetDiskActivity(
+	_6502_Context_t *pContext,
+	u32 lDrive,
+	u8 cActivity);
+
+u8 AtariIoGetDiskActivity(
+	_6502_Context_t *pContext,
+	u32 lDrive);
 
 #endif
