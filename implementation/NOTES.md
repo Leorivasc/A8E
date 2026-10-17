@@ -1,5 +1,19 @@
 # NOTES.md
 
+- 2026-10-17: fixed the browser recoverable-Trash view when jsA8E uses the
+  Worker backend. The Worker snapshot now transports trash records and the
+  proxy exposes `listTrash`, restore, and purge operations, so the UI can
+  register the Trash button and keep its actions functional across both
+  backends. The Worker proxy regression now covers the snapshot and restore
+  boundary.
+
+- 2026-10-17: fixed browser Full Library export when jsA8E uses the Worker
+  backend. Export progress/cancellation callbacks and AbortSignals were being
+  included in the `postMessage` payload, causing the browser structured-clone
+  failure `Function object could not be cloned.` The Worker payload now keeps
+  only serializable package options, with a regression covering the export
+  request boundary.
+
 - 2026-10-17: fixed `publish-tauri.yml` so the rolling `tauri-latest` release
   no longer force-moves a shared Git tag. The release action now updates the
   existing prerelease assets in place with `overwrite_files: true`; the tag is
