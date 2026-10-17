@@ -1,5 +1,13 @@
 # NOTES.md
 
+- 2026-10-16: opened the separate real-hardware validation project in
+  `implementation/REAL_HARDWARE_VALIDATION.md`. It is a session handoff for
+  PAL/NTSC Atari 800 XL measurements covering POKEY/SIO, ANTIC/GTIA, raster
+  effects, audio, and representative ATR/XEX software. It records the required
+  hardware/capture setup, existing AHRM-07/AHRM-08 fixtures, evidence format,
+  and signoff criteria. Until that project is completed, public status remains
+  “AHRM-aligned and contract-tested,” not fully hardware-certified.
+
 - 2026-10-16: documented the explicit AHRM alignment boundary for the current
   POKEY, SIO, ANTIC, and GTIA updates. Serial holding/shift-register timing,
   SIO response phases and supported high-speed paths, sector geometry,

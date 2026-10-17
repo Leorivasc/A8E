@@ -72,8 +72,9 @@ contracts, and the AHRM-07 synthetic PMG/GTIA diagnostic is certified for its
 stated scope. Full hardware-equivalence validation remains open for broader
 real-title and PAL/NTSC comparisons, analog POKEY calibration, and the
 accepted jsA8E P1 CPU/POKEY phase follow-up. See the [color-clock accuracy
-scope](legacy/COLOR_CLOCK_ACCURACY.md) and the [implementation notes](implementation/NOTES.md)
-for the detailed boundaries.
+scope](legacy/COLOR_CLOCK_ACCURACY.md), the [real hardware validation
+project](implementation/REAL_HARDWARE_VALIDATION.md), and the [implementation
+notes](implementation/NOTES.md) for the detailed boundaries and handoff.
 
 ### Extended Memory
 

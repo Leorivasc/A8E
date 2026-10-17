@@ -94,6 +94,10 @@ These items are implemented in both modern ports:
 The remaining task is verification against real content and the AHRM timing
 charts, not another large renderer rewrite.
 
+The hardware-measurement and cross-platform comparison work has been split into
+the separate [Real Hardware Validation Project](../implementation/REAL_HARDWARE_VALIDATION.md)
+so it can be resumed independently from the implementation merge.
+
 ### 1. Regression sweep against raster-effect content
 
 Status: open
