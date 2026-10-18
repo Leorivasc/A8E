@@ -1,5 +1,13 @@
 # NOTES.md
 
+- 2026-10-17: started `OptimizationRun1` with an AHRM-preserving GTIA PMG
+  allocation reduction. Immutable PMG register maps are now allocated once,
+  while per-clock collision scratch buffers are owned by each machine and
+  reused. The per-clock priming helpers are also shared instead of recreated
+  as closures. The PMG draw order, register accesses, collision writes, and
+  cycle timing are unchanged; the scratch buffers are transient and excluded
+  from serialized machine state.
+
 - 2026-10-17: made jsA8E's per-instruction debugger trace opt-in. Normal
   gameplay now leaves `instructionTraceHook` disabled, avoiding the register
   snapshot allocations that caused long-run garbage-collection pressure. The

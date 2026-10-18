@@ -150,6 +150,11 @@
           playerPmgState: new Uint8Array(4),
           missilePmgShift: new Uint8Array(4),
           missilePmgState: new Uint8Array(4),
+          // Scratch collision state reused by GTIA's per-clock PMG renderer.
+          // These are not emulated registers and are intentionally excluded
+          // from serialized machine state.
+          playerCollision: new Uint16Array(4),
+          missileCollision: new Uint16Array(4),
           playfieldLineBuffer: new Uint8Array(48),
           scheduledPlayfieldDma: new Uint8Array(CYCLES_PER_LINE),
         },
