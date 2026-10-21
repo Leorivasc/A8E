@@ -1,5 +1,19 @@
 # NOTES.md
 
+- 2026-10-21: fixed the jsA8E Assembler Editor HostFS source selector during
+  asynchronous Worker/IndexedDB startup. The Worker now waits for the HostFS
+  snapshot to be ready, while the editor shows a loading state and refreshes
+  when the file list arrives instead of treating the initial empty cache as
+  having no assembler sources.
+
+- 2026-10-21: made the Assembler Editor load the selected HostFS source
+  immediately when the source selector changes, using the same read and editor
+  refresh path as the explicit Load button.
+
+- 2026-10-21: fixed the Assembler Editor initial-load condition so the first
+  HostFS source is loaded even though the editor starts with its example
+  template; subsequent panel openings preserve the user's current edits.
+
 - 2026-10-21: added a draggable desktop divider between the tools column and
   the Atari display in the browser Work/Development layouts. The column ratio
   updates live through pointer or keyboard interaction, persists in browser
