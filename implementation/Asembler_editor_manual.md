@@ -345,7 +345,221 @@ Check that:
 - `.RUN` points to loaded code;
 - the program does not accidentally overwrite system memory.
 
-## 12. Quick reference
+## 12. 6502 instruction reference
+
+The following instruction groups cover most beginner programs. The examples
+use labels instead of hard-coded addresses whenever possible.
+
+### Load and store
+
+These instructions move values between memory and registers:
+
+| Instructions | Purpose |
+|---|---|
+| `LDA`, `LDX`, `LDY` | Load the accumulator, X register, or Y register |
+| `STA`, `STX`, `STY` | Store a register in memory |
+
+```asm
+VALUE = $80
+
+.ORG $2000
+    LDA #$2A              ; Load an immediate value.
+    STA VALUE             ; Store A in zero-page memory.
+    LDX #$00              ; Initialize X.
+    LDY VALUE             ; Load Y from memory.
+    STX VALUE+1           ; Store X in the next byte.
+    RTS
+.RUN $2000
+```
+
+### Arithmetic and counters
+
+`ADC` adds with carry and `SBC` subtracts with borrow. Clear or set the carry
+flag before using them:
+
+```asm
+TOTAL = $81
+
+    CLC                   ; Start addition with carry clear.
+    LDA TOTAL
+    ADC #$05
+    STA TOTAL
+
+    SEC                   ; Start subtraction with carry set.
+    LDA TOTAL
+    SBC #$01
+    STA TOTAL
+
+    INX                   ; Increment X.
+    DEY                   ; Decrement Y.
+    INC TOTAL             ; Increment a memory byte.
+    DEC TOTAL             ; Decrement a memory byte.
+```
+
+### Logic and bit tests
+
+`AND`, `ORA`, and `EOR` manipulate individual bits. `BIT` tests bits in a
+memory location without changing its value:
+
+```asm
+FLAGS = $D01F
+
+    LDA #$01
+    ORA FLAGS              ; Set bits present in A or FLAGS.
+    EOR #$08               ; Toggle bit 3.
+    AND #%00001111         ; Keep only the low four bits.
+    STA FLAGS
+
+    BIT FLAGS              ; Update processor flags from FLAGS.
+```
+
+### Comparisons and conditional branches
+
+`CMP`, `CPX`, and `CPY` compare a register with a value and set the processor
+flags. They do not change the compared register.
+
+| Branch | Condition |
+|---|---|
+| `BEQ` | Equal / zero |
+| `BNE` | Not equal / not zero |
+| `BCC` | Carry clear |
+| `BCS` | Carry set |
+| `BMI` | Negative |
+| `BPL` | Positive or zero |
+| `BVC` | Overflow clear |
+| `BVS` | Overflow set |
+
+```asm
+COUNT = $80
+
+    LDX #$00
+NEXT:
+    INX
+    CPX #$0A              ; Has X reached ten?
+    BNE NEXT              ; Repeat while it has not.
+
+    LDA COUNT
+    CMP #$00
+    BEQ IS_ZERO
+    RTS
+
+IS_ZERO:
+    INY
+    RTS
+```
+
+### Jumps and subroutines
+
+Use `JMP` for an unconditional jump. Use `JSR` to call a subroutine and
+`RTS` to return from it:
+
+```asm
+.ORG $2000
+
+START:
+    JSR SETUP
+    JSR MAIN_LOOP
+    RTS
+
+SETUP:
+    LDA #$00
+    STA $80
+    RTS
+
+MAIN_LOOP:
+    INC $80
+    JMP MAIN_LOOP
+
+.RUN START
+```
+
+`BRK` and `RTI` are intended for interrupt and debugger-oriented code. They
+should not replace `RTS` in an ordinary subroutine.
+
+### Registers, stack, and flags
+
+Register-transfer instructions:
+
+```asm
+    TAX                   ; A -> X.
+    TXA                   ; X -> A.
+    TAY                   ; A -> Y.
+    TYA                   ; Y -> A.
+    TSX                   ; Stack pointer -> X.
+    TXS                   ; X -> stack pointer.
+```
+
+Stack instructions:
+
+```asm
+    PHA                   ; Save A.
+    PHP                   ; Save processor status.
+    PLA                   ; Restore A.
+    PLP                   ; Restore processor status.
+```
+
+Flag instructions include `CLC`/`SEC` for carry, `CLV` for overflow,
+`CLD`/`SED` for decimal mode, and `CLI`/`SEI` for interrupt enable. Use
+`NOP` when a deliberate one-instruction delay is useful.
+
+### Shifts and rotates
+
+`ASL` shifts left, `LSR` shifts right, and `ROL`/`ROR` rotate through carry:
+
+```asm
+VALUE = $80
+
+    ASL A                 ; Shift the accumulator left.
+    LSR A                 ; Shift the accumulator right.
+    ROL VALUE              ; Rotate a memory byte left through carry.
+    ROR VALUE              ; Rotate a memory byte right through carry.
+```
+
+## 13. Addressing modes
+
+The addressing mode is part of the instruction syntax. The same mnemonic can
+operate on an immediate value, a memory address, or an indexed address.
+
+| Mode | Example | Meaning |
+|---|---|---|
+| Immediate | `LDA #$10` | Use the value `$10` itself |
+| Zero page | `LDA $80` | Read from address `$0080` |
+| Zero-page indexed | `LDA $80,X` | Read from `$0080 + X` |
+| Absolute | `LDA $4000` | Read from address `$4000` |
+| Absolute indexed | `LDA $4000,Y` | Read from `$4000 + Y` |
+| Indexed indirect | `LDA ($80,X)` | Find a pointer at `$80 + X`, then read through it |
+| Indirect indexed | `LDA ($80),Y` | Read a pointer at `$80`, then add Y |
+| Indirect jump | `JMP ($0200)` | Jump through a two-byte pointer |
+| Accumulator | `ASL A` | Shift the accumulator itself |
+| Implied | `INX` | The instruction has no operand |
+
+Indirect-index pointers must be in zero page. For example, this is valid:
+
+```asm
+VALUE = $80
+
+SCREEN_PTR = $80
+
+    LDA #<$4000
+    STA SCREEN_PTR
+    LDA #>$4000
+    STA SCREEN_PTR+1
+    LDY #$00
+    LDA (SCREEN_PTR),Y
+```
+
+This is not valid for `(pointer),Y`:
+
+```asm
+SCREEN_PTR = $4000       ; Not a zero-page pointer.
+    LDA (SCREEN_PTR),Y
+```
+
+When an instruction reports an addressing-mode or range error, check whether
+the operand is using the intended mode and whether a pointer belongs in zero
+page.
+
+## 14. Quick reference
 
 ```text
 HostFS: upload HELLO.ASM

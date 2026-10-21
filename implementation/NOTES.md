@@ -1,5 +1,9 @@
 # NOTES.md
 
+- 2026-10-21: expanded the English Assembler Editor manual with a 6502
+  instruction quick reference, instruction-family examples, and an addressing
+  mode table including zero-page indirect-pointer guidance.
+
 - 2026-10-21: corrected the English Assembler Editor's screen-text example by
   placing its indirect-index pointer in zero page (`$0080`), as required by
   the 6502 `(pointer),Y` addressing mode, and by using the correct Atari screen
