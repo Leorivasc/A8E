@@ -3131,7 +3131,7 @@ canvas.crtEnabled {
 }
 
 .asm-bp-row.no-addr {
-  opacity: 0.35;
+  opacity: 1;
   cursor: default;
 }
 
@@ -3172,9 +3172,9 @@ canvas.crtEnabled {
   min-width: 18px;
   text-align: right;
   flex: 0 0 auto;
-  color: var(--sub-panel-dim);
-  font-size: 10px;
-  opacity: 0.55;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  opacity: 1;
 }
 
 .asm-bp-addr {
@@ -3200,7 +3200,11 @@ canvas.crtEnabled {
 }
 
 .asm-bp-row.has-addr .asm-bp-num {
-  color: var(--muted);
+  color: var(--text);
+}
+
+.asm-bp-row.no-addr .asm-bp-num {
+  color: var(--text);
 }
 
 .asm-bp-row.has-addr .asm-bp-addr {

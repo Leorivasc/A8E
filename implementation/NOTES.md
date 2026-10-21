@@ -1,5 +1,24 @@
 # NOTES.md
 
+- 2026-10-21: corrected the English Assembler Editor's screen-text example by
+  placing its indirect-index pointer in zero page (`$0080`), as required by
+  the 6502 `(pointer),Y` addressing mode, and by using the correct Atari screen
+  codes for uppercase letters and spaces.
+
+- 2026-10-21: improved the jsA8E Assembler Editor line-number gutter
+  readability. Line numbers now use the panel's normal text color and full
+  opacity, including source lines without assembled addresses, while address
+  and byte metadata retain their subdued styling.
+
+- 2026-10-21: translated `implementation/Asembler_editor_manual.md` from
+  Spanish to English, matching the official language used by the emulator
+  interface and documentation.
+
+- 2026-10-21: added `implementation/Asembler_editor_manual.md`, a Spanish
+  user manual for the jsA8E Assembler Editor. It documents the HostFS workflow,
+  editor controls, source syntax, executable generation, debugging, common
+  errors, and simple 6502 examples.
+
 - 2026-10-21: fixed the jsA8E Assembler Editor HostFS source selector during
   asynchronous Worker/IndexedDB startup. The Worker now waits for the HostFS
   snapshot to be ready, while the editor shows a loading state and refreshes
