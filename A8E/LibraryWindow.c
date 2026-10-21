@@ -264,7 +264,7 @@ static void A8E_LibraryWindow_ShowStorage(A8E_LibraryWindow_t *pWindow)
 		return;
 	}
 	lCapacity = (uint64_t)tTotal.QuadPart;
-	lAvailable = (uint64_t)tFree.QuadPart;
+	lAvailable = (uint64_t)tAvailable.QuadPart;
 #else
 	struct statvfs tStats;
 	if(statvfs("library", &tStats) != 0)

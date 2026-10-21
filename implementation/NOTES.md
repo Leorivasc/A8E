@@ -1,5 +1,17 @@
 # NOTES.md
 
+- 2026-10-20: fixed native `-o`/`-O` OPTION-on-start boot mapping. The XL/XE
+  reset state now leaves BASIC unmapped when OPTION is requested, so the OS
+  can preserve BASIC-disabled memory for disk software or enter Self Test
+  without D1:. Added an execution-level regression to
+  `A8E/tests/gtia_consol_probe.c`; the JavaScript CONSOL contract remains
+  covered by `jsA8E/tests/consol_startup_option.test.js`.
+
+- 2026-10-20: fixed the native Windows Full Library storage-capacity path in
+  `A8E/LibraryWindow.c`. `GetDiskFreeSpaceExA` now reads the available-byte
+  result from the declared `tAvailable` variable instead of the nonexistent
+  `tFree`; the Linux `statvfs` path was unchanged.
+
 - 2026-10-17: started `OptimizationRun1` with an AHRM-preserving GTIA PMG
   allocation reduction. Immutable PMG register maps are now allocated once,
   while per-clock collision scratch buffers are owned by each machine and
