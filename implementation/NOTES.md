@@ -1,5 +1,10 @@
 # NOTES.md
 
+- 2026-10-21: added a draggable desktop divider between the tools column and
+  the Atari display in the browser Work/Development layouts. The column ratio
+  updates live through pointer or keyboard interaction, persists in browser
+  storage, and is disabled automatically for the mobile single-column layout.
+
 - 2026-10-20: fixed native `-o`/`-O` OPTION-on-start boot mapping. The XL/XE
   reset state now leaves BASIC unmapped when OPTION is requested, so the OS
   can preserve BASIC-disabled memory for disk software or enter Self Test

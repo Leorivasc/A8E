@@ -168,6 +168,7 @@
   }
 
   const LAYOUT_SCHEME_STORAGE_KEY = "a8e_layout_scheme";
+  const LAYOUT_COLUMN_RATIO_STORAGE_KEY = "a8e_layout_column_ratio";
   const LAYOUT_SCHEMES = Object.freeze({
     emulation: { label: "Emulation", panels: [], joystick: false },
     work: {
@@ -210,6 +211,41 @@
     try {
       if (window.localStorage) {
         window.localStorage.setItem(LAYOUT_SCHEME_STORAGE_KEY, normalized);
+      }
+    } catch {
+      // ignore storage failures
+    }
+    return normalized;
+  }
+
+  function normalizeLayoutColumnRatio(value) {
+    const ratio = Number.parseFloat(value);
+    if (!Number.isFinite(ratio)) return null;
+    return Math.min(0.6, Math.max(0.24, ratio));
+  }
+
+  function resolveLayoutColumnRatioPreference() {
+    try {
+      if (window.localStorage) {
+        const stored = normalizeLayoutColumnRatio(
+          window.localStorage.getItem(LAYOUT_COLUMN_RATIO_STORAGE_KEY),
+        );
+        if (stored !== null) return stored;
+      }
+    } catch {
+      // ignore storage failures
+    }
+    return 0.34;
+  }
+
+  function persistLayoutColumnRatioPreference(value) {
+    const normalized = normalizeLayoutColumnRatio(value) || 0.34;
+    try {
+      if (window.localStorage) {
+        window.localStorage.setItem(
+          LAYOUT_COLUMN_RATIO_STORAGE_KEY,
+          String(normalized),
+        );
       }
     } catch {
       // ignore storage failures
@@ -306,12 +342,16 @@
     const layoutSchemePreference = persistLayoutSchemePreference(
       resolveLayoutSchemePreference(),
     );
+    let layoutColumnRatio = persistLayoutColumnRatioPreference(
+      resolveLayoutColumnRatioPreference(),
+    );
     let screenViewport = canvas.parentElement;
     let layoutRoot =
       screenViewport && screenViewport.closest
         ? screenViewport.closest(".layout")
         : null;
     const keyboardPanel = document.getElementById("keyboardPanel");
+    const layoutSplitter = document.getElementById("layoutSplitter");
     const joystickPanel = document.getElementById("joystickPanel");
     const systemKeyboardInput = document.getElementById("systemKeyboardInput");
     const systemKeyboardTouchZone = document.getElementById(
@@ -930,7 +970,13 @@
       const normalized = normalizeLayoutScheme(value) || "work";
       const scheme = LAYOUT_SCHEMES[normalized];
       const visiblePanels = new Set(scheme.panels || []);
-      if (layoutRoot) layoutRoot.dataset.layoutScheme = normalized;
+      if (layoutRoot) {
+        layoutRoot.dataset.layoutScheme = normalized;
+        layoutRoot.style.setProperty(
+          "--tools-column-width",
+          (layoutColumnRatio * 100).toFixed(3) + "%",
+        );
+      }
       updateLayoutSchemeButtons(normalized);
 
       // The assembler panel contains the source debugger, breakpoints, and
@@ -954,6 +1000,105 @@
       if (isMobileViewport()) hideMobilePanels();
       resizeCrtCanvas();
       queueKeyboardScaleConsistencyCheck();
+    }
+
+    function getLayoutColumnBounds() {
+      if (!layoutRoot) return { min: 0.24, max: 0.6 };
+      const style = window.getComputedStyle(layoutRoot);
+      const padding =
+        (parseFloat(style.paddingLeft || "0") || 0) +
+        (parseFloat(style.paddingRight || "0") || 0);
+      const contentWidth = Math.max(1, layoutRoot.clientWidth - padding);
+      const min = Math.min(0.6, 240 / contentWidth);
+      const max = Math.max(
+        min,
+        Math.min(0.6, (contentWidth - 330) / contentWidth),
+      );
+      return { min: min, max: max };
+    }
+
+    function setLayoutColumnRatio(value, persist) {
+      const bounds = getLayoutColumnBounds();
+      layoutColumnRatio = Math.min(
+        bounds.max,
+        Math.max(bounds.min, Number(value)),
+      );
+      if (!Number.isFinite(layoutColumnRatio)) layoutColumnRatio = 0.34;
+      if (layoutRoot) {
+        layoutRoot.style.setProperty(
+          "--tools-column-width",
+          (layoutColumnRatio * 100).toFixed(3) + "%",
+        );
+      }
+      if (layoutSplitter) {
+        layoutSplitter.setAttribute(
+          "aria-valuenow",
+          String(Math.round(layoutColumnRatio * 100)),
+        );
+      }
+      if (persist) persistLayoutColumnRatioPreference(layoutColumnRatio);
+      resizeCrtCanvas();
+    }
+
+    function resizeLayoutColumnsFromPointer(clientX) {
+      if (!layoutRoot) return;
+      const rect = layoutRoot.getBoundingClientRect();
+      const style = window.getComputedStyle(layoutRoot);
+      const paddingLeft = parseFloat(style.paddingLeft || "0") || 0;
+      const paddingRight = parseFloat(style.paddingRight || "0") || 0;
+      const contentWidth = Math.max(
+        1,
+        layoutRoot.clientWidth - paddingLeft - paddingRight,
+      );
+      const toolsWidth = clientX - rect.left - paddingLeft;
+      setLayoutColumnRatio(toolsWidth / contentWidth, true);
+    }
+
+    if (layoutSplitter) {
+      let pointerId = null;
+
+      layoutSplitter.addEventListener("pointerdown", function (event) {
+        if (isMobileViewport()) return;
+        pointerId = event.pointerId;
+        layoutSplitter.setPointerCapture(pointerId);
+        document.body.classList.add("layout-column-resizing");
+        event.preventDefault();
+        resizeLayoutColumnsFromPointer(event.clientX);
+      });
+
+      layoutSplitter.addEventListener("pointermove", function (event) {
+        if (pointerId !== event.pointerId) return;
+        event.preventDefault();
+        resizeLayoutColumnsFromPointer(event.clientX);
+      });
+
+      function finishColumnResize(event) {
+        if (pointerId !== event.pointerId) return;
+        pointerId = null;
+        document.body.classList.remove("layout-column-resizing");
+        if (layoutSplitter.hasPointerCapture(event.pointerId)) {
+          layoutSplitter.releasePointerCapture(event.pointerId);
+        }
+      }
+
+      layoutSplitter.addEventListener("pointerup", finishColumnResize);
+      layoutSplitter.addEventListener("pointercancel", finishColumnResize);
+      layoutSplitter.addEventListener("keydown", function (event) {
+        if (
+          event.key !== "ArrowLeft" &&
+          event.key !== "ArrowRight" &&
+          event.key !== "Home" &&
+          event.key !== "End"
+        ) return;
+        const bounds = getLayoutColumnBounds();
+        let next = layoutColumnRatio;
+        if (event.key === "ArrowLeft") next -= 0.02;
+        if (event.key === "ArrowRight") next += 0.02;
+        if (event.key === "Home") next = bounds.min;
+        if (event.key === "End") next = bounds.max;
+        setLayoutColumnRatio(next, true);
+        event.preventDefault();
+      });
     }
 
     const romOs = document.getElementById("romOs");
