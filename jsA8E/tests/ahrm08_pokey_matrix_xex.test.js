@@ -34,11 +34,13 @@ const rootDir = path.resolve(__dirname, "../..");
 const sourcePath = path.join(
   rootDir,
   "implementation",
+  "AHRM Validation",
   "AHRM08_POKEY_MATRIX_TEST.asm",
 );
 const artifactPath = path.join(
   rootDir,
   "implementation",
+  "AHRM Validation",
   "AHRM08_POKEY_MATRIX_TEST.XEX",
 );
 const result = loadAssembler().assembleToXex(fs.readFileSync(sourcePath, "utf8"));

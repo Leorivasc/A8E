@@ -6,6 +6,10 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 function loadApi() {
+  const diskImageSource = fs.readFileSync(
+    path.join(__dirname, "..", "js", "core", "disk_image.js"),
+    "utf8",
+  );
   const source = fs.readFileSync(
     path.join(__dirname, "..", "js", "core", "atr_inspector.js"),
     "utf8",
@@ -18,6 +22,7 @@ function loadApi() {
   context.window = context;
   context.self = context;
   vm.createContext(context);
+  vm.runInContext(diskImageSource, context, { filename: "disk_image.js" });
   vm.runInContext(source, context, { filename: "atr_inspector.js" });
   return context.window.A8EAtrInspector;
 }
@@ -97,6 +102,19 @@ async function main() {
   assert.equal(unknownIntegrity.filesystemKnown, false);
   assert.ok(unknownIntegrity.warnings.length > 0);
   assert.equal(inspector.inspect(new Uint8Array([0, 1])).valid, false);
+
+  const raw = new Uint8Array(720 * 128);
+  const rawVtoc = (360 - 1) * 128;
+  raw[rawVtoc] = 2;
+  raw[rawVtoc + 1] = 707;
+  raw[rawVtoc + 3] = 707;
+  const rawInspection = inspector.inspect(raw);
+  assert.equal(rawInspection.valid, true);
+  assert.equal(rawInspection.sourceFormat, "raw");
+  assert.equal(rawInspection.sourceByteLength, raw.length);
+  assert.equal(rawInspection.header.totalSectors, 720);
+  assert.equal(rawInspection.filesystem.name, "DOS 2.x / MyDOS");
+
   console.log("atr_inspector.test.js passed");
 }
 

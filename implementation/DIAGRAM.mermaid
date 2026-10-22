@@ -1,46 +1,58 @@
 flowchart TD
 
-subgraph group_browser["Browser control"]
-  node_ui["Browser UI<br/>[ui.js]"]
-  node_app["App facade<br/>[a8e.js]"]
+subgraph group_browser["Browser application"]
+  node_ui["Browser UI and panels<br/>[ui.js, hostfs_ui.js, disk_library_ui.js,<br/>assembler_ui.js, snapshot_ui.js]"]
+  node_app["Application facade<br/>[a8e.js]"]
+  node_proxy["Thread bridge and fallback<br/>[app_proxy.js]"]
   node_automation["Automation API<br/>[automation_api.js]"]
   node_worker["Emulator worker<br/>[emulator_worker.js]"]
 end
 
-subgraph group_machine["Emulation core"]
+subgraph group_machine["JavaScript emulation core"]
   node_machine_js["Atari machine<br/>[atari.js]"]
   node_cpu["6502 CPU<br/>[cpu.js]"]
-  node_memory[("Memory maps<br/>[memory.js]")]
-  node_io["Hardware I/O<br/>[io.js]"]
-  node_antic["ANTIC video<br/>[antic.js]"]
-  node_gtia["GTIA graphics<br/>[gtia.js]"]
-  node_pokey["POKEY sound I/O<br/>[pokey.js]"]
-  node_playfield["Playfield renderer<br/>[renderer_base.js]"]
+  node_memory[("Memory maps and expansion<br/>[memory.js]")]
+  node_io["Hardware I/O bus<br/>[io.js, input.js, hdevice.js]"]
+  node_antic["ANTIC video and DMA<br/>[antic.js]"]
+  node_gtia["GTIA graphics and collisions<br/>[gtia.js]"]
+  node_pokey["POKEY sound, timers and SIO<br/>[pokey.js, pokey_sio.js]"]
+  node_pia["PIA console and ports<br/>[io.js, input.js]"]
+  node_playfield["Playfield and display-list renderer<br/>[renderer.js, renderer_base.js]"]
 end
 
-subgraph group_media_dev["Media and tools"]
-  node_disk[("Disk library<br/>[disk_library.js]")]
-  node_hostfs["Host filesystem<br/>[hostfs.js]"]
-  node_snapshot["Machine snapshots<br/>[atari_snapshot.js]"]
-  node_debugger["Debugger<br/>[debugger.js]"]
-  node_assembler["Assembler<br/>[assembler_core.js]"]
-  node_artifacts["Failure artifacts<br/>[artifacts.js]"]
+subgraph group_media_dev["Media, state and development tools"]
+  node_disk["Disk library and mounted ATRs<br/>[disk_library.js]"]
+  node_library_pkg["Library archive/package formats<br/>[library_archive.js, library_package.js]"]
+  node_hostfs["HostFS workspace files<br/>[hostfs.js]"]
+  node_snapshot["Snapshots and codecs<br/>[atari_snapshot.js, snapshot_codec.js]"]
+  node_debugger["Debugger and machine state<br/>[debugger.js, state.js]"]
+  node_assembler["Assembler and source tools<br/>[assembler_core.js, assembler/*]"]
+  node_artifacts["Failure artifacts and traces<br/>[artifacts.js]"]
 end
 
-subgraph group_output["Audio and display"]
-  node_gl["WebGL renderer<br/>[gl.js]"]
-  node_software["Canvas renderer<br/>[software.js]"]
-  node_audio["Audio runtime<br/>[runtime.js]"]
-  node_worklet["Audio worklet<br/>[worklet.js]"]
+subgraph group_output["Audio and display output"]
+  node_gl["WebGL renderer<br/>[render/gl.js]"]
+  node_software["Canvas renderer<br/>[render/software.js]"]
+  node_audio["Audio runtime<br/>[audio/runtime.js]"]
+  node_worklet["Audio worklet<br/>[audio/worklet.js]"]
 end
 
-subgraph group_native["Native emulator"]
-  node_native_app["Native application<br/>[A8E.c]"]
+subgraph group_native["Native SDL emulator"]
+  node_native_app["Native application and SDL shell<br/>[A8E.c]"]
   node_native_cpu["Native 6502<br/>[6502.c]"]
-  node_native_io["Native Atari I/O<br/>[AtariIo.c]"]
+  node_native_io["Native Atari I/O bus<br/>[AtariIo.c]"]
   node_native_antic["Native ANTIC<br/>[Antic.c]"]
   node_native_gtia["Native GTIA<br/>[Gtia.c]"]
   node_native_pokey["Native POKEY<br/>[Pokey.c]"]
+  node_native_pia["Native PIA<br/>[Pia.c]"]
+  node_native_library["Native library backend<br/>[LibraryRepository.c, LibraryPackage.c,<br/>LibraryArchive.c, LibraryStore.c]"]
+end
+
+subgraph group_validation["Validation and comparison"]
+  node_guest_tests["Guest diagnostics<br/>AHRM06-AHRM18<br/>U1MB_MEMORY_TEST + MEMORY_STRESS_TEST"]
+  node_js_tests["JavaScript automation tests<br/>XEX boot and hardware regressions<br/>current suite: passing"]
+  node_native_tests["Native CMake/CTest probes<br/>16 registered - 14 passing - 2 open"]
+  node_validation_doc["Validation guide and expected output<br/>[AHRM Validation/AHRM_Validation_Tests.md]"]
 end
 
 node_user(("User or agent"))
@@ -49,34 +61,57 @@ node_user -->|"controls"| node_ui
 node_ui -->|"starts and configures"| node_app
 node_user -.->|"scripts"| node_automation
 node_automation -->|"controls and queries"| node_app
-node_app -.->|"dispatches commands"| node_worker
+node_app -->|"uses"| node_proxy
+node_proxy -.->|"dispatches requests"| node_worker
+node_proxy -.->|"can run directly"| node_machine_js
 node_worker -.->|"creates and controls"| node_machine_js
+
 node_machine_js -->|"executes"| node_cpu
 node_machine_js -->|"configures maps"| node_memory
 node_machine_js -->|"coordinates devices"| node_io
 node_io -->|"dispatches video"| node_antic
 node_io -->|"dispatches graphics I/O"| node_gtia
-node_io -->|"dispatches sound I/O"| node_pokey
-node_antic -->|"renders scanlines"| node_playfield
+node_io -->|"dispatches sound and serial I/O"| node_pokey
+node_io -->|"dispatches console I/O"| node_pia
+node_antic -->|"renders scanlines and DMA"| node_playfield
+node_gtia -->|"provides playfield/player colors"| node_playfield
 node_playfield -->|"supplies pixels"| node_gl
 node_playfield -->|"supplies pixels"| node_software
 node_pokey -->|"feeds audio"| node_audio
 node_audio -.->|"queues samples"| node_worklet
+
 node_app -->|"loads and mounts disks"| node_disk
+node_disk -->|"imports and exports"| node_library_pkg
+node_disk -->|"stores revisions and trash"| node_library_pkg
 node_app -->|"accesses files"| node_hostfs
 node_app -->|"saves and loads state"| node_snapshot
 node_app -->|"queries and controls"| node_debugger
 node_app -->|"assembles source"| node_assembler
 node_automation -->|"captures failures"| node_artifacts
+
 node_user -->|"runs emulator"| node_native_app
 node_native_app -->|"executes machine code"| node_native_cpu
 node_native_app -->|"coordinates hardware I/O"| node_native_io
+node_native_app -->|"uses library services"| node_native_library
 node_native_io -->|"uses video hardware"| node_native_antic
 node_native_io -->|"uses graphics hardware"| node_native_gtia
 node_native_io -->|"uses sound hardware"| node_native_pokey
+node_native_io -->|"uses console hardware"| node_native_pia
+
+node_user -->|"runs comparisons"| node_guest_tests
+node_automation -->|"runs"| node_js_tests
+node_user -->|"builds and runs"| node_native_tests
+node_validation_doc -.->|"defines coverage and expected output"| node_guest_tests
+node_validation_doc -.->|"documents status"| node_js_tests
+node_validation_doc -.->|"documents open contracts"| node_native_tests
+node_guest_tests -.->|"exercises"| node_machine_js
+node_guest_tests -.->|"can run on"| node_native_app
+node_js_tests -.->|"verifies"| node_machine_js
+node_native_tests -.->|"verifies"| node_native_app
 
 click node_ui "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/app/ui.js"
 click node_app "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/app/a8e.js"
+click node_proxy "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/app_proxy.js"
 click node_automation "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/app/automation_api.js"
 click node_worker "https://github.com/leorivasc/a8e/blob/main/jsA8E/emulator_worker.js"
 click node_machine_js "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/atari.js"
@@ -86,12 +121,14 @@ click node_io "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/io.js"
 click node_antic "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/antic.js"
 click node_gtia "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/gtia.js"
 click node_pokey "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/pokey.js"
-click node_playfield "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/playfield/renderer_base.js"
+click node_pia "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/input.js"
+click node_playfield "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/playfield/renderer.js"
 click node_gl "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/render/gl.js"
 click node_software "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/render/software.js"
 click node_audio "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/audio/runtime.js"
 click node_worklet "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/audio/worklet.js"
 click node_disk "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/disk_library.js"
+click node_library_pkg "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/library_package.js"
 click node_hostfs "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/hostfs.js"
 click node_snapshot "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/atari_snapshot.js"
 click node_debugger "https://github.com/leorivasc/a8e/blob/main/jsA8E/js/core/debugger.js"
@@ -103,6 +140,12 @@ click node_native_io "https://github.com/leorivasc/a8e/blob/main/A8E/AtariIo.c"
 click node_native_antic "https://github.com/leorivasc/a8e/blob/main/A8E/Antic.c"
 click node_native_gtia "https://github.com/leorivasc/a8e/blob/main/A8E/Gtia.c"
 click node_native_pokey "https://github.com/leorivasc/a8e/blob/main/A8E/Pokey.c"
+click node_native_pia "https://github.com/leorivasc/a8e/blob/main/A8E/Pia.c"
+click node_native_library "https://github.com/leorivasc/a8e/blob/main/A8E/LibraryRepository.c"
+click node_guest_tests "https://github.com/leorivasc/a8e/blob/main/implementation/AHRM%20Validation/AHRM_Validation_Tests.md"
+click node_js_tests "https://github.com/leorivasc/a8e/tree/main/jsA8E/tests"
+click node_native_tests "https://github.com/leorivasc/a8e/tree/main/A8E/tests"
+click node_validation_doc "https://github.com/leorivasc/a8e/blob/main/implementation/AHRM%20Validation/AHRM_Validation_Tests.md"
 
 classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
 classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
@@ -111,8 +154,10 @@ classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
 classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
 classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
 classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
-class node_ui,node_app,node_automation,node_worker,node_user toneBlue
-class node_machine_js,node_cpu,node_memory,node_io,node_antic,node_gtia,node_pokey,node_playfield toneAmber
-class node_disk,node_hostfs,node_snapshot,node_debugger,node_assembler,node_artifacts toneMint
+class node_ui,node_app,node_proxy,node_automation,node_worker,node_user toneBlue
+class node_machine_js,node_cpu,node_memory,node_io,node_antic,node_gtia,node_pokey,node_pia,node_playfield toneAmber
+class node_disk,node_library_pkg,node_hostfs,node_snapshot,node_debugger,node_assembler,node_artifacts toneMint
 class node_gl,node_software,node_audio,node_worklet toneRose
-class node_native_app,node_native_cpu,node_native_io,node_native_antic,node_native_gtia,node_native_pokey toneIndigo
+class node_native_app,node_native_cpu,node_native_io,node_native_antic,node_native_gtia,node_native_pokey,node_native_pia,node_native_library toneIndigo
+class node_guest_tests,node_js_tests,node_validation_doc toneTeal
+class node_native_tests toneRose

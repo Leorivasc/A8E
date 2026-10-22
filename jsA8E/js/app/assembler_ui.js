@@ -383,6 +383,7 @@
     let statusKind = "";
     let debugStatusMessage = "";
     let highlightQueued = false;
+    let sourceLoaded = false;
     let gutterQueued = false;
     let sourceLineAddressMap = Object.create(null);
     let addressLineMap = Object.create(null);
@@ -912,12 +913,22 @@
     }
 
     function refreshSourceList() {
-      const files = hostFs.listFiles().filter(function (f) {
-        return isSourceFileName(f.name);
-      });
-
       const selectedBefore = sourceSelect.value;
+      const hostFsReady =
+        typeof hostFs.isReady !== "function" || hostFs.isReady();
       sourceSelect.innerHTML = "";
+
+      if (!hostFsReady) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "(loading HostFS...)";
+        sourceSelect.appendChild(opt);
+        return;
+      }
+
+      const files = hostFs.listFiles().filter(function (f) {
+        return f && isSourceFileName(f.name);
+      });
 
       if (!files.length) {
         const opt = document.createElement("option");
@@ -960,6 +971,7 @@
       editor.scrollTop = 0;
       editor.scrollLeft = 0;
       sourceNameInput.value = selected;
+      sourceLoaded = true;
       clearLineAddressMaps();
       queueHighlightRefresh();
       clearErrorList();
@@ -1169,10 +1181,10 @@
       panel.hidden = !active;
       if (active) {
         refreshSourceList();
-        /* Auto-load the first ASM file, or clear editor if none exist */
-        if (!editor.value && sourceSelect.value) {
+        /* Auto-load the selected source once; preserve later edits. */
+        if (!sourceLoaded && sourceSelect.value) {
           loadFromHostFs();
-        } else if (!editor.value) {
+        } else if (!sourceSelect.value && !editor.value) {
           clearErrorList();
         }
         sizePanelToViewport();
@@ -1183,7 +1195,9 @@
     });
 
     sourceSelect.addEventListener("change", function () {
-      if (sourceSelect.value) sourceNameInput.value = sourceSelect.value;
+      if (!sourceSelect.value) return;
+      sourceNameInput.value = sourceSelect.value;
+      loadFromHostFs();
     });
 
     loadBtn.addEventListener("click", loadFromHostFs);
@@ -1256,7 +1270,10 @@
 
     if (typeof hostFs.onChange === "function") {
       panel.__a8eAssemblerUnsub = hostFs.onChange(function () {
-        if (!panel.hidden) refreshSourceList();
+        refreshSourceList();
+        if (!panel.hidden && !sourceLoaded && sourceSelect.value) {
+          loadFromHostFs();
+        }
       });
     }
 
@@ -1283,6 +1300,7 @@
     if (!editor.value.trim().length) editor.value = DEFAULT_SOURCE_TEMPLATE;
     clearLineAddressMaps();
     refreshHighlightNow();
+    refreshSourceList();
     setDebugControlsMode("hidden");
     if (!supportsBreakpoints) {
       breakpointGutter.classList.add("unsupported");

@@ -50,6 +50,6 @@ calibration against real POKEY captures or a reference emulator.
 The opt-in POKEY trace now includes `pc` and `opcode` for register writes and
 timed serial events. Native A8E emits these fields with `VERBOSE_SIO`; jsA8E
 emits them in the JSON record enabled by `?a8e_pokey_trace=1`. Reuse
-`AHRM08_POKEY_MATRIX_TEST.XEX` and compare the `STIMER_WRITE`,
+`implementation/AHRM Validation/AHRM08_POKEY_MATRIX_TEST.XEX` and compare the `STIMER_WRITE`,
 `TIMER_RESET_APPLY`, `SEROUT_WRITE`, `DATA_NEEDED`, and `TRANSMISSION_DONE`
 records. The fields are diagnostic only and do not alter CPU or POKEY timing.

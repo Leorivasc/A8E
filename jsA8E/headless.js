@@ -23,6 +23,7 @@ const SCRIPT_PATHS = [
   "js/core/assembler/assembler.js",
   "js/core/assembler_core.js",
   "js/core/cpu.js",
+  "js/core/disk_image.js",
   "js/core/pokey_sio.js",
   "js/core/pokey.js",
   "js/audio/runtime.js",

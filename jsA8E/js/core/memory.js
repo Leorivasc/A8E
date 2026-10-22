@@ -1674,7 +1674,17 @@
           bytes: bytes,
           xexPreflight: null,
         };
-        if (!isXexFile(name)) return result;
+        if (!isXexFile(name)) {
+          const diskImage = window.A8EDiskImage;
+          if (diskImage && typeof diskImage.normalizeForEmulator === "function") {
+            const normalized = diskImage.normalizeForEmulator(bytes);
+            result.bytes = normalized.bytes;
+            result.mountedByteLength = normalized.bytes.length | 0;
+            result.sourceFormat = normalized.sourceFormat;
+            result.diskGeometry = normalized.geometry;
+          }
+          return result;
+        }
         const preflight = preflightXex(bytes, {
           mediaState: getMediaStateForXex(),
           portB: normalizeXexPortBOverride(options),

@@ -33,6 +33,7 @@
   let rendererBackend = "unknown";
   let initDone = false;
   let hostFsUnsubscribe = null;
+  let hostFsSnapshotRetryTimer = 0;
   let diskLibraryUnsubscribe = null;
   const pendingCommands = [];
   const DEBUG_STATE_MIN_INTERVAL_MS = 80;
@@ -339,6 +340,7 @@
       "js/core/cpu_tables.js",
       "js/core/cpu.js",
       "js/render/gl.js",
+      "js/core/disk_image.js",
       "js/core/pokey_sio.js",
       "js/core/pokey.js",
       "js/audio/runtime.js",
@@ -382,6 +384,15 @@
     const hostFs = getHostFs();
     if (!hostFs || typeof hostFs.listFiles !== "function") {
       self.postMessage({ type: "hostfsSnapshot", files: [] });
+      return;
+    }
+    if (typeof hostFs.isReady === "function" && !hostFs.isReady()) {
+      if (!hostFsSnapshotRetryTimer) {
+        hostFsSnapshotRetryTimer = setTimeout(function () {
+          hostFsSnapshotRetryTimer = 0;
+          postHostFsSnapshot();
+        }, 25);
+      }
       return;
     }
 
