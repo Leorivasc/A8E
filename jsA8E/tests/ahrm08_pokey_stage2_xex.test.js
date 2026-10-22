@@ -46,11 +46,13 @@ const rootDir = path.join(__dirname, "..", "..");
 const sourcePath = path.join(
   rootDir,
   "implementation",
+  "AHRM",
   "AHRM08_POKEY_STAGE2_TEST.asm",
 );
 const artifactPath = path.join(
   rootDir,
   "implementation",
+  "AHRM",
   "AHRM08_POKEY_STAGE2_TEST.XEX",
 );
 const result = loadAssembler().assembleToXex(fs.readFileSync(sourcePath, "utf8"));
