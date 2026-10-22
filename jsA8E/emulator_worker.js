@@ -340,6 +340,7 @@
       "js/core/cpu_tables.js",
       "js/core/cpu.js",
       "js/render/gl.js",
+      "js/core/disk_image.js",
       "js/core/pokey_sio.js",
       "js/core/pokey.js",
       "js/audio/runtime.js",

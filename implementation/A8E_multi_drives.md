@@ -493,6 +493,21 @@ in both jsA8E and native A8E with a shared regression. Until that work is
 resumed, the observed pauses are classified as a known guest timing/firmware
 case rather than a Full Library blocker.
 
+### Flat sector-dump compatibility
+
+AHRM describes the disk as a logical sector device and does not define the
+ATR file container. jsA8E therefore accepts the standard unheadered sector
+dumps for 90K single density (720 x 128 bytes), 130K enhanced density
+(1040 x 128 bytes), and standard double density (720 or 1440 x 256 bytes)
+at the media boundary. The raw bytes are normalized to the internal ATR
+layout before mounting; SIO command framing, sector numbering, status, and
+error behavior remain unchanged.
+
+For raw double-density media, the first three physical 256-byte sectors are
+converted to the ATR representation as three logical 128-byte boot sectors,
+discarding the unused second halves as specified by AHRM Appendix B. This is
+container normalization only; it does not alter the emulated disk protocol.
+
 ## SIO implementation phases
 
 ### Phase 1: drive collection
