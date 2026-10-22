@@ -32,11 +32,11 @@ hardware measurements.
 
 Existing starting fixtures include:
 
-- `implementation/AHRM/AHRM08_POKEY_TEST.md` and its `.asm` diagnostic;
-- `implementation/AHRM/AHRM08_POKEY_EDGE_TEST.md`;
-- `implementation/AHRM/AHRM08_POKEY_PHASE_TEST.md`;
-- `implementation/AHRM/AHRM08_POKEY_MATRIX_TEST.md`;
-- `implementation/AHRM/AHRM08_CPU_BOUNDARY_TEST.md`.
+- `implementation/AHRM Validation/AHRM08_POKEY_TEST.md` and its `.asm` diagnostic;
+- `implementation/AHRM Validation/AHRM08_POKEY_EDGE_TEST.md`;
+- `implementation/AHRM Validation/AHRM08_POKEY_PHASE_TEST.md`;
+- `implementation/AHRM Validation/AHRM08_POKEY_MATRIX_TEST.md`;
+- `implementation/AHRM Validation/AHRM08_CPU_BOUNDARY_TEST.md`.
 
 ### ANTIC and GTIA
 

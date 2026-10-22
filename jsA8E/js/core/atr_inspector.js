@@ -21,6 +21,24 @@
     return new Uint8Array(0);
   }
 
+  function prepareDiskBytes(data) {
+    const source = toBytes(data);
+    const diskImage = root.A8EDiskImage;
+    if (diskImage && typeof diskImage.normalizeForEmulator === "function") {
+      const normalized = diskImage.normalizeForEmulator(source);
+      return {
+        bytes: normalized.bytes,
+        sourceFormat: normalized.sourceFormat,
+        sourceByteLength: source.length | 0,
+      };
+    }
+    return {
+      bytes: source,
+      sourceFormat: "atr",
+      sourceByteLength: source.length | 0,
+    };
+  }
+
   function readWord(bytes, offset) {
     return (bytes[offset] | (bytes[offset + 1] << 8)) >>> 0;
   }
@@ -100,13 +118,16 @@
   }
 
   function inspect(data) {
-    const bytes = toBytes(data);
+    const prepared = prepareDiskBytes(data);
+    const bytes = prepared.bytes;
     const result = {
       valid: false,
       error: null,
       header: null,
       filesystem: null,
       entries: [],
+      sourceFormat: prepared.sourceFormat,
+      sourceByteLength: prepared.sourceByteLength,
     };
     if (bytes.length < ATR_HEADER_SIZE) {
       result.error = "ATR image is shorter than its header";
@@ -165,7 +186,7 @@
   }
 
   function extractFile(data, inspection, entry) {
-    const bytes = toBytes(data);
+    const bytes = prepareDiskBytes(data).bytes;
     if (!inspection || !inspection.valid || !entry) {
       throw new Error("Cannot extract from an invalid ATR entry");
     }
@@ -193,7 +214,7 @@
   }
 
   function verify(data) {
-    const bytes = toBytes(data);
+    const bytes = prepareDiskBytes(data).bytes;
     const inspection = inspect(bytes);
     const result = {
       valid: inspection.valid,

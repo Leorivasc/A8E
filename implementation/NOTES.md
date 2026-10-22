@@ -1,7 +1,14 @@
 # NOTES.md
 
+- 2026-10-22: added AHRM-aligned support for standard flat sector dumps
+  without an ATR container header. The jsA8E media boundary now recognizes
+  90K/130K single-density and standard double-density raw geometries and
+  normalizes them to the internal ATR representation; double-density boot
+  sectors retain the AHRM rule that only their first 128 bytes are exposed.
+  The ATR inspector and automation regression suite cover the raw path.
+
 - 2026-10-22: moved all AHRM guest-test sources, XEX artifacts, individual
-  guides, and the cumulative validation guide into `implementation/AHRM/`.
+  guides, and the cumulative validation guide into `implementation/AHRM Validation/`.
   Updated automated test paths, hardware-validation references, the diagram,
   and `.gitignore` accordingly. Older entries retain their original wording
   as historical change records.
@@ -69,7 +76,7 @@
   source, documentation, reproducible XEX artifact, and assembler regression;
   audio and video results remain observational until compared with captures.
 
-- 2026-10-21: added `implementation/AHRM/AHRM_Validation_Tests.md`, the cumulative
+- 2026-10-21: added `implementation/AHRM Validation/AHRM_Validation_Tests.md`, the cumulative
   English operating guide for all current memory, ANTIC, GTIA/PMG, POKEY, CPU
   boundary, and host-side validation tests. It records expected screen values,
   PASS lines, observational results, known deviations, and the chapter format
