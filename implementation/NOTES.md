@@ -1,7 +1,7 @@
 # NOTES.md
 
 - 2026-10-22: moved all AHRM guest-test sources, XEX artifacts, individual
-  guides, and the cumulative validation guide into `implementation/AHRM/`.
+  guides, and the cumulative validation guide into `implementation/AHRM Validation/`.
   Updated automated test paths, hardware-validation references, the diagram,
   and `.gitignore` accordingly. Older entries retain their original wording
   as historical change records.
@@ -69,7 +69,7 @@
   source, documentation, reproducible XEX artifact, and assembler regression;
   audio and video results remain observational until compared with captures.
 
-- 2026-10-21: added `implementation/AHRM/AHRM_Validation_Tests.md`, the cumulative
+- 2026-10-21: added `implementation/AHRM Validation/AHRM_Validation_Tests.md`, the cumulative
   English operating guide for all current memory, ANTIC, GTIA/PMG, POKEY, CPU
   boundary, and host-side validation tests. It records expected screen values,
   PASS lines, observational results, known deviations, and the chapter format

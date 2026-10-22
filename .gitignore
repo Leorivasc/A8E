@@ -13,5 +13,5 @@ src-tauri/target/
 *.atr
 *.xex
 !implementation/*.XEX
-!implementation/AHRM/*.XEX
+!implementation/AHRM Validation/*.XEX
 !jsA8E/assets/standby.xex

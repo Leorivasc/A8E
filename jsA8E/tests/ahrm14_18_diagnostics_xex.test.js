@@ -39,8 +39,8 @@ for (const name of [
   "AHRM17_VIDEO_TIMING_TEST",
   "AHRM18_POKEY_RANDOM_TIMER_TEST",
 ]) {
-  const sourcePath = path.join(rootDir, "implementation", "AHRM", `${name}.asm`);
-  const artifactPath = path.join(rootDir, "implementation", "AHRM", `${name}.XEX`);
+  const sourcePath = path.join(rootDir, "implementation", "AHRM Validation", `${name}.asm`);
+  const artifactPath = path.join(rootDir, "implementation", "AHRM Validation", `${name}.XEX`);
   const result = assembler.assembleToXex(fs.readFileSync(sourcePath, "utf8"));
   assert.ok(result.ok, `${name} should assemble: ${result.error || ""}`);
   assert.deepEqual(
