@@ -555,8 +555,8 @@ External AHRM-07 validation:
   startup, display-list/DLI vectors, 65 balanced DLI returns, both phase
   transitions, and collision PASS. The subsequent two-phase Chromium
   worker/native/Altirra visual comparison passed, and the hardware image was
-  visually equivalent to Altirra. See `implementation/AHRM07_PMG_TEST.md`.
-- Retain `implementation/AHRM07_PMG_TEST.XEX` as the PMG/GTIA regression gate:
+  visually equivalent to Altirra. See `implementation/AHRM/AHRM07_PMG_TEST.md`.
+- Retain `implementation/AHRM/AHRM07_PMG_TEST.XEX` as the PMG/GTIA regression gate:
   confirm `P0/P1 COLLISION: PASS`, compare the alternating PMBASE patterns,
   and observe stable DLI-driven HPOS/PRIOR changes after future changes.
 - Validate real raster-content titles and confirm parity between native A8E,
@@ -651,7 +651,7 @@ Status: **in progress; digital timer/SIO, live POT reads, and continuous ALLPOT 
   native and JS probes, for the shared AUDF=0 normal/fast/linked timer
   contract. This is a digital period contract, not a claim of cycle-perfect
   STIMER reload timing.
-- Added `implementation/AHRM08_POKEY_TEST.XEX`, a portable guest-level
+- Added `implementation/AHRM/AHRM08_POKEY_TEST.XEX`, a portable guest-level
   diagnostic that records timer IRQ, SEROUT, and POT/ALLPOT observations for
   external comparison on jsA8E, native A8E, Altirra, and hardware.
 - The Stage 2 guest-level timer/SIO contract and its shared digital fixtures
@@ -693,7 +693,7 @@ Completion boundary requiring external reference:
   output deadlines, and `XMTDONE` remains inactive until a real output clock
   exists. This removes the JS-only event/status divergence without changing
   disk response bytes or host-audio behavior.
-- Added `implementation/AHRM08_POKEY_STAGE2_TEST.XEX` to compare all eight
+- Added `implementation/AHRM/AHRM08_POKEY_STAGE2_TEST.XEX` to compare all eight
   serial clock modes, the immediate `STIMER`/`IRQST` state, and timer-1 IRQ
   polling across jsA8E, native A8E, Altirra, and hardware. Its output is
   intentionally observational; an external-clock timeout is preserved as

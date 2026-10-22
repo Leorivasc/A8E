@@ -12,6 +12,6 @@ node_modules/
 src-tauri/target/
 *.atr
 *.xex
-!implementation/U1MB_MEMORY_TEST.XEX
-!implementation/MEMORY_STRESS_TEST.XEX
+!implementation/*.XEX
+!implementation/AHRM/*.XEX
 !jsA8E/assets/standby.xex

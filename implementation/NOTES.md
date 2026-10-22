@@ -1,5 +1,154 @@
 # NOTES.md
 
+- 2026-10-22: moved all AHRM guest-test sources, XEX artifacts, individual
+  guides, and the cumulative validation guide into `implementation/AHRM/`.
+  Updated automated test paths, hardware-validation references, the diagram,
+  and `.gitignore` accordingly. Older entries retain their original wording
+  as historical change records.
+
+- 2026-10-21: simplified the AHRM10 PMG artwork to one-line-resolution
+  solid bars. The moving M0 projectile and P0-P3 bars now use the AHRM 2 KiB
+  PMG layout, making the collision scene readable without fragile sprite
+  glyph shapes.
+
+- 2026-10-21: corrected the visual presentation of the new AHRM10 scene by
+  switching its display list to ANTIC mode 7 (Atari BASIC `GRAPHICS 2`),
+  initializing `VDELAY`, using a black/high-contrast text palette, and moving
+  the PMG artwork below the instruction rows. The 20-column screen layout and
+  status/register offsets were adjusted accordingly.
+
+- 2026-10-21: redesigned `AHRM10_PRIORITY_COLLISION_TEST` as a human-readable
+  space scene. A red ship, green target, and moving yellow missile now make
+  the collision event visible as `COLLISION WAIT` -> `COLLISION HIT`; the
+  scene still cycles all nine `PRIOR` values every 32 frames and exposes the
+  live `M0PL`, `P0PL`, and `P1PL` masks. Corrected the missile collision
+  register definitions to the AHRM addresses (`$D008-$D00B`) and added a
+  headless moving-missile boot regression.
+
+- 2026-10-21: completed the visual validation of the simplified
+  `AHRM09_GTIA_MODES_TEST`. The observed output is a fixed full-screen ramp
+  with no text or resolution changes; only the GTIA colour interpretation
+  changes between the three 128-frame phases. The reported roughly three-
+  second colour transitions are accepted as the expected result for the
+  tested display setup, with the exact wall-clock interval remaining
+  PAL/NTSC- and host-dependent.
+
+- 2026-10-21: simplified `AHRM09_GTIA_MODES_TEST` to a full-screen visual
+  diagnostic with no text overlay and one DLI per frame. This removes the
+  text-band transition path and makes the three 128-frame GTIA phases easier
+  to perceive.
+
+- 2026-10-21: fixed the `AHRM09_GTIA_MODES_TEST` two-DLI phase counter so
+  `DLI_STATE` is set after every first DLI, not only when the phase changes.
+  This restores the intended one counter tick per frame and the full 128-frame
+  pause for each GTIA mode.
+
+- 2026-10-21: extended each `AHRM09_GTIA_MODES_TEST` GTIA phase from 32 to
+  128 frames so the mode-9/10/11 differences are easier to observe manually;
+  regenerated the XEX and updated the displayed diagnostic text.
+
+- 2026-10-21: moved the two `AHRM09_GTIA_MODES_TEST` phase DLIs onto blank
+  guard lines. This prevents a `PRIOR`/`COLBK` transition from splitting a
+  visible text or ramp row and removes raster-boundary flicker.
+
+- 2026-10-21: improved `AHRM09_GTIA_MODES_TEST` readability by keeping the
+  title in a normal ANTIC band and applying GTIA special modes only to the
+  ramp band. Paired DLIs enable and restore the phase without losing the
+  color-mode comparison.
+
+- 2026-10-21: corrected `AHRM09_GTIA_MODES_TEST` to enable only DLI NMIs.
+  The OS VBI was restoring its GTIA shadow values every frame, masking the
+  diagnostic's mode-9/10/11 transitions; the XEX artifact was regenerated.
+
+- 2026-10-21: added the first external-comparison diagnostic batch:
+  `AHRM09_GTIA_MODES_TEST` cycles GTIA modes 9/10/11 over a deterministic
+  ramp, `AHRM10_PRIORITY_COLLISION_TEST` exercises documented and conflicting
+  `PRIOR` combinations with live collision latches, and
+  `AHRM11_POKEY_AUDIO_TEST` produces fixed audio-capture phases for square,
+  noise, linked-timer, volume-only, and high-pass paths. Each has an assembly
+  source, documentation, reproducible XEX artifact, and assembler regression;
+  audio and video results remain observational until compared with captures.
+
+- 2026-10-21: added `implementation/AHRM/AHRM_Validation_Tests.md`, the cumulative
+  English operating guide for all current memory, ANTIC, GTIA/PMG, POKEY, CPU
+  boundary, and host-side validation tests. It records expected screen values,
+  PASS lines, observational results, known deviations, and the chapter format
+  required when future diagnostics are added.
+
+- 2026-10-21: added `AHRM12_ANTIC_DISPLAYLIST_TEST` for LMS/DLI/JVB,
+  HSCROL, and VSCROL comparison, plus `AHRM13_ANTIC_CHARSET_TEST` for OS and
+  custom CHBASE sections, CHACTL inversion, and vertical reflection. Both
+  include reproducible XEX artifacts, guides, manual boot-smoke validation,
+  and new chapters in `AHRM_Validation_Tests.md`.
+
+- 2026-10-21: completed the proposed guest diagnostic set with
+  `AHRM14_PMG_DMA_EDGE_TEST`, `AHRM15_CPU_DMA_CONTENTION_TEST`,
+  `AHRM16_PIA_CONSOL_INPUT_TEST`, `AHRM17_VIDEO_TIMING_TEST`, and
+  `AHRM18_POKEY_RANDOM_TIMER_TEST`. These cover PMG resolution/PMBASE/VDELAY,
+  CPU bus contention, live PIA/CONSOL input, PAL/NTSC VCOUNT ranges, and
+  POKEY RANDOM/timer observations; each has a reproducible XEX and a chapter
+  in `AHRM_Validation_Tests.md`.
+
+- 2026-10-21: the complete JavaScript automation suite passed after adding
+  AHRM-14 through AHRM-18. Native CTest remains at 14/16: the existing
+  `antic_graphics_modes_probe` mode-0 PF2/player-mix contract and
+  `pokey_sio_contract_probe` initial-ACK contract still fail; no production
+  emulator code was changed by the guest-test batch.
+
+- 2026-10-21: expanded the English Assembler Editor manual with a 6502
+  instruction quick reference, instruction-family examples, and an addressing
+  mode table including zero-page indirect-pointer guidance.
+
+- 2026-10-21: corrected the English Assembler Editor's screen-text example by
+  placing its indirect-index pointer in zero page (`$0080`), as required by
+  the 6502 `(pointer),Y` addressing mode, and by using the correct Atari screen
+  codes for uppercase letters and spaces.
+
+- 2026-10-21: improved the jsA8E Assembler Editor line-number gutter
+  readability. Line numbers now use the panel's normal text color and full
+  opacity, including source lines without assembled addresses, while address
+  and byte metadata retain their subdued styling.
+
+- 2026-10-21: translated `implementation/Asembler_editor_manual.md` from
+  Spanish to English, matching the official language used by the emulator
+  interface and documentation.
+
+- 2026-10-21: added `implementation/Asembler_editor_manual.md`, a Spanish
+  user manual for the jsA8E Assembler Editor. It documents the HostFS workflow,
+  editor controls, source syntax, executable generation, debugging, common
+  errors, and simple 6502 examples.
+
+- 2026-10-21: fixed the jsA8E Assembler Editor HostFS source selector during
+  asynchronous Worker/IndexedDB startup. The Worker now waits for the HostFS
+  snapshot to be ready, while the editor shows a loading state and refreshes
+  when the file list arrives instead of treating the initial empty cache as
+  having no assembler sources.
+
+- 2026-10-21: made the Assembler Editor load the selected HostFS source
+  immediately when the source selector changes, using the same read and editor
+  refresh path as the explicit Load button.
+
+- 2026-10-21: fixed the Assembler Editor initial-load condition so the first
+  HostFS source is loaded even though the editor starts with its example
+  template; subsequent panel openings preserve the user's current edits.
+
+- 2026-10-21: added a draggable desktop divider between the tools column and
+  the Atari display in the browser Work/Development layouts. The column ratio
+  updates live through pointer or keyboard interaction, persists in browser
+  storage, and is disabled automatically for the mobile single-column layout.
+
+- 2026-10-20: fixed native `-o`/`-O` OPTION-on-start boot mapping. The XL/XE
+  reset state now leaves BASIC unmapped when OPTION is requested, so the OS
+  can preserve BASIC-disabled memory for disk software or enter Self Test
+  without D1:. Added an execution-level regression to
+  `A8E/tests/gtia_consol_probe.c`; the JavaScript CONSOL contract remains
+  covered by `jsA8E/tests/consol_startup_option.test.js`.
+
+- 2026-10-20: fixed the native Windows Full Library storage-capacity path in
+  `A8E/LibraryWindow.c`. `GetDiskFreeSpaceExA` now reads the available-byte
+  result from the declared `tAvailable` variable instead of the nonexistent
+  `tFree`; the Linux `statvfs` path was unchanged.
+
 - 2026-10-17: started `OptimizationRun1` with an AHRM-preserving GTIA PMG
   allocation reduction. Immutable PMG register maps are now allocated once,
   while per-clock collision scratch buffers are owned by each machine and

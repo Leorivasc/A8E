@@ -638,11 +638,12 @@ button:active:not(:disabled) {
 
 .layout[data-layout-scheme="work"],
 .layout[data-layout-scheme="development"] {
-  grid-template-columns: minmax(240px, 0.45fr) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, var(--tools-column-width, 34%)) 10px minmax(320px, 1fr);
   grid-template-areas:
-    "tools screen"
-    "input input";
+    "tools splitter screen"
+    "input input input";
   align-items: start;
+  column-gap: 0;
 }
 
 .screenPanel {
@@ -681,6 +682,47 @@ button:active:not(:disabled) {
   align-items: start;
   gap: 10px;
   min-width: 0;
+}
+
+.layoutSplitter {
+  grid-area: splitter;
+  display: none;
+  align-self: stretch;
+  justify-self: stretch;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+
+.layoutSplitter > span {
+  display: block;
+  width: 2px;
+  height: 100%;
+  min-height: 180px;
+  border-radius: 999px;
+  background: var(--sub-panel-border);
+  transition: width 120ms ease, background 120ms ease;
+}
+
+.layoutSplitter:hover > span,
+.layoutSplitter:focus-visible > span,
+body.layout-column-resizing .layoutSplitter > span {
+  width: 4px;
+  background: var(--accent);
+}
+
+.layout[data-layout-scheme="work"] > .layoutSplitter,
+.layout[data-layout-scheme="development"] > .layoutSplitter {
+  display: flex;
+}
+
+body.layout-column-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .layoutTools > .disklibPanel,
@@ -1934,6 +1976,9 @@ canvas.crtEnabled {
     flex: none;
     overflow-y: auto;
   }
+  .layoutSplitter {
+    display: none !important;
+  }
   .inputPanelRow {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3086,7 +3131,7 @@ canvas.crtEnabled {
 }
 
 .asm-bp-row.no-addr {
-  opacity: 0.35;
+  opacity: 1;
   cursor: default;
 }
 
@@ -3127,9 +3172,9 @@ canvas.crtEnabled {
   min-width: 18px;
   text-align: right;
   flex: 0 0 auto;
-  color: var(--sub-panel-dim);
-  font-size: 10px;
-  opacity: 0.55;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  opacity: 1;
 }
 
 .asm-bp-addr {
@@ -3155,7 +3200,11 @@ canvas.crtEnabled {
 }
 
 .asm-bp-row.has-addr .asm-bp-num {
-  color: var(--muted);
+  color: var(--text);
+}
+
+.asm-bp-row.no-addr .asm-bp-num {
+  color: var(--text);
 }
 
 .asm-bp-row.has-addr .asm-bp-addr {
@@ -3686,6 +3735,10 @@ canvas.crtEnabled {
       "input"
       "tools";
     align-items: start;
+  }
+
+  .layoutSplitter {
+    display: none !important;
   }
 
   .screenPanel {

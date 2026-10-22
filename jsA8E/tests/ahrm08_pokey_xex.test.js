@@ -31,8 +31,8 @@ function loadAssembler() {
 }
 
 const rootDir = path.resolve(__dirname, "../..");
-const sourcePath = path.join(rootDir, "implementation", "AHRM08_POKEY_TEST.asm");
-const artifactPath = path.join(rootDir, "implementation", "AHRM08_POKEY_TEST.XEX");
+const sourcePath = path.join(rootDir, "implementation", "AHRM", "AHRM08_POKEY_TEST.asm");
+const artifactPath = path.join(rootDir, "implementation", "AHRM", "AHRM08_POKEY_TEST.XEX");
 const result = loadAssembler().assembleToXex(fs.readFileSync(sourcePath, "utf8"));
 assert.ok(result.ok, "AHRM-08 XEX should assemble: " + (result.error || ""));
 assert.deepEqual(

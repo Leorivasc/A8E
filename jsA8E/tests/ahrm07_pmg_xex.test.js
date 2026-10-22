@@ -46,8 +46,8 @@ function readSegments(bytes) {
   return segments;
 }
 
-const sourcePath = path.resolve(__dirname, "../../implementation/AHRM07_PMG_TEST.asm");
-const artifactPath = path.resolve(__dirname, "../../implementation/AHRM07_PMG_TEST.XEX");
+const sourcePath = path.resolve(__dirname, "../../implementation/AHRM/AHRM07_PMG_TEST.asm");
+const artifactPath = path.resolve(__dirname, "../../implementation/AHRM/AHRM07_PMG_TEST.XEX");
 const result = loadAssembler().assembleToXex(fs.readFileSync(sourcePath, "utf8"));
 assert.ok(result.ok, "AHRM-07 XEX should assemble: " + (result.error || ""));
 

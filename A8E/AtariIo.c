@@ -6012,7 +6012,10 @@ void AtariIoOpenWithMemory(
 		pIoData->cU1mbUctl = 0x03;
 		pIoData->cU1mbColdf = 0x80;
 	}
-	pIoData->bBasicRomEnabled = 1;
+	/* AHRM: reset leaves PORTB pulled high, so BASIC is disabled until the
+	 * OS explicitly enables it. Normal startup does that after sampling
+	 * CONSOL; Option-on-Start must preserve the reset mapping. */
+	pIoData->bBasicRomEnabled = pIoData->bOptionOnStart ? 0 : 1;
 	pIoData->bSelfTestRomEnabled = 0;
 	if(eMemoryExpansion != ATARI_MEMORY_NONE)
 	{
@@ -6081,7 +6084,15 @@ void AtariIoOpenWithMemory(
 	memcpy(&RAM[0xd800], pIoData->pFloatingPointRom, 0x2800);
 	AtariIo_CloseFileOrDie(pFile, "ATARIXL.ROM");
 
-	_6502_SetRom(pContext, 0xa000, 0xbfff);
+	if(pIoData->bBasicRomEnabled)
+	{
+		_6502_SetRom(pContext, 0xa000, 0xbfff);
+	}
+	else
+	{
+		memcpy(&RAM[0xa000], &SRAM[0xa000], 0x2000);
+		_6502_SetRam(pContext, 0xa000, 0xbfff);
+	}
 	_6502_SetRom(pContext, 0xc000, 0xcfff);
 	_6502_SetRom(pContext, 0xd000, 0xd7ff);
 	_6502_SetRom(pContext, 0xd800, 0xffff);

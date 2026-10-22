@@ -701,6 +701,7 @@
   function createHostFsProxy(sendHostFsCommand) {
     const files = new Map();
     const listeners = new Set();
+    let ready = false;
 
     function emitChange() {
       listeners.forEach(function (fn) {
@@ -729,7 +730,12 @@
           });
         }
       }
+      ready = true;
       emitChange();
+    }
+
+    function isReady() {
+      return ready;
     }
 
     function listFiles(pattern) {
@@ -861,6 +867,7 @@
       snapshotFromWire: snapshotFromWire,
       api: {
         listFiles: listFiles,
+        isReady: isReady,
         readFile: readFile,
         writeFile: writeFile,
         deleteFile: deleteFile,

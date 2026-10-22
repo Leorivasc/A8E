@@ -25,11 +25,11 @@ async function main() {
     const api = runtime.api;
     const build = await api.dev.assembleSource({
       name: "AHRM07.ASM",
-      text: fs.readFileSync(path.join(root, "implementation/AHRM07_PMG_TEST.asm"), "utf8"),
+      text: fs.readFileSync(path.join(root, "implementation/AHRM/AHRM07_PMG_TEST.asm"), "utf8"),
     });
     assert.ok(build.ok, build.error);
     const symbols = build.symbols;
-    const bytes = fs.readFileSync(path.join(root, "implementation/AHRM07_PMG_TEST.XEX"));
+    const bytes = fs.readFileSync(path.join(root, "implementation/AHRM/AHRM07_PMG_TEST.XEX"));
     assert.deepEqual(Buffer.from(build.bytes), bytes);
     await api.dev.writeHostFile("AHRM07_P.XEX", { bytes: bytes });
     await api.debug.setBreakpoints(symbols.START);
