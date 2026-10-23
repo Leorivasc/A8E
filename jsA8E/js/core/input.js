@@ -32,6 +32,9 @@
       const isReady = opts.isReady;
       let pressedKeys = {};
       let joystickArrowMask = 0;
+      // Host Shift+arrow maps to an Atari cursor key. Keep that choice until
+      // keyup: Shift may be released before the arrow itself.
+      let cursorArrowSyms = new Set();
 
       function normalizeSourceToken(e) {
         if (!e || e.sourceToken === undefined || e.sourceToken === null)
@@ -155,6 +158,13 @@
         machine.ctx.ram[IO_SKCTL_SKSTAT] &= ~0x04;
       }
 
+      function releaseQueuedKeyCode() {
+        if (machine.ctx.ioData.keyPressCounter > 0)
+          {machine.ctx.ioData.keyPressCounter--;}
+        if (machine.ctx.ioData.keyPressCounter === 0)
+          {machine.ctx.ram[IO_SKCTL_SKSTAT] |= 0x04;}
+      }
+
       function joystickMaskForArrowSym(sym) {
         if (sym === SDLK_UP) return JOYSTICK_UP_MASK;
         if (sym === SDLK_DOWN) return JOYSTICK_DOWN_MASK;
@@ -181,8 +191,8 @@
       }
 
       function cursorKeyCodeForArrowSym(sym) {
-        if (sym === SDLK_UP) return 54 | 0x80; // Ctrl + '-'
-        if (sym === SDLK_DOWN) return 55 | 0x80; // Ctrl + '='
+        if (sym === SDLK_UP) return 14 | 0x80; // Ctrl + '-'
+        if (sym === SDLK_DOWN) return 15 | 0x80; // Ctrl + '='
         if (sym === SDLK_LEFT) return 6 | 0x80; // Ctrl + '+'
         if (sym === SDLK_RIGHT) return 7 | 0x80; // Ctrl + '*'
         return null;
@@ -217,7 +227,15 @@
         if (arrowMask) {
           if (shiftKeyDown) {
             const cursorKeyCode = cursorKeyCodeForArrowSym(sym);
-            if (cursorKeyCode !== null) queueKeyCode(cursorKeyCode);
+            if (cursorKeyCode !== null) {
+              cursorArrowSyms.add(sym);
+              // Shift is a host-only cursor shortcut here. Do not combine the
+              // real Atari Shift line with the synthetic Ctrl+punctuation
+              // cursor code: screen editors assign that combination a
+              // different meaning (for example, clear or insert space).
+              machine.ctx.ram[IO_SKCTL_SKSTAT] |= 0x08;
+              queueKeyCode(cursorKeyCode);
+            }
             return true;
           }
           if (engageJoystickArrow(arrowMask)) {
@@ -295,6 +313,17 @@
 
         const arrowMask = joystickMaskForArrowSym(sym);
         if (arrowMask) {
+          if (cursorArrowSyms.has(sym)) {
+            cursorArrowSyms.delete(sym);
+            releaseQueuedKeyCode();
+            if (
+              cursorArrowSyms.size === 0 &&
+              (isSymCurrentlyDown(303) || isSymCurrentlyDown(304))
+            ) {
+              machine.ctx.ram[IO_SKCTL_SKSTAT] &= ~0x08;
+            }
+            return true;
+          }
           if (releaseJoystickArrow(arrowMask)) {
             machine.ctx.ram[IO_PORTA] |= arrowMask;
           }
@@ -329,16 +358,14 @@
         const kc = KEY_CODE_TABLE[sym] !== undefined ? KEY_CODE_TABLE[sym] : 255;
         if (kc === 255) return false;
 
-        if (machine.ctx.ioData.keyPressCounter > 0)
-          {machine.ctx.ioData.keyPressCounter--;}
-        if (machine.ctx.ioData.keyPressCounter === 0)
-          {machine.ctx.ram[IO_SKCTL_SKSTAT] |= 0x04;}
+        releaseQueuedKeyCode();
         return true;
       }
 
       function releaseAll() {
         pressedKeys = {};
         joystickArrowMask = 0;
+        cursorArrowSyms = new Set();
         machine.ctx.ioData.keyPressCounter = 0;
         machine.ctx.ram[IO_PORTA] |= 0x0f;
         setTriggerPressed(0, false);
@@ -375,14 +402,23 @@
         return {
           pressedKeys: entries,
           joystickArrowMask: joystickArrowMask & 0x0f,
+          cursorArrowSyms: Array.from(cursorArrowSyms),
         };
       }
 
       function importSnapshotState(snapshot) {
         pressedKeys = {};
         joystickArrowMask = 0;
+        cursorArrowSyms = new Set();
         if (!snapshot || typeof snapshot !== "object") return;
         joystickArrowMask = Math.max(0, snapshot.joystickArrowMask | 0) & 0x0f;
+        const cursorSyms = Array.isArray(snapshot.cursorArrowSyms)
+          ? snapshot.cursorArrowSyms
+          : [];
+        for (let i = 0; i < cursorSyms.length; i++) {
+          const sym = cursorSyms[i] | 0;
+          if (joystickMaskForArrowSym(sym)) cursorArrowSyms.add(sym);
+        }
         const entries = Array.isArray(snapshot.pressedKeys) ? snapshot.pressedKeys : [];
         for (let i = 0; i < entries.length; i++) {
           const entry = entries[i];

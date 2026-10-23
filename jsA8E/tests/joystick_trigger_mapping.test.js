@@ -89,4 +89,41 @@ runtime.onKeyUp(leftAlt);
 assert.equal(ctx.ram[IO_GRAFP3_TRIG0], 1, "left Alt still acted as TRIG0");
 assert.equal(ctx.ram[IO_COLPM0_TRIG2], 1, "left Alt acted as TRIG2");
 
+const physicalShift = {
+  key: "Shift",
+  code: "ShiftLeft",
+  sourceToken: "test:shift",
+};
+runtime.onKeyDown(physicalShift);
+
+const shiftedUp = {
+  key: "ArrowUp",
+  code: "ArrowUp",
+  shiftKey: true,
+  sourceToken: "test:shift-up",
+};
+runtime.onKeyDown(shiftedUp);
+assert.equal(ctx.ram[IO_PORTA] & 0x01, 0x01, "Shift+Up acted as joystick up");
+assert.equal(ctx.ram[IO_STIMER_KBCODE], 14 | 0x80, "Shift+Up did not send Atari Ctrl+-");
+assert.equal(ctx.ioData.keyPressCounter, 1, "Shift+Up did not press a keyboard key");
+assert.notEqual(ctx.ram[IO_SKCTL_SKSTAT] & 0x08, 0, "Shift+Up left Atari Shift active");
+runtime.onKeyUp({
+  key: "ArrowUp",
+  code: "ArrowUp",
+  shiftKey: false,
+  sourceToken: "test:shift-up",
+});
+assert.equal(ctx.ioData.keyPressCounter, 0, "Shift+Up left the keyboard key pressed");
+assert.notEqual(ctx.ram[IO_SKCTL_SKSTAT] & 0x04, 0, "Shift+Up did not release SKSTAT");
+assert.equal(ctx.ram[IO_SKCTL_SKSTAT] & 0x08, 0, "Shift did not resume after Shift+Up");
+runtime.onKeyUp(physicalShift);
+assert.notEqual(ctx.ram[IO_SKCTL_SKSTAT] & 0x08, 0, "Shift did not release after Shift+Up");
+
+const plainUp = { key: "ArrowUp", code: "ArrowUp", sourceToken: "test:plain-up" };
+runtime.onKeyDown(plainUp);
+assert.equal(ctx.ram[IO_PORTA] & 0x01, 0, "plain Up did not press joystick up");
+assert.equal(ctx.ioData.keyPressCounter, 0, "plain Up pressed the keyboard");
+runtime.onKeyUp(plainUp);
+assert.equal(ctx.ram[IO_PORTA] & 0x01, 0x01, "plain Up did not release joystick up");
+
 console.log("joystick_trigger_mapping.test.js passed");
