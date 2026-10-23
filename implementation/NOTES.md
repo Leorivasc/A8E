@@ -1,5 +1,15 @@
 # NOTES.md
 
+- 2026-10-23: fixed host `Shift+Arrow` cursor-key handling in jsA8E. The
+  keydown records whether an arrow was mapped as an Atari cursor key or a
+  joystick direction; keyup releases the same path even if Shift was released
+  first. During the cursor chord, the Atari Shift line is temporarily masked
+  so the synthetic `Ctrl`+punctuation cursor code is not reinterpreted by
+  screen editors as a Shift-modified command. The up/down codes now exactly
+  match physical `Ctrl+-` (`$8E`) and `Ctrl+=` (`$8F`) rather than their
+  ASCII-key values. This prevents stuck keys while preserving normal Shift
+  typing and unmodified arrow-as-joystick behavior.
+
 - 2026-10-23: removed the virtual-disk burst shortcut that could schedule
   `DATA NEEDED` 50 CPU cycles after a write, before the next real POKEY serial
   clock edge. The drive-grant state remains bounded, but both jsA8E and native
