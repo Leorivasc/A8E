@@ -59,6 +59,11 @@
         sioBuffer: new Uint8Array(4096),
         sioOutIndex: 0,
         sioOutPhase: 0, // 0=command frame, 1=data frame (write/put/verify)
+        // The SIO COMMAND wire is PIA CB2, not a side effect of SEROUT.
+        // A disk validates a command only after the host releases CB2 high.
+        sioCommandLineControlled: true,
+        sioCommandLineAsserted: false,
+        sioCommandFrameReady: false,
         sioDataIndex: 0,
         sioPendingDevice: 0,
         sioPendingCmd: 0,

@@ -1212,13 +1212,14 @@
         ctx.currentInstructionPc = cpu.pc & 0xffff;
         ctx.currentOpcode = opcode & 0xff;
         ctx.currentInstructionCycles = OPCODE_BASE_CYCLES[opcode] | 0;
+        // An I/O deadline may latch while the 6502 is executing an
+        // instruction, but IRQ/NMI recognition occurs only at the following
+        // instruction boundary.  Do not split a guest instruction merely to
+        // dispatch an I/O event: that can vector an IRQ before an adjacent
+        // store (notably the XL SIO CHKSUM update) has completed.  DMA stalls
+        // remain a separate scheduling boundary because the CPU is held for
+        // those cycles rather than executing the instruction.
         let nextEvent = cycleTarget;
-        if (
-          ctx.ioCycleTimedEventFunction &&
-          ctx.ioCycleTimedEventCycle < nextEvent
-        ) {
-          nextEvent = ctx.ioCycleTimedEventCycle;
-        }
         if (ctx.stallCycleCounter < nextEvent) nextEvent = ctx.stallCycleCounter;
         if (
           nextEvent > ctx.cycleCounter &&

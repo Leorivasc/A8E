@@ -9,6 +9,8 @@
       cfg.SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES;
     const SERIAL_INPUT_FIRST_DATA_READY_CYCLES =
       cfg.SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+    const SIO_DISK_RESPONSE_TURNAROUND_CYCLES =
+      cfg.SIO_DISK_RESPONSE_TURNAROUND_CYCLES | 0;
     const SERIAL_INPUT_DATA_READY_CYCLES = cfg.SERIAL_INPUT_DATA_READY_CYCLES;
     const IO_IRQEN_IRQST = cfg.IO_IRQEN_IRQST;
     const CYCLE_NEVER =
@@ -97,11 +99,11 @@
       }
 
       const period = serialOutputDelay(ctx, SERIAL_OUTPUT_DATA_NEEDED_CYCLES);
-      const needCycle = scheduleNeed
-        ? typeof serialOutputClockNextCycle === "function"
+      const normalNeedCycle =
+        typeof serialOutputClockNextCycle === "function"
           ? serialOutputClockNextCycle(ctx, now)
-          : now + period
-        : 0;
+          : now + period;
+      const needCycle = scheduleNeed ? normalNeedCycle : 0;
       if (scheduleNeed) io.serialOutputNeedDataCycle = needCycle;
       if (scheduleDone) {
         const doneDelay = scheduleNeed
@@ -161,6 +163,13 @@
       const io = ctx.ioData;
       if (!io.serialOutputShiftActive) return false;
 
+      // Keep the serial cadence anchored to the already scheduled frame.
+      // Timed events are observed at CPU instruction boundaries, so the
+      // dispatcher can arrive a few cycles after the hardware deadline.  If
+      // the next frame is based on that late observation, the error is added
+      // to every byte in a burst and makes the transfer audibly bunch up.
+      const scheduledDoneCycle = io.serialOutputTransmissionDoneCycle;
+
       transmitSioByte(ctx, io.serialOutputShiftValue & 0xff);
       if (!io.serialOutputBytePending) {
         io.serialOutputShiftActive = false;
@@ -171,8 +180,13 @@
       io.serialOutputBytePending = false;
       io.serialOutputShiftActive = true;
       const period = serialOutputDelay(ctx, SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES);
-      io.serialOutputTransmissionDoneCycle =
-        (eventCycle | 0) + period * 20;
+      const frameCycles = period * 20;
+      const scheduledNext = Number.isFinite(scheduledDoneCycle)
+        ? scheduledDoneCycle + frameCycles
+        : (eventCycle | 0) + frameCycles;
+      io.serialOutputTransmissionDoneCycle = scheduledNext > (eventCycle | 0)
+        ? scheduledNext
+        : (eventCycle | 0) + frameCycles;
       cycleTimedEventUpdate(ctx);
       return true;
     }
@@ -185,10 +199,31 @@
       return serialOutputTransmissionDone(ctx, effectiveEventCycle(ctx));
     }
 
-    function setSioCommandLine(ctx, level) {
+    function commandLineIsControlled(io) {
+      return !!(io && io.sioCommandLineControlled);
+    }
+
+    function sioCommandLineChanged(ctx, level) {
       const io = ctx.ioData;
-      if (io && typeof io.piaSetControlLine === "function")
-        io.piaSetControlLine(ctx, "cb2", level ? 1 : 0);
+      if (!commandLineIsControlled(io)) return;
+
+      const asserted = !level;
+      const wasAsserted = !!io.sioCommandLineAsserted;
+      io.sioCommandLineAsserted = asserted;
+      if (asserted) {
+        // A new low CB2 interval begins a command frame. A half-received
+        // frame cannot produce a response.
+        if ((io.sioOutPhase | 0) === 0) {
+          io.sioOutIndex = 0;
+          io.sioCommandFrameReady = false;
+        }
+        return;
+      }
+
+      // AHRM 9.1: the disk validates the five bytes and starts ACK/NAK only
+      // after the host releases COMMAND. No extra serial byte is consumed.
+      if (wasAsserted && io.sioCommandFrameReady)
+        transmitSioByte(ctx, 0);
     }
 
     function handleAbsentDevice(ctx) {
@@ -235,7 +270,16 @@
       io.sioInSize = size | 0;
       io.sioInIndex = 0;
       io.sioInReady = false;
-      io.serialInputDataReadyCycle = now + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+      // This simplified receive path exposes complete bytes directly. Its
+      // 1530-cycle value is therefore the guest-visible serial delay, rather
+      // than a start-bit delay to which another byte time is added. A separate
+      // virtual-drive turn-around precedes it, matching the finite command
+      // processing interval allowed by AHRM 9.1.
+      // Adding that second interval shifts the serial-input IRQ phase and
+      // makes the older OS CHKSUM race much more likely (AHRM 5.10).
+      io.serialInputDataReadyCycle =
+        now + SIO_DISK_RESPONSE_TURNAROUND_CYCLES +
+        SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
       traceSio(ctx, "SIO_RESPONSE_QUEUED", {
         size: io.sioInSize,
         firstByte: io.sioBuffer[0] & 0xff,
@@ -562,7 +606,6 @@
           io.sioPendingSector = sectorIndex2 & 0xffff;
           io.sioPendingBytes = si2.bytes | 0;
           io.sioPendingWriteResult = 0;
-
           // ACK command frame; host will then send the data frame.
           queueSingleByteResponse(ctx, now, CHAR_ACK);
           return;
@@ -620,14 +663,6 @@
           !canAccessSector(disk, diskSize, si) ||
           si.bytes !== payloadBytes
         ) {
-          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
-            command: cmd,
-            payloadBytes: payloadBytes | 0,
-            sector: io.sioPendingSector | 0,
-            calculatedChecksum: calculated,
-            providedChecksum: providedCrc & 0xff,
-            result: CHAR_NACK,
-          });
           queueDeviceNack(ctx, now);
           return;
         }
@@ -646,12 +681,6 @@
           }
           setDiskFdcStatus(io, mounted.deviceSlot, ok ? 0xff : 0x00);
           io.sioPendingWriteResult = ok ? CHAR_COMPLETE : CHAR_ERROR;
-          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
-            command: cmd,
-            payloadBytes: payloadBytes | 0,
-            sector: io.sioPendingSector | 0,
-            result: io.sioPendingWriteResult,
-          });
           queueSingleByteResponse(ctx, now, CHAR_ACK);
           if (ok) notifyDiskActivity(io, mounted, "verify");
           return;
@@ -678,22 +707,10 @@
           }
           setDiskFdcStatus(io, mounted.deviceSlot, verified ? 0xff : 0x00);
           io.sioPendingWriteResult = verified ? CHAR_COMPLETE : CHAR_ERROR;
-          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
-            command: cmd,
-            payloadBytes: payloadBytes | 0,
-            sector: io.sioPendingSector | 0,
-            result: io.sioPendingWriteResult,
-          });
           queueSingleByteResponse(ctx, now, CHAR_ACK);
         } else {
           setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
           io.sioPendingWriteResult = CHAR_COMPLETE;
-          traceSio(ctx, "SIO_DATA_FRAME_RESULT", {
-            command: cmd,
-            payloadBytes: payloadBytes | 0,
-            sector: io.sioPendingSector | 0,
-            result: CHAR_COMPLETE,
-          });
           queueSingleByteResponse(ctx, now, CHAR_ACK);
         }
       }
@@ -712,13 +729,18 @@
     ) {
       sioDeviceHandlers[devId] = diskDevice(devId);
     }
-    function seroutWrite(ctx, value) {
+    function seroutWrite(ctx, value, writeCycle) {
       const io = ctx.ioData;
-      const now = effectiveEventCycle(ctx);
-
-      // SEROUT writes fill POKEY's one-byte holding register.  The SIO bus
-      // sees the byte only when the output shift register completes it.
-      setSioCommandLine(ctx, 0);
+      // I/O writes occur on the final bus cycle of a CPU instruction.  The
+      // optional timestamp lets the CPU-facing I/O layer preserve that fact
+      // while direct callers retain the current-cycle behaviour.
+      const now = Number.isFinite(writeCycle)
+        ? writeCycle
+        : effectiveEventCycle(ctx);
+      // SEROUT writes fill POKEY's one-byte holding register. The COMMAND
+      // line is PIA CB2 and is deliberately not changed by a data write.
+      // The SIO bus sees the byte only when the output shift register
+      // completes it.
       io.serialOutputRegisterValue = value & 0xff;
       queueSerialOutput(ctx, now);
     }
@@ -757,13 +779,16 @@
         io.sioPendingSector = 0;
         io.sioPendingBytes = 0;
         io.sioOutIndex = 0;
-        setSioCommandLine(ctx, 1);
         return;
       }
 
       // --- Command phase ---
+      const commandFrameReady =
+        commandLineIsControlled(io) && !!io.sioCommandFrameReady;
       let outIdx = io.sioOutIndex | 0;
-      if (outIdx === 0) {
+      if (!commandFrameReady && outIdx === 0) {
+        if (commandLineIsControlled(io) && !io.sioCommandLineAsserted)
+          return;
         if (value > 0 && value < 255) {
           buf[0] = value & 0xff;
           io.sioOutIndex = 1;
@@ -771,15 +796,22 @@
         return;
       }
 
-      buf[outIdx] = value & 0xff;
-      outIdx = (outIdx + 1) | 0;
-      io.sioOutIndex = outIdx;
+      if (!commandFrameReady) {
+        buf[outIdx] = value & 0xff;
+        outIdx = (outIdx + 1) | 0;
+        io.sioOutIndex = outIdx;
 
-      if (outIdx !== 5) return;
+        if (outIdx !== 5) return;
+        if (commandLineIsControlled(io)) {
+          io.sioCommandFrameReady = true;
+          return;
+        }
+      }
 
-      // Reset outgoing command state (always, like the C emulator).
+      // A controlled command frame is held until PIA CB2 returns high. The
+      // direct-core harnesses intentionally retain immediate processing.
       io.sioOutIndex = 0;
-      setSioCommandLine(ctx, 1);
+      io.sioCommandFrameReady = false;
 
       if (sioChecksum(buf, 4) !== (buf[4] & 0xff)) {
         // AHRM 9.1 normally keeps checksum errors silent so devices cannot
@@ -889,6 +921,7 @@
 
     return {
       seroutWrite: seroutWrite,
+      sioCommandLineChanged: sioCommandLineChanged,
       serialOutputTransmitNow: serialOutputTransmitNow,
       serialOutputDataNeeded: serialOutputDataNeeded,
       serialOutputTransmissionDone: serialOutputTransmissionDone,

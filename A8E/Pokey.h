@@ -57,6 +57,7 @@ void Pokey_SerialInputReady(_6502_Context_t *pContext);
 void Pokey_SerialOutputDataNeeded(_6502_Context_t *pContext);
 u8 Pokey_SerialOutputTransmissionDone(_6502_Context_t *pContext,
                                       u64 llEventCycle);
+void Pokey_SioCommandLineChanged(_6502_Context_t *pContext, u8 cLevel);
 u8 *Pokey_IRQEN_IRQST(_6502_Context_t *pContext, u8 *pValue);
 u8 *Pokey_SKCTL_SKSTAT(_6502_Context_t *pContext, u8 *pValue);
 

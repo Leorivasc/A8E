@@ -92,6 +92,7 @@
     const pokeySyncLfsr17 = cfg.pokeySyncLfsr17;
     const pokeySeroutWrite = cfg.pokeySeroutWrite;
     const pokeySerinRead = cfg.pokeySerinRead;
+    const pokeySioCommandLineChanged = cfg.pokeySioCommandLineChanged;
     const pokeyPotUpdate = cfg.pokeyPotUpdate;
     const pokeyPotReadValue = cfg.pokeyPotReadValue;
     const TRIG_REGS = [
@@ -354,6 +355,7 @@
       const statusKey = isA ? "piaStatusA" : "piaStatusB";
       const levelKey = isA ? "piaCa2Level" : "piaCb2Level";
       const oldMode = piaControlMode(ctx.sram[address]);
+      const oldLevel = io[levelKey] ? 1 : 0;
       const newValue = value & 0x3f;
       const newMode = piaControlMode(newValue);
       ctx.sram[address] = newValue;
@@ -367,6 +369,13 @@
       if (newMode >= 4) {
         io[levelKey] = newMode === 7 ? 1 : 0;
         if (!isA) io.piaCb2WasRaisedOutput = newMode === 7 && oldMode === 6;
+        if (
+          !isA &&
+          oldLevel !== (io[levelKey] ? 1 : 0) &&
+          typeof pokeySioCommandLineChanged === "function"
+        ) {
+          pokeySioCommandLineChanged(ctx, io[levelKey] ? 1 : 0);
+        }
       }
 
       piaUpdateControlReadback(ctx, address);
@@ -576,7 +585,19 @@
               pokeyTraceEvent(ctx, "SEROUT_WRITE", { value: v });
             }
             ram[IO_IRQEN_IRQST] |= 0x10;
-            pokeySeroutWrite(ctx, v);
+            // A store reaches the peripheral on the final bus cycle of the
+            // 6502 instruction.  The CPU core executes an instruction as an
+            // atomic operation, so its cycle counter still names the first
+            // cycle here.  Giving POKEY that early timestamp can make it see
+            // an output-clock edge before the write could physically occur,
+            // producing a spurious DATA NEEDED IRQ between SEROUT and the
+            // OS checksum update.  AHRM 5.6 specifies that SEROUT transfers
+            // only on the *next* rising output-clock edge.
+            pokeySeroutWrite(
+              ctx,
+              v,
+              ctx.cycleCounter + Math.max((ctx.currentInstructionCycles | 0) - 1, 0),
+            );
             break;
 
           case IO_IRQEN_IRQST:

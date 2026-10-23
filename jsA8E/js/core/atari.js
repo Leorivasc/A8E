@@ -38,6 +38,8 @@
     hwApi.SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES;
   const SERIAL_INPUT_FIRST_DATA_READY_CYCLES =
     hwApi.SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+  const SIO_DISK_RESPONSE_TURNAROUND_CYCLES =
+    hwApi.SIO_DISK_RESPONSE_TURNAROUND_CYCLES;
   const SERIAL_INPUT_DATA_READY_CYCLES = hwApi.SERIAL_INPUT_DATA_READY_CYCLES;
   const SIO_TURBO_EMU_MULTIPLIER = hwApi.SIO_TURBO_EMU_MULTIPLIER;
   const POKEY_AUDIO_MAX_CATCHUP_CYCLES = hwApi.POKEY_AUDIO_MAX_CATCHUP_CYCLES;
@@ -307,6 +309,8 @@
             SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES,
           SERIAL_INPUT_FIRST_DATA_READY_CYCLES:
             SERIAL_INPUT_FIRST_DATA_READY_CYCLES,
+          SIO_DISK_RESPONSE_TURNAROUND_CYCLES:
+            SIO_DISK_RESPONSE_TURNAROUND_CYCLES,
           SERIAL_INPUT_DATA_READY_CYCLES: SERIAL_INPUT_DATA_READY_CYCLES,
           IO_AUDF1_POT0: IO_AUDF1_POT0,
           IO_AUDC1_POT1: IO_AUDC1_POT1,
@@ -357,6 +361,7 @@
     pokeyAudioApi.serialOutputTransmissionDone;
   const pokeySerialInputReady = pokeyAudioApi.serialInputReady;
   const pokeySerinRead = pokeyAudioApi.serinRead;
+  const pokeySioCommandLineChanged = pokeyAudioApi.sioCommandLineChanged;
 
   const ioApi =
     window.A8EIo && window.A8EIo.createApi
@@ -452,6 +457,7 @@
           pokeySerialOutputTransmissionDone: pokeySerialOutputTransmissionDone,
           pokeySerialInputReady: pokeySerialInputReady,
           pokeySerinRead: pokeySerinRead,
+          pokeySioCommandLineChanged: pokeySioCommandLineChanged,
           pokeyPotUpdate: pokeyPotUpdate,
           pokeyPotReadValue: pokeyPotReadValue,
           recordPmgRegisterWrite: function (ctx, address, value) {

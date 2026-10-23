@@ -5754,13 +5754,6 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 
 	if(llMasterCycle >= pIoData->llSerialOutputTransmissionDoneCycle)
 	{
-	#ifdef VERBOSE_SIO
-		fprintf(stderr, "DBG_XMT cycle=%llu pc=%04X ram=%02X en=%02X pending=%u shift=%u\\n",
-			(unsigned long long)llMasterCycle, pContext->tCpu.pc,
-			RAM[IO_IRQEN_IRQST], SRAM[IO_IRQEN_IRQST],
-			pIoData->bSerialOutputBytePending,
-			pIoData->bSerialOutputShiftActive);
-	#endif
 		u8 bQueuedByte = Pokey_SerialOutputTransmissionDone(pContext,
 			llMasterCycle);
 #ifdef VERBOSE_SIO
@@ -5795,13 +5788,6 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 
 	if(llMasterCycle >= pIoData->llSerialOutputNeedDataCycle)
 	{
-	#ifdef VERBOSE_SIO
-		fprintf(stderr, "DBG_NEED cycle=%llu pc=%04X ram=%02X en=%02X pending=%u shift=%u\\n",
-			(unsigned long long)llMasterCycle, pContext->tCpu.pc,
-			RAM[IO_IRQEN_IRQST], SRAM[IO_IRQEN_IRQST],
-			pIoData->bSerialOutputBytePending,
-			pIoData->bSerialOutputShiftActive);
-	#endif
 		Pokey_SerialOutputDataNeeded(pContext);
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIAL_OUTPUT_DATA_NEEDED request!\n", pContext->llCycleCounter);
@@ -5959,10 +5945,6 @@ void AtariIoOpenWithMemory(
 	IoInitValue_t *pIoInitValue = m_aIoInitValues;
 	IoData_t *pIoData;
 	SDL_Surface *pSdlAtariSurface;
-	#ifdef SIO_DIAG
-	fprintf(stderr, "DBG_OPEN cwd-file=%s\\n", pDiskFileName ? pDiskFileName : "(null)");
-	#endif
-
 	/* create an 8-bit indexed surface; masks must be zero or SDL will
 	   refuse the format.  the previous masks were intended for a
 	   32-bit surface and caused SDL_CreateRGBSurface to fail with ""
@@ -6164,21 +6146,10 @@ void AtariIoOpenWithMemory(
 	if(pDiskFileName)
 	{
 		pFile = fopen(pDiskFileName, "rb");
-		#ifdef SIO_DIAG
-		fprintf(stderr, "DBG_OPEN_RESULT file=%s opened=%u\\n",
-			pDiskFileName, pFile ? 1u : 0u);
-		#endif
-
 		if(pFile)
 		{
 			pIoData->lDiskSize = fread(pIoData->pDisk1, 1, MAX_DISK_SIZE, pFile);
 			pIoData->alDiskSize[0] = pIoData->lDiskSize;
-		#ifdef SIO_DIAG
-			fprintf(stderr, "DBG_MOUNT file=%s size=%lu first=%02X second=%02X sector=%u\\n",
-				pDiskFileName, pIoData->lDiskSize, pIoData->pDisk1[0],
-				pIoData->pDisk1[1],
-				(unsigned)(pIoData->pDisk1[4] | (pIoData->pDisk1[5] << 8)));
-		#endif
 			strncpy(pIoData->acDiskName[0], pDiskFileName, sizeof(pIoData->acDiskName[0]) - 1u);
 			pIoData->acDiskName[0][sizeof(pIoData->acDiskName[0]) - 1u] = '\0';
 			AtariIo_CloseFileOrWarn(pFile, pDiskFileName);
