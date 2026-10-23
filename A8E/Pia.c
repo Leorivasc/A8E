@@ -97,6 +97,7 @@ static void Pia_WriteControl(_6502_Context_t *pContext, u16 sAddress, u8 cValue)
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
 	u8 *pStatus = sAddress == IO_PACTL ? &pIoData->cPiaStatusA : &pIoData->cPiaStatusB;
 	u8 *pLevel = sAddress == IO_PACTL ? &pIoData->cPiaCa2Level : &pIoData->cPiaCb2Level;
+	u8 cOldLevel = *pLevel;
 	u8 cOldControl = SRAM[sAddress];
 	u8 cOldMode = Pia_ControlMode(cOldControl);
 	u8 cNewMode = Pia_ControlMode(cValue);
@@ -117,7 +118,11 @@ static void Pia_WriteControl(_6502_Context_t *pContext, u16 sAddress, u8 cValue)
 	{
 		*pLevel = (u8)(cNewMode == 7);
 		if(sAddress != IO_PACTL)
+		{
 			pIoData->bPiaCb2WasRaisedOutput = (u8)(cNewMode == 7 && cOldMode == 6);
+			if(cOldLevel != *pLevel)
+				Pokey_SioCommandLineChanged(pContext, *pLevel);
+		}
 	}
 
 	Pia_UpdateControlReadback(pContext, sAddress);

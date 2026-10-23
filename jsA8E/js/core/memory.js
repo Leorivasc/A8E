@@ -2144,6 +2144,9 @@
           sioBuffer: new Uint8Array(io.sioBuffer || 0),
           sioOutIndex: io.sioOutIndex | 0,
           sioOutPhase: io.sioOutPhase | 0,
+          sioCommandLineControlled: !!io.sioCommandLineControlled,
+          sioCommandLineAsserted: !!io.sioCommandLineAsserted,
+          sioCommandFrameReady: !!io.sioCommandFrameReady,
           sioDataIndex: io.sioDataIndex | 0,
           sioPendingDevice: io.sioPendingDevice | 0,
           sioPendingCmd: io.sioPendingCmd | 0,
@@ -2279,6 +2282,12 @@
         copyBytesTo(io.sioBuffer, state.sioBuffer);
         io.sioOutIndex = state.sioOutIndex | 0;
         io.sioOutPhase = state.sioOutPhase | 0;
+        if (state.sioCommandLineControlled !== undefined)
+          io.sioCommandLineControlled = !!state.sioCommandLineControlled;
+        if (state.sioCommandLineAsserted !== undefined)
+          io.sioCommandLineAsserted = !!state.sioCommandLineAsserted;
+        if (state.sioCommandFrameReady !== undefined)
+          io.sioCommandFrameReady = !!state.sioCommandFrameReady;
         io.sioDataIndex = state.sioDataIndex | 0;
         io.sioPendingDevice = state.sioPendingDevice | 0;
         io.sioPendingCmd = state.sioPendingCmd | 0;

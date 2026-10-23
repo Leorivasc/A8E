@@ -16,6 +16,28 @@ State is created up-front by `state.js` into a fixed `ioData` shape. ANTIC and t
 
 `io.clock` is the display beam clock (color clocks); `ctx.cycleCounter` is the CPU cycle counter. DLI deadlines use `io.clock`; timer/SIO deadlines use `cycleCounter`. The scheduler tracks separate beam/master wake thresholds (`ioBeamTimedEventCycle` / `ioMasterTimedEventCycle`) so scanline rendering and CPU execution each poll the correct domain. During `drawLine`, `io.clock` is the authoritative reference for all timed events.
 
+SIO disk writes retain AHRM's one-byte `SEROUT` holding register and checksum
+rules. Write/Put/Verify bytes advance only at POKEY output-clock edges, and
+the checksum byte is validated before the virtual disk acknowledges the frame.
+There is no disk-specific fast path or host-time pacing.
+
+The virtual disk includes a 640-cycle controller turn-around before the first
+automatic response byte, then the 1530-cycle (approximately 850 us) AHRM
+minimum serial visibility delay. The current receive model delivers whole
+bytes to `SERIN`, so the latter interval must not gain a second byte interval.
+Subsequent response bytes use their normal interval. The independent controller
+turn-around avoids an artificial fixed phase lock between virtual-disk replies
+and the older Atari OS SIO/VBI race.
+
+The complete investigation, verification trace, and regression procedure are
+in [SIO write timing investigation](../SIO_write_timing_investigation.md).
+
+The SIO `COMMAND` wire is PIA CB2. POKEY `SEROUT` writes never change it: the
+host asserts CB2 low before the five-byte command frame and releases it high
+after the frame. The virtual disk holds the complete frame until that real
+PIA transition, then starts validation and its ACK/NAK delay. This prevents a
+response from interrupting the OS while it still prepares the first data byte.
+
 ## ANTIC / Display List
 
 - NMIST DLI/VBI bits are set at cycle 7 of the triggering scanline; NMI is asserted at cycle 8 (AHRM 4.8). `DLI_HORIZONTAL_OFFSET = 7` marks the NMIST cycle; the event handler fires at cycle 7 to latch NMIST and again at cycle 8 to fire the NMI. The NMI handler begins at the first instruction boundary at cycle 10 or later.

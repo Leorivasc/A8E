@@ -178,6 +178,13 @@ SERIN responses are queued with a delay before the first byte and a separate
 interval between subsequent bytes. The response queue returns bytes through
 the same `$D20D` register until the current response is exhausted.
 
+For the virtual disk, the first response also includes a 640-cycle controller
+turn-around before POKEY's 1530-cycle first-byte visibility delay. This is a
+device-processing delay permitted by AHRM 9.1; it does not alter POKEY's
+serial timing. See [SIO write timing investigation](SIO_write_timing_investigation.md)
+for the race analysis, corrective timing contracts, trace evidence, and
+validation procedure.
+
 The implementation also drives the PIA CB2 line. CB2 is asserted during the
 command transmission and released after the command frame, following the
 AHRM active-low SIO command-line behavior.
@@ -440,19 +447,30 @@ Complete/Error response are separate protocol phases; combining them causes
 DOS to wait for a response that has already been sent.
 
 The approximately 16-20 second pauses observed during DOS 2.5 duplication
-must be distinguished from a response-phase defect. Chrome tracing showed
+were first distinguished from a response-phase defect. Chrome tracing showed
 that successful writes use the expected `ACK -> data-frame ACK -> Complete`
 sequence, while the paused attempts receive a data-frame `NAK` for `$57` and
 then wait for the DOS retry timeout. AHRM 5.10 documents a race in older Atari
 OS SIO code: the first transmitted byte can be written before `CHKSUM` is
 initialized, and a SIO receive IRQ or VBI can corrupt that checksum. The drive
 must NAK that invalid data frame, and the older OS may then take the long retry
-path. The pause is therefore a documented guest timing/firmware behavior, not
-normal disk latency or an ATR geometry mismatch. The emulator must retain the
-checksum validation and NAK behavior; accepting the corrupted frame or
-shortening the timeout would not be AHRM-compliant. A remaining optional
-investigation is a cycle-level AHRM-08 comparison against Altirra and hardware
-to explain differences in how often the guest race is hit.
+path. The emulator must retain the checksum validation and NAK behavior;
+accepting the corrupted frame or shortening the timeout would not be
+AHRM-compliant.
+
+The correction does not accelerate the serial bus or introduce a virtual
+data-phase fast path. Each byte continues through POKEY's one-byte `SEROUT`
+holding register and its next eligible serial-clock edge; the checksum byte
+is still validated and a bad checksum still produces NAK. All timing remains
+in emulated CPU cycles and does not copy another emulator's implementation.
+
+The command-line sequencing is independent from POKEY data transmission. CB2
+on PIA is the active-low `COMMAND` wire: the virtual drive receives all five
+command bytes while it is low, but does not validate them or start ACK/NAK
+timing until the guest releases CB2 high. In particular, data-frame writes to
+`SEROUT` do not alter CB2. This preserves the host's documented setup interval
+between the command frame and device response, avoiding a virtual response IRQ
+inside the stock OS first-byte/checksum window.
 
 #### Open investigation record
 
@@ -484,14 +502,13 @@ The investigation established the following:
   then corrupt the checksum. The drive must NAK the bad data frame, while the
   older OS may take the long retry path.
 
-The pending resolution is not to accept invalid checksums, suppress NAKs, or
-shorten protocol timeouts. Those changes would hide guest-visible AHRM
-behavior. The correct follow-up is an AHRM-08 cycle-level comparison of the
-first-byte SEROUT/CHKSUM window and the receive-IRQ/VBI arbitration against
-Altirra and hardware. If a timing discrepancy is found, the fix must be made
-in both jsA8E and native A8E with a shared regression. Until that work is
-resumed, the observed pauses are classified as a known guest timing/firmware
-case rather than a Full Library blocker.
+The remaining validation is now empirical: run the original `SAVE` scenario
+in jsA8E with SIO acceleration enabled and compare the wall-clock pauses and
+the SIO trace against Altirra. The checked-in regression
+`jsA8E/tests/pokey_sio_burst.test.js` verifies the device grant, POKEY-clock
+DATA NEEDED scheduling, the normal ACK/Complete phases, and closure at the
+checksum byte. A failed data checksum must still be visible as NAK and must
+not be hidden by this change.
 
 ### Flat sector-dump compatibility
 

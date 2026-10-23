@@ -1,5 +1,92 @@
 # NOTES.md
 
+- 2026-10-23: removed the virtual-disk burst shortcut that could schedule
+  `DATA NEEDED` 50 CPU cycles after a write, before the next real POKEY serial
+  clock edge. The drive-grant state remains bounded, but both jsA8E and native
+  A8E now schedule the holding-register load only from POKEY's clock. This
+  prevents accelerated data bytes from creating guest checksum races and
+  preserves AHRM serial timing; the normal DOS retry timeout is intentionally
+  unchanged.
+
+- 2026-10-23: corrected the first automatic SIO response phase. The simplified
+  receive path delivers complete bytes directly to SERIN, so its 1530-cycle
+  first-response interval is already guest-visible. Adding another byte time
+  had shifted the input-IRQ phase and increased the older OS `CHKSUM` race;
+  JS and native paths now use the same 1530-cycle first-byte phase while
+  subsequent-byte timing, checksum validation, NAK behavior, and DOS retry
+  timing remain unchanged.
+
+- 2026-10-23: live jsA8E capture of `SAVE"D2:OTRO.BAS"` isolated the long
+  retry: sector 163 transmitted all 128 payload bytes plus checksum in order,
+  with no SEROUT holding-register overwrite, but POKEY raised the first
+  `DATA NEEDED` event only four CPU cycles after the first SEROUT store. The
+  guest then supplied `$EE` while the transmitted payload checksum was `$71`,
+  so the virtual drive correctly returned NAK and DOS waited 15.96 seconds.
+  This is the AHRM 5.10 old-OS CHKSUM race, not ATR corruption or a disk-write
+  failure. The response-phase correction above removes an erroneous extra
+  input-byte interval that was shifting this IRQ phase.
+
+- 2026-10-23: the same capture showed the serial output-ready latch was being
+  made visible on the timer edge itself: a sector could raise `DATA NEEDED`
+  five cycles after the first SEROUT store. JS and native POKEY now apply the
+  two-cycle serial-latch propagation interval after the selected clock edge.
+  This preserves the clock edge and ten-bit frame cadence, but prevents an
+  emulator-only early IRQ from preempting the following `CHKSUM` store.
+
+- 2026-10-23: corrected SIO command-line ownership in jsA8E and native A8E.
+  POKEY `SEROUT` writes no longer force PIA CB2 low or high. The command
+  frame is retained until the guest's real CB2 low-to-high transition, then
+  the disk begins validation and ACK/NAK timing. This restores the AHRM
+  command setup phase before the OS starts its first data byte and avoids
+  injecting a virtual response IRQ into the first-byte `CHKSUM` race. The
+  focused regression now verifies that no response is queued before CB2 rises
+  and that data writes do not reassert COMMAND.
+
+- 2026-10-23: added focused jsA8E SIO transmission diagnostics for the
+  `SEROUT` holding register, `DATA NEEDED`, shift-register transfer, and
+  `XMTDONE` byte delivery. The trace records pending/active values and
+  deadlines so checksum failures can be reproduced without the invasive
+  all-memory access hook; its diagnostic ring retains a complete multi-sector
+  frame, and emulation timing is unchanged.
+
+- 2026-10-23: corrected the diagnostic wire-byte index so it refers to the
+  byte currently being delivered, before the SIO data counter is incremented.
+  This changes only trace interpretation; emulation timing and data flow are
+  unchanged.
+
+- 2026-10-23: the first byte-by-byte live trace of the problematic SIO path
+  showed that CPU `SEROUT` values and transmitted values remain ordered, with
+  no holding-register overwrite in the captured command/read sequence. The
+  observed NAKs therefore came from the Atari-side checksum value already
+  written by the guest (for example, `$EE` supplied where the checksum of the
+  four transmitted command bytes was `$41`), not from the virtual-disk
+  checksum routine or ATR geometry. The diagnostic still records
+  `holdingOccupied` so a real WRITE data phase can distinguish this documented
+  guest checksum race from a POKEY overrun.
+
+- 2026-10-23: anchored queued serial-output frames to the previously scheduled
+  `XMTDONE` deadline in jsA8E and native A8E. Timed callbacks can be observed
+  a few CPU cycles late at an instruction boundary; the next ten-bit frame now
+  preserves the existing cadence instead of accumulating that dispatch delay.
+  The change does not accept invalid checksums or alter SEROUT replacement
+  semantics, and a regression covers a late callback with one queued byte.
+
+- 2026-10-22: revised virtual-disk SIO burst timing to follow the AHRM/Altirra
+  device-grant model without copying Altirra source. A write/put/verify command
+  now explicitly grants the burst only after entering its data phase; each
+  payload byte renews a bounded window, and the checksum byte revokes the
+  grant. The original implementation briefly used a 50-cycle minimum lead;
+  that shortcut was removed on 2026-10-23 because it could precede the next
+  real POKEY output-clock edge. JS and native POKEY paths now share the
+  bounded state and preserve normal timing. The regression covers the grant,
+  POKEY-clock scheduling, and closure behavior.
+
+- 2026-10-22: aligned the first virtual-disk SIO response with the AHRM
+  automatic-response minimum by reducing its delay from 3000 to 1530 CPU
+  cycles in both JS and native POKEY. This matches the reference scheduler's
+  response timing and avoids an unnecessary response-phase interval before
+  DOS prepares the next transfer.
+
 - 2026-10-22: added AHRM-aligned support for standard flat sector dumps
   without an ATR container header. The jsA8E media boundary now recognizes
   90K/130K single-density and standard double-density raw geometries and
@@ -2314,6 +2401,45 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   deadlines, and `IRQST` where available. The trace is observational only and is disabled by default; its
   purpose is to decide whether the remaining P1 mismatch is a real internal
   edge difference or merely a guest polling boundary before changing timing.
+
+## 2026-10-22 SIO disk burst scheduling
+
+- 2026-10-23: Added a 640-cycle virtual disk-controller turn-around before
+  POKEY's existing 1530-cycle first-input-byte visibility delay in both cores.
+  AHRM 9.1 permits this response interval, and it models controller work as a
+  device delay rather than altering POKEY. It breaks the artificial fixed
+  phase relationship between virtual-disk responses and the XL/XE OS VBI,
+  which was still provoking occasional AHRM 5.10 command-checksum retries
+  after the data-frame race was fixed. `pokey_sio_burst.test.js` now asserts
+  that the device turn-around and serial visibility delays are combined. Full
+  analysis, observed traces, normal DOS close activity, validation, and the
+  regression diagnostic procedure are recorded in
+  `implementation/SIO_write_timing_investigation.md`.
+
+- 2026-10-23: Fixed the JS and native SEROUT write timestamp.  The CPU core
+  evaluates a store before advancing its instruction counter, but the 6502
+  presents that store on its final bus cycle.  POKEY now schedules the first
+  SEROUT-to-shifter load from that final cycle and only from a subsequent
+  rising serial-clock edge, as required by AHRM 5.6.  This prevents a
+  phase-dependent `DATA NEEDED` IRQ from pre-empting the XL OS between
+  `STA $D20D` and its checksum update, which had created invalid SIO data
+  checksums, NAKs, and the DOS retry pause.  POKEY exposes the selected load
+  two cycles after its serial clock edge, and the JS CPU now dispatches I/O
+  deadlines only at a completed instruction boundary; an I/O deadline can
+  latch during an instruction but cannot vector the CPU halfway through it.
+  The CPU and SIO regressions cover both contracts.
+
+- Added `jsA8E/tests/pokey_sio_burst.test.js` and registered it in the
+  automation suite. It verifies final-bus-cycle `SEROUT` scheduling,
+  POKEY-clocked sector delivery, checksum closure, and response turn-around.
+  The focused SIO regressions pass; the native build remains to be checked in
+  the Windows build tree.
+
+- 2026-10-23: Removed the investigation-only SIO event buffer expansion,
+  per-byte trace records, `DBG_*` markers, and unused data-phase deadline
+  state after the timing contract was covered by regressions. The supported
+  AHRM POKEY phase trace remains available independently through its existing
+  opt-in mechanism.
 
 ## Legal / License TODO
 

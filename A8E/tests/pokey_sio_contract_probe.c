@@ -103,10 +103,12 @@ static void SendSioByte(_6502_Context_t *pContext, u8 cValue)
 static void SendSioFrame(_6502_Context_t *pContext, const u8 *pFrame)
 {
 	u32 lIndex;
+	Pokey_SioCommandLineChanged(pContext, 0);
 	for(lIndex = 0; lIndex < 5u; lIndex++)
 	{
 		SendSioByte(pContext, pFrame[lIndex]);
 	}
+	Pokey_SioCommandLineChanged(pContext, 1);
 }
 
 static u8 TestSioChecksum(const u8 *pBuffer, u32 lSize)

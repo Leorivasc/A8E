@@ -98,6 +98,8 @@
               cfg.SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES,
             SERIAL_INPUT_FIRST_DATA_READY_CYCLES:
               cfg.SERIAL_INPUT_FIRST_DATA_READY_CYCLES,
+            SIO_DISK_RESPONSE_TURNAROUND_CYCLES:
+              cfg.SIO_DISK_RESPONSE_TURNAROUND_CYCLES,
             SERIAL_INPUT_DATA_READY_CYCLES: cfg.SERIAL_INPUT_DATA_READY_CYCLES,
             IO_IRQEN_IRQST: IO_IRQEN_IRQST,
             CYCLE_NEVER: CYCLE_NEVER,
@@ -1335,6 +1337,12 @@
       return timer !== 0 && pokeyTimerPeriodCpuCycles(ctx, timer) > 0;
     }
 
+    // The timer edge selects the serial shifter, then the output latch and
+    // its IRQ become CPU-visible two cycles later. This follows the observed
+    // POKEY output pipeline and lets the CPU finish an in-flight instruction
+    // before recognizing the latched IRQ.
+    const POKEY_SERIAL_OUTPUT_LATCH_LATENCY_CYCLES = 2;
+
     function pokeySerialOutputClockNextCycle(ctx, now) {
       const timer = pokeySerialOutputClockTimer(ctx);
       const period = timer ? pokeyTimerPeriodCpuCycles(ctx, timer) : 0;
@@ -1350,7 +1358,9 @@
         next += period;
       }
       if (level) next += period;
-      return next;
+      // `next` is strictly after `now`, so a SEROUT write cannot be consumed
+      // by a clock edge that occurred earlier in the same CPU bus cycle.
+      return next + POKEY_SERIAL_OUTPUT_LATCH_LATENCY_CYCLES;
     }
 
     function pokeySerialOutputClockTimerExpired(ctx, timer) {
@@ -1480,6 +1490,7 @@
       serialOutputTransmissionDone: pokeySioApi.serialOutputTransmissionDone,
       serialInputReady: pokeySioApi.serialInputReady,
       serinRead: pokeySioApi.serinRead,
+      sioCommandLineChanged: pokeySioApi.sioCommandLineChanged,
     };
   }
 
