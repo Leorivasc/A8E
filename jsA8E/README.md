@@ -127,6 +127,7 @@ Behavior:
 - Disk image/program load (`Open Disk`) accepts `.atr`, `.xex`, and `.zip`.
   - `.zip` archives are scanned for the first `.atr` (preferred) or `.xex` entry and loaded directly.
   - `.xex` files are converted in-memory to an ATR-compatible boot stream using the same XEX boot loader logic as the native path.
+  - Headerless, standard-geometry sector dumps described by AHRM Appendix B are accepted and normalized internally as ATR media; ambiguous raw-image sizes are rejected.
 - When D1 is empty at startup, the browser mounts and starts the built-in
   `standby.xex`, which displays disk-loading instructions through its own
   ANTIC display list. Loading a disk through **Open Disk** restarts into it.

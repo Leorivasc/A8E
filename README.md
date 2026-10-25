@@ -56,8 +56,9 @@ The directly AHRM-based changes include:
 - POKEY serial holding/shift-register timing, `SERIN`/`SEROUT` event order,
   `DATA NEEDED`, `TRANSMISSION DONE`, and `DATA READY` handling;
 - SIO command/response phases, checksums, `ACK`/`COMPLETE`/`NAK` sequencing,
-  sector geometry, `STATUS`, `FORMAT`, write verification, and the supported
-  US Doubler timing paths (AHRM sections 5.6, 5.10, and 9–10);
+  PIA CB2/`COMMAND` control, virtual-drive response timing, sector geometry,
+  `STATUS`, `FORMAT`, write verification, and the supported US Doubler timing
+  paths (AHRM sections 5.6, 5.10, and 9–10);
 - ANTIC/GTIA scanline, DMA, `CHBASE`, player/missile priority, collision, and
   GTIA Mode 10 composition behavior (AHRM sections 4.4, 4.8, 4.11, 4.13,
   4.14, and 6.5).
@@ -95,7 +96,7 @@ The native and browser implementations support the AHRM memory-map profiles belo
 
 RAMBO and COMPY bank-bit layouts, CPU/ANTIC window behavior, BASIC/Self-Test overlays, and bank persistence are implemented and covered by native and browser regression probes. Ultimate1MB currently provides its AHRM memory mapping and core UCTL/UAUX/COLDF control-register behavior, including selectable 64K, 320K, 576K, and 1088K modes. Ultimate1MB BIOS/flash, RTC, PBI devices, and external peripheral images are not yet emulated.
 
-The repository includes two standalone Atari diagnostics for expanded-memory validation: [`U1MB_MEMORY_TEST.XEX`](implementation/U1MB_MEMORY_TEST.XEX) performs full bank, system-window, configuration, and visual ANTIC checks; [`MEMORY_STRESS_TEST.XEX`](implementation/MEMORY_STRESS_TEST.XEX) performs repeated bank-switching and PORTB-map checks. See [implementation/memory_tests.md](implementation/memory_tests.md).
+The repository includes two standalone Atari diagnostics for expanded-memory validation: [`U1MB_MEMORY_TEST.XEX`](<implementation/AHRM Validation/U1MB_MEMORY_TEST.XEX>) performs full bank, system-window, configuration, and visual ANTIC checks; [`MEMORY_STRESS_TEST.XEX`](<implementation/AHRM Validation/MEMORY_STRESS_TEST.XEX>) performs repeated bank-switching and PORTB-map checks. See the [memory-test guide](implementation/memory_tests.md) and the [AHRM validation-test catalogue](<implementation/AHRM Validation/AHRM_Validation_Tests.md>) for expected output and the complete diagnostic set.
 
 ### Browser Presentation
 
