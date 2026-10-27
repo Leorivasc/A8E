@@ -1,5 +1,48 @@
 # NOTES.md
 
+- 2026-10-26: added the first jsA8E interface theme system on the `Themes`
+  branch. The browser UI now provides persistent presets inspired by Atari
+  400/800, 800XL, 65XE/130XE, XEGS, ST, and 2600 hardware, plus the existing
+  dark presentation. Theme variables cover the main workspace, toolbar,
+  sub-panels, and virtual keyboard without changing the emulated PAL/NTSC
+  palette or CRT renderer. The 800XL theme was reset to a white base with gray
+  text, black borders, and red/dark-gray highlights; the XEGS theme uses the sampled warm-gray,
+  red, blue, yellow, pink, and lilac colors from the supplied reference image.
+  The assembler editor and snapshot panel backgrounds now consume the active
+  theme surfaces instead of retaining fixed dark backgrounds.
+  The selector persists through `localStorage`. Visual browser verification
+  remains pending because the local Windows/browser automation runtime was not
+  available in this session. `node --check`, `git diff --check`, theme-reference
+  checks, and HTTP serving checks pass; ESLint could not run because the local
+  `jsA8E` dependency tree does not contain the `eslint` executable.
+
+- 2026-10-26: replaced the mounted-disk library's text activity marker with the
+  compact `jsA8E/assets/leds.png` sprite. Its four LED states are mapped to
+  green for reads, red for writes, yellow for media errors, and the unlit LED
+  when idle. The sprite is rendered at 18px so it fits the narrow library row;
+  the activity event handling also recognizes error/failure operation names
+  without changing emulation timing.
+
+- 2026-10-26: measured the LED sprite's visible centers at X=29, 81, 133,
+  and 186 px rather than assuming equal source cells. Adjusted each 18px
+  library crop independently so the colored and unlit indicators remain
+  visually stationary when activity changes.
+
+- 2026-10-26: renamed the visible `classic` dark theme label to `CyberDeck`;
+  its stored key remains `classic` for preference compatibility.
+
+- 2026-10-26: removed the misleading writable markers from mounted disk rows
+  and removed the `RW` column from the disk library. The UI no longer claims
+  write protection support until the emulated media path enforces it.
+
+- 2026-10-26: increased the 800XL top-bar gradient contrast and added a subtle
+  mid-tone highlight so its white surface reads more like brushed metal.
+
+- 2026-10-26: replaced the OS and BASIC ROM load-button check/cross icons with
+  the compact LED sprite. The indicator is unlit when the ROM is absent and
+  green when it is loaded; loading behavior and stored ROM handling are
+  unchanged.
+
 - 2026-10-23: fixed host `Shift+Arrow` cursor-key handling in jsA8E. The
   keydown records whether an arrow was mapped as an Atari cursor key or a
   joystick direction; keyup releases the same path even if Shift was released

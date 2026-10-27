@@ -27,6 +27,25 @@
           return null;
         }
 
+        function normalizeUiTheme(value) {
+          var text = String(value === undefined || value === null ? "" : value)
+            .trim()
+            .toLowerCase();
+          var themes = ["classic", "800xl", "xegs", "65xe", "400-800", "st", "2600"];
+          return themes.indexOf(text) >= 0 ? text : null;
+        }
+
+        function readStoredUiTheme() {
+          try {
+            if (window.localStorage) {
+              return normalizeUiTheme(window.localStorage.getItem("a8e_ui_theme"));
+            }
+          } catch {
+            // ignore storage failures
+          }
+          return null;
+        }
+
         var boot =
           window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
             ? window.A8E_BOOT_OPTIONS
@@ -35,9 +54,13 @@
           normalizeVideoStandard(boot.videoStandard) ||
           readStoredVideoStandard() ||
           "ntsc";
+        var nextTheme = normalizeUiTheme(boot.uiTheme) || readStoredUiTheme() || "classic";
+
+        document.documentElement.dataset.uiTheme = nextTheme;
 
         window.A8E_BOOT_OPTIONS = Object.assign({}, boot, {
           videoStandard: nextStandard,
+          uiTheme: nextTheme,
         });
       })();
     </script>
@@ -90,10 +113,10 @@
               </div>
 
               <div class="tt-section">
-                <span class="tt-heading">Status Icons</span>
+                <span class="tt-heading">Status LEDs</span>
                 <div class="tt-icons">
-                  <span class="tt-icon"><i class="fa-solid fa-circle-xmark"></i> not loaded</span>
-                  <span class="tt-icon"><i class="fa-solid fa-circle-check"></i> loaded</span>
+                  <span class="tt-icon"><i class="rom-status-led" aria-hidden="true"></i> not loaded</span>
+                  <span class="tt-icon"><i class="rom-status-led loaded" aria-hidden="true"></i> loaded</span>
                 </div>
               </div>
 
@@ -133,13 +156,13 @@
                 <i class="fa-solid fa-volume-xmark audio-off"></i>
               </button>
             </div>
-            <label id="toolbarRomOs" class="fileBtn fileBtnPrimary" title="Load the Atari XL operating system ROM (ATARIXL.ROM). This file is required for a normal boot. Status icon: red cross means not loaded, green check means loaded.">
+            <label id="toolbarRomOs" class="fileBtn fileBtnPrimary" title="Load the Atari XL operating system ROM (ATARIXL.ROM). This file is required for a normal boot. Status LED: off means not loaded, green means loaded.">
               <input type="file" id="romOs" accept=".rom,application/octet-stream" />
-              <span>ATARIXL.ROM <i id="romOsStatus" class="fa-solid fa-circle-xmark status-icon"></i></span>
+              <span>ATARIXL.ROM <i id="romOsStatus" class="rom-status-led" aria-hidden="true"></i></span>
             </label>
-            <label id="toolbarRomBasic" class="fileBtn fileBtnPrimary" title="Load the Atari BASIC ROM (ATARIBAS.ROM). Keep this loaded for BASIC programs; disable with Option on Start when software requires BASIC off. Status icon: red cross means not loaded, green check means loaded.">
+            <label id="toolbarRomBasic" class="fileBtn fileBtnPrimary" title="Load the Atari BASIC ROM (ATARIBAS.ROM). Keep this loaded for BASIC programs; disable with Option on Start when software requires BASIC off. Status LED: off means not loaded, green means loaded.">
               <input type="file" id="romBasic" accept=".rom,application/octet-stream" />
-              <span>ATARIBAS.ROM <i id="romBasicStatus" class="fa-solid fa-circle-xmark status-icon"></i></span>
+              <span>ATARIBAS.ROM <i id="romBasicStatus" class="rom-status-led" aria-hidden="true"></i></span>
             </label>
             <label id="toolbarDiskOpen" class="fileBtn diskOpenBtn" title="Open an ATR disk image, XEX executable, or ZIP archive containing ATR/XEX in drive 1.">
               <input type="file" id="disk1" aria-label="Open disk image" accept=".atr,.xex,.zip,application/zip,application/octet-stream" />
@@ -243,6 +266,18 @@
                 <option value="compy-576k">576K (COMPY)</option>
                 <option value="rambo-1088k">1088K (RAMBO)</option>
                 <option value="ultimate1mb">Ultimate1MB (1MB) (WIP)</option>
+              </select>
+            </label>
+            <label class="toolbarSelectWrap" title="Choose the interface colors inspired by Atari hardware models.">
+              <span>Theme</span>
+              <select id="uiThemeSelect" class="toolbarSelect toolbarSelectWide" aria-label="Interface theme">
+                <option value="classic">CyberDeck</option>
+                <option value="800xl">Atari 800XL</option>
+                <option value="xegs">Atari XEGS</option>
+                <option value="65xe">Atari 65XE/130XE</option>
+                <option value="400-800">Atari 400/800</option>
+                <option value="st">Atari ST</option>
+                <option value="2600">Atari 2600 Woodgrain</option>
               </select>
             </label>
             <button id="btnClearStoredRoms" class="toggle-btn" type="button" disabled title="Delete user-uploaded ROMs saved in this browser." aria-label="Delete user-uploaded ROMs saved in this browser.">
@@ -516,7 +551,6 @@
             <div class="disklib-cols-header">
               <span class="disklib-col disklib-col-chk"><input type="checkbox" class="disklib-master-chk" title="Select or deselect all" /></span>
               <span class="disklib-col disklib-col-name">Name</span>
-              <span class="disklib-col disklib-col-rw">RW</span>
               <span class="disklib-col disklib-col-drive">D1:</span>
               <span class="disklib-col disklib-col-drive">D2:</span>
               <span class="disklib-col disklib-col-drive">D3:</span>

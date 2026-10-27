@@ -110,6 +110,73 @@
     return normalized;
   }
 
+  const UI_THEME_STORAGE_KEY = "a8e_ui_theme";
+  const UI_THEMES = Object.freeze({
+    classic: "classic",
+    "800xl": "800xl",
+    xegs: "xegs",
+    "65xe": "65xe",
+    "400-800": "400-800",
+    st: "st",
+    "2600": "2600",
+  });
+
+  function normalizeUiTheme(value) {
+    const text = String(value === undefined || value === null ? "" : value)
+      .trim()
+      .toLowerCase();
+    return Object.prototype.hasOwnProperty.call(UI_THEMES, text)
+      ? text
+      : null;
+  }
+
+  function resolveUiThemePreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    const bootTheme = boot ? normalizeUiTheme(boot.uiTheme) : null;
+    if (bootTheme) return bootTheme;
+
+    try {
+      if (window.localStorage) {
+        const stored = normalizeUiTheme(
+          window.localStorage.getItem(UI_THEME_STORAGE_KEY),
+        );
+        if (stored) return stored;
+      }
+    } catch {
+      // ignore storage failures
+    }
+
+    return "classic";
+  }
+
+  function applyUiTheme(value) {
+    const normalized = normalizeUiTheme(value) || "classic";
+    if (document.documentElement) {
+      document.documentElement.dataset.uiTheme = normalized;
+    }
+    return normalized;
+  }
+
+  function persistUiThemePreference(value) {
+    const normalized = applyUiTheme(value);
+    try {
+      if (window.localStorage) {
+        window.localStorage.setItem(UI_THEME_STORAGE_KEY, normalized);
+      }
+    } catch {
+      // ignore storage failures
+    }
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : {};
+    window.A8E_BOOT_OPTIONS = Object.assign({}, boot, { uiTheme: normalized });
+    return normalized;
+  }
+
   function resolveMemoryExpansionPreference() {
     const boot =
       window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
@@ -335,6 +402,9 @@
     }
     const videoStandardPreference = persistVideoStandardPreference(
       resolveVideoStandardPreference(),
+    );
+    const uiThemePreference = persistUiThemePreference(
+      resolveUiThemePreference(),
     );
     const memoryExpansionPreference = persistMemoryExpansionPreference(
       resolveMemoryExpansionPreference(),
@@ -673,6 +743,7 @@
     const btnSnapshots = document.getElementById("btnSnapshots");
     const videoStandardSelect = document.getElementById("videoStandardSelect");
     const memoryExpansionSelect = document.getElementById("memoryExpansionSelect");
+    const uiThemeSelect = document.getElementById("uiThemeSelect");
     const layoutSchemeButtons = Array.from(
       document.querySelectorAll("[data-layout-scheme]"),
     );
@@ -1333,6 +1404,14 @@
         if (app && typeof app.reset === "function") {
           app.reset({ memoryExpansion: next });
         }
+      });
+    }
+
+    if (uiThemeSelect) {
+      uiThemeSelect.value = uiThemePreference;
+      uiThemeSelect.addEventListener("change", function () {
+        const next = persistUiThemePreference(uiThemeSelect.value);
+        uiThemeSelect.value = next;
       });
     }
 
@@ -2365,23 +2444,9 @@
     }
 
     function updateStatus() {
-      // Update OS ROM status icon
-      if (app.hasOsRom()) {
-        romOsStatus.classList.remove("fa-circle-xmark");
-        romOsStatus.classList.add("fa-circle-check");
-      } else {
-        romOsStatus.classList.remove("fa-circle-check");
-        romOsStatus.classList.add("fa-circle-xmark");
-      }
-
-      // Update BASIC ROM status icon
-      if (app.hasBasicRom()) {
-        romBasicStatus.classList.remove("fa-circle-xmark");
-        romBasicStatus.classList.add("fa-circle-check");
-      } else {
-        romBasicStatus.classList.remove("fa-circle-check");
-        romBasicStatus.classList.add("fa-circle-xmark");
-      }
+      // Update OS and BASIC ROM status LEDs.
+      romOsStatus.classList.toggle("loaded", app.hasOsRom());
+      romBasicStatus.classList.toggle("loaded", app.hasBasicRom());
       updateRomStatusTitle(
         romOsStatus,
         "Atari OS ROM",
