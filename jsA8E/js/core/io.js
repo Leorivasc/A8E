@@ -95,6 +95,9 @@
     const pokeySioCommandLineChanged = cfg.pokeySioCommandLineChanged;
     const pokeyPotUpdate = cfg.pokeyPotUpdate;
     const pokeyPotReadValue = cfg.pokeyPotReadValue;
+    const vbxeAccess = cfg.vbxeAccess;
+    const vbxeSoftReset = cfg.vbxeSoftReset;
+    const vbxeMemacAddress = cfg.vbxeMemacAddress;
     const TRIG_REGS = [
       IO_GRAFP3_TRIG0,
       IO_GRAFM_TRIG1,
@@ -436,6 +439,30 @@
       const ram = ctx.ram;
       const sram = ctx.sram;
       const io = ctx.ioData;
+
+      if (
+        value != null &&
+        io && io.vbxe && io.vbxe.enabled &&
+        addr >= 0xd080 && addr <= 0xd0ff &&
+        vbxeSoftReset
+      ) {
+        vbxeSoftReset(io.vbxe);
+      }
+      if (io && io.vbxe && io.vbxe.enabled && vbxeAccess) {
+        const vbxeValue = vbxeAccess(io.vbxe, addr, value);
+        if (vbxeValue !== null && vbxeValue !== undefined) {
+          if (value != null && addr >= io.vbxe.page + 0x1d && addr <= io.vbxe.page + 0x1f &&
+              typeof io.vbxeMapSync === "function") io.vbxeMapSync(ctx);
+          return vbxeValue & 0xff;
+        }
+      }
+      if (io && io.vbxe && io.vbxe.enabled && vbxeMemacAddress) {
+        const localAddress = vbxeMemacAddress(io.vbxe, addr, false);
+        if (localAddress >= 0) {
+          if (value != null) io.vbxe.vram[localAddress] = value & 0xff;
+          return io.vbxe.vram[localAddress] & 0xff;
+        }
+      }
 
       if (value != null) {
         const v = value & 0xff;

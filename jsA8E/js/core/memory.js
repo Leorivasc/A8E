@@ -1243,6 +1243,12 @@
       const getTurbo = opts.getTurbo;
       const pokeyAudioResetState = opts.pokeyAudioResetState;
       const pokeyAudioSetTurbo = opts.pokeyAudioSetTurbo;
+      const createVbxeState =
+        typeof opts.createVbxeState === "function" ? opts.createVbxeState : null;
+      const cloneVbxeState =
+        typeof opts.cloneVbxeState === "function" ? opts.cloneVbxeState : null;
+      const restoreVbxeState =
+        typeof opts.restoreVbxeState === "function" ? opts.restoreVbxeState : null;
       const diskMediaChangeObserver =
         typeof opts.onDiskMediaChanged === "function"
           ? opts.onDiskMediaChanged
@@ -1250,6 +1256,12 @@
       const diskActivityObserver =
         typeof opts.onDiskActivity === "function" ? opts.onDiskActivity : null;
       let memoryWriteHook = null;
+
+      function attachVbxeState(io) {
+        if (io && createVbxeState) io.vbxe = createVbxeState();
+        if (io) io.vbxeMapSync = setupMemoryMap;
+        return io;
+      }
       machine.memoryExpansion = createMemoryExpansionState(
         opts && opts.memoryExpansion !== undefined ? opts.memoryExpansion : "none",
       );
@@ -1520,6 +1532,18 @@
       function readExpansionMemoryByte(ctx, address, isAnticRead) {
         const addr = address & 0xffff;
         const mem = getMemoryExpansionState();
+        const vbxe = ctx.ioData && ctx.ioData.vbxe;
+        const vbxeLocalAddress =
+          isAnticRead && vbxe && vbxe.enabled &&
+          typeof window.A8EVbxe !== "undefined" && window.A8EVbxe.memacAddress
+            ? window.A8EVbxe.memacAddress(vbxe, addr, true)
+            : -1;
+        const u1mbWindowOwnsAddress =
+          mem.ultimate1mb && addr >= 0x4000 && addr < 0x8000 &&
+          (mem.sharedWindow ? mem.cpuWindowEnabled : mem.anticWindowEnabled);
+        if (vbxeLocalAddress >= 0 && !u1mbWindowOwnsAddress) {
+          return vbxe.vram[vbxeLocalAddress] & 0xff;
+        }
         if (!mem.enabled || addr < 0x4000 || addr > 0x7fff) {
           return ctx.ram[addr] & 0xff;
         }
@@ -1853,7 +1877,7 @@
         machine.ctx.nmiPending = 0;
         machine.ctx.nmiActive = 0;
         machine.ctx.irqPending = 0;
-        machine.ctx.ioData = makeIoData(video);
+        machine.ctx.ioData = attachVbxeState(makeIoData(video));
         machine.ctx.ioData.optionOnStart = !!getOptionOnStart();
         machine.ctx.ioData.sioTurbo = !!getSioTurbo();
         machine.ctx.ioData.piaSetControlLine = piaSetControlLine;
@@ -2240,12 +2264,13 @@
           optionOnStart: !!io.optionOnStart,
           sioTurbo: !!io.sioTurbo,
           memoryExpansion: cloneMemoryExpansionState(io.memoryExpansion),
+          vbxe: cloneVbxeState && io.vbxe ? cloneVbxeState(io.vbxe) : null,
         };
       }
 
       function createIoDataFromSnapshot(snapshot) {
         const state = snapshot && typeof snapshot === "object" ? snapshot : {};
-        const io = makeIoData(video);
+        const io = attachVbxeState(makeIoData(video));
         if (state.video && typeof state.video === "object") {
           io.video.currentDisplayLine = state.video.currentDisplayLine | 0;
         }
@@ -2399,6 +2424,10 @@
         io.optionOnStart = !!state.optionOnStart;
         io.sioTurbo = !!state.sioTurbo;
         io.memoryExpansion = cloneMemoryExpansionState(state.memoryExpansion);
+        if (state.vbxe && restoreVbxeState) {
+          io.vbxe = restoreVbxeState(state.vbxe);
+        }
+        io.vbxeMapSync = setupMemoryMap;
         return io;
       }
 

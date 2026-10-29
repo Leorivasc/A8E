@@ -6,6 +6,7 @@
     const CYCLE_NEVER = cfg.CYCLE_NEVER;
     const CYCLES_PER_LINE = cfg.CYCLES_PER_LINE;
     const IO_INIT_VALUES = cfg.IO_INIT_VALUES;
+    const vbxeMemacAddress = cfg.vbxeMemacAddress;
 
     function makeIoData(video) {
       const potValues = new Uint8Array(8);
@@ -249,6 +250,25 @@
       if (!ioAccess) throw new Error("A8EState: missing ioAccess");
       for (let i = 0; i < IO_INIT_VALUES.length; i++) {
         CPU.setIo(ctx, IO_INIT_VALUES[i].addr, ioAccess);
+      }
+      const vbxe = ctx.ioData && ctx.ioData.vbxe;
+      if (vbxe && vbxe.enabled) {
+        for (let address = vbxe.page; address < vbxe.page + 0x20; address++) {
+          CPU.setIo(ctx, address, ioAccess);
+        }
+        if (vbxeMemacAddress) {
+          const ramAccess = ctx.accessFunctionList[0];
+          for (let address = 0; address < 0xd000; address++) {
+            if (vbxeMemacAddress(vbxe, address, false) >= 0 &&
+                ctx.accessFunctionList[address] === ramAccess) {
+              const expansion = ctx.ioData.memoryExpansion;
+              if (!(expansion && expansion.ultimate1mb && expansion.cpuWindowEnabled &&
+                    address >= 0x4000 && address < 0x8000)) {
+                CPU.setIo(ctx, address, ioAccess);
+              }
+            }
+          }
+        }
       }
     }
 

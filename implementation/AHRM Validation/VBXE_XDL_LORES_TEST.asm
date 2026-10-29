@@ -1,0 +1,66 @@
+; FX 1.26 lores XDL overlay: solid green 160x192 field, expanded to 320 pixels.
+.ORG $2000
+NMIEN=$D40E
+MEMACB=$D65D
+VIDEO=$D640
+XDL0=$D641
+XDL1=$D642
+XDL2=$D643
+CSEL=$D644
+PSEL=$D645
+CR=$D646
+CG=$D647
+CB=$D648
+START:
+ LDA #0
+ STA NMIEN
+ LDA #$C0
+ STA MEMACB
+ LDA #1
+ LDX #0
+FILL:
+ STA $4000,X
+ INX
+ CPX #160
+ BNE FILL
+ ; Palette 1, color 1 = green.
+ LDA #1
+ STA CSEL
+ STA PSEL
+ LDA #0
+ STA CR
+ LDA #$FE
+ STA CG
+ LDA #0
+ STA CB
+ ; XDL local $1000: graphics + repeat + address, lores + OvMisc.
+ LDA #$62
+ STA $5000
+ LDA #$28
+ STA $5001
+ LDA #$BF
+ STA $5002
+ LDA #0
+ STA $5003
+ STA $5004
+ STA $5005
+ STA $5006
+ STA $5007
+ LDA #$14
+ STA $5008
+ LDA #$FF
+ STA $5009
+ LDA #0
+ STA $500A
+ LDA #$80
+ STA $500B
+ LDA #0
+ STA XDL0
+ LDA #$10
+ STA XDL1
+ LDA #0
+ STA XDL2
+ LDA #1
+ STA VIDEO
+LOOP: JMP LOOP
+.RUN START

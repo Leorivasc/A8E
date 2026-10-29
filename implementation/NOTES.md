@@ -1,5 +1,127 @@
 # NOTES.md
 
+- 2026-10-29: started the optional jsA8E VBXE device foundation. The new
+  `js/core/vbxe.js` models a disabled-by-default FX 1.26 board with 512 KiB
+  local VRAM, `$D640` register decoding, palette/write latches, VSync-latched
+  video/XDL controls, soft reset, MEMAC register state and CPU/ANTIC address
+  resolution, CPU RAM-window mapping, ANTIC DMA reads (with Ultimate1MB
+  precedence), and snapshot copying.
+  I/O only maps the VBXE page when enabled, so ordinary machines retain their
+  prior decode. The XDL renderer, MEMAC mapping, compositing, and blitter are
+  intentionally not claimed yet. The focused device-state test and existing
+  snapshot, ANTIC, machine-matrix, and headless automation regressions pass.
+
+- 2026-10-29: added `VBXE_MEMAC_B_TEST.asm` and its reproducible XEX artifact
+  as the first external differential diagnostic. With an FX 1.26 VBXE at
+  `$D640`, it verifies the revision registers, enables CPU+ANTIC MEMAC B bank
+  0 at `$4000-$7FFF`, tests a CPU VRAM read/write, and displays an ANTIC text
+  screen sourced from that VRAM. It is intended for Altirra comparison before
+  extending the device beyond the bus-level implementation.
+
+- 2026-10-29: corrected the first Altirra differential diagnostic after an
+  external run: Altirra's `$D600` device option places VBXE registers at
+  `$D640` (and `$D700` at `$D740`), while valid FX 1.26 cores can differ in
+  the non-major bits of `CORE_REVISION`. The XEX now probes both register
+  pages, accepts the defined FX major/minor revision fields, and writes proper
+  Atari screen-code spaces instead of displaying `@` characters.
+
+- 2026-10-29: Altirra ran `VBXE_MEMAC_B_TEST.XEX` with VBXE FX 1.26 in its
+  `$D600` device range and reported all four expected PASS lines. This is the
+  first external differential result: CPU and ANTIC both accessed MEMAC B
+  bank 0 successfully. Added a persisted, disabled-by-default VBXE selector
+  to jsA8E for FX 1.26 at `$D600`/`$D700`; changes rebuild the machine so the
+  MEMAC decode cannot be changed on a live map.
+
+- 2026-10-29: added `VBXE_MEMAC_A_TEST.asm` and its reproducible XEX artifact
+  for the next external differential case. It disables MEMAC B, configures
+  MEMAC A as the smallest 4 KiB `$6000-$6FFF` CPU+ANTIC window into local bank
+  0, then proves CPU read/write and ANTIC display-list fetching through it.
+
+- 2026-10-29: Altirra and jsA8E both ran `VBXE_MEMAC_A_TEST.XEX` with all
+  expected PASS lines, externally validating the 4 KiB `$6000-$6FFF` MEMAC A
+  window for CPU and ANTIC. Added the next differential diagnostic,
+  `VBXE_MEMAC_PRIORITY_TEST`: it overlays MEMAC A bank 0 onto MEMAC B bank 1
+  at `$6000`, verifies that disabling A exposes B's sentinel again, then
+  verifies ANTIC still fetches from the higher-priority A window.
+
+- 2026-10-29: began the XDL milestone with snapshot-safe frame state and a
+  tested per-line decoder for overlay graphics/text enable, repeat, overlay
+  address and stride, optional block skipping, and XDL termination. It does
+  not composite pixels yet; direct VBXE RGB output is the next renderer step.
+
+- 2026-10-29: added a separate 32-bit RGB plane to the software video path
+  for VBXE composition. It is copied at presentation time and takes priority
+  only when nonzero, leaving normal indexed Atari rendering unchanged. XDL
+  drawing will populate this plane rather than mutate the Atari palette.
+
+- 2026-10-29: connected the first visible XDL subset: standard-resolution,
+  normal-width graphics now draws 320 palette-1 RGB pixels per decoded XDL
+  line into the separate VBXE plane after ANTIC/GTIA. Other widths, modes,
+  transparency, and priority are intentionally pending comparison.
+
+- 2026-10-29: Altirra comparison of the first XDL XEX found the diagnostic's
+  repeated overlay row needed a zero stride; after correction it displays the
+  expected uniform red field. A jsA8E WebGL texture-allocation ordering bug
+  was also fixed: creating the VBXE RGB texture no longer redirects the Atari
+  palette upload into that texture.
+
+- 2026-10-29: made WebGL shader-source loads bypass the HTTP cache so a
+  renderer change (including the new VBXE RGB sampler) cannot silently run
+  against a stale fragment shader during visual differential testing.
+
+- 2026-10-29: the worker renderer remains disabled only while VBXE is active:
+  its frame path still loses the separate VBXE RGB plane. The main-thread
+  WebGL renderer remains enabled, preserving the original CRT postprocess
+  while XDL output is validated.
+
+- 2026-10-29: external visual validation confirmed jsA8E now matches Altirra
+  for standard and lores XDL field geometry, palette RGB output, and stable
+  frame presentation. The original WebGL CRT barrel/scanline effect also
+  works with VBXE after changing the RGB texture upload from `Uint32Array` to
+  an explicit byte view. Main-thread WebGL remains the active VBXE renderer;
+  worker VBXE presentation remains deferred.
+
+- 2026-10-29: jsA8E now visually matches Altirra for the first XDL
+  standard-resolution test (a uniform 320x192 red field). VBXE currently
+  selects the software renderer while active, isolating the validated RGB
+  plane from the still-in-progress WebGL path. Added the corresponding lores
+  160-pixel renderer path with two-pixel horizontal expansion.
+
+- 2026-10-29: added tested color-0 and color-15 overlay transparency for the
+  standard/lores renderer subset, gated by the VSync-latched VIDEO_CONTROL
+  transparency field. Without that field, zero remains an opaque black pixel.
+
+- 2026-10-29: the XDL graphics descriptor now retains `OvMisc` overlay
+  palette and priority fields, and the separate VBXE RGB plane is cleared at
+  each frame boundary so transparent pixels cannot leave stale overlay data.
+
+- 2026-10-29: added `VBXE_XDL_LORES_TEST.asm`, the next Altirra/jsA8E visual
+  differential diagnostic. It produces a uniform 160x192 green lores overlay
+  (doubled horizontally to the normal 320-pixel output width).
+
+- 2026-10-29: rejected the experimental wider VBXE presentation viewport
+  after external visual testing: it displaced the normal Atari raster without
+  changing the overlay's relative width. Overlay geometry must instead be
+  corrected inside the VBXE compositor; the standard 336-pixel viewport was
+  restored.
+
+- 2026-10-29: adjusted normal/lores VBXE overlay geometry inside the
+  compositor from 320 to 256 presented pixels (4:5), centered at x=128. This
+  matches the observed Altirra ratio of a normal-width 320-pixel VBXE overlay
+  within the wider Atari raster while preserving jsA8E's standard viewport.
+
+- 2026-10-29: Altirra confirmed the lores XDL diagnostic as a centered,
+  top-aligned 320x192 green field over the Atari background. jsA8E's visible
+  flicker was caused by clearing the whole VBXE plane at VSync before its
+  scanlines were rebuilt; the plane now clears each composed overlay line.
+
+- 2026-10-29: added `implementation/VBXE.md`, the pre-implementation design
+  for an optional VideoBoard XE device. It defines behavior-level rather than
+  gate-level FPGA emulation, an FX 1.26 / `$D640` first target, 512 KiB VRAM,
+  MEMAC and XDL integration, staged compositor/blitter work, snapshot and
+  reset expectations, and an Altirra-based differential validation plan. No
+  production emulation behavior changed.
+
 - 2026-10-26: added the first jsA8E interface theme system on the `Themes`
   branch. The browser UI now provides persistent presets inspired by Atari
   400/800, 800XL, 65XE/130XE, XEGS, ST, and 2600 hardware, plus the existing

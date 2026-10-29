@@ -53,6 +53,35 @@
     return null;
   }
 
+  function normalizeVbxePreference(value) {
+    if (value && typeof value === "object") {
+      if (value.enabled === false) return "off";
+      if (value.enabled !== true && value.profile !== "fx1.26") return "off";
+      return (value.page | 0) === 0xd740 ? "fx1.26-d700" : "fx1.26-d600";
+    }
+    const text = String(value === undefined || value === null ? "" : value)
+      .trim()
+      .toLowerCase();
+    if (text === "fx1.26-d700" || text === "fx126-d700" || text === "d700") {
+      return "fx1.26-d700";
+    }
+    if (text === "fx1.26" || text === "fx126" || text === "fx1.26-d600" ||
+        text === "fx126-d600" || text === "d600") {
+      return "fx1.26-d600";
+    }
+    return "off";
+  }
+
+  function vbxeConfigForPreference(value) {
+    const preference = normalizeVbxePreference(value);
+    if (preference === "off") return { enabled: false, profile: "off", page: 0xd640 };
+    return {
+      enabled: true,
+      profile: "fx1.26",
+      page: preference === "fx1.26-d700" ? 0xd740 : 0xd640,
+    };
+  }
+
   function resolveVideoStandardPreference() {
     const boot =
       window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
@@ -234,6 +263,53 @@
     return normalized;
   }
 
+  function resolveVbxePreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    if (boot && boot.vbxe !== undefined) return normalizeVbxePreference(boot.vbxe);
+    try {
+      if (window.localStorage) {
+        const stored = window.localStorage.getItem("a8e_vbxe");
+        if (stored !== null) return normalizeVbxePreference(stored);
+      }
+    } catch {
+      // ignore storage failures
+    }
+    if (
+      window.location &&
+      typeof window.location.search === "string" &&
+      typeof window.URLSearchParams === "function"
+    ) {
+      try {
+        const params = new window.URLSearchParams(window.location.search);
+        const query = params.get("a8e_vbxe") || params.get("vbxe");
+        if (query !== null) return normalizeVbxePreference(query);
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+    return "off";
+  }
+
+  function persistVbxePreference(value) {
+    const normalized = normalizeVbxePreference(value);
+    try {
+      if (window.localStorage) window.localStorage.setItem("a8e_vbxe", normalized);
+    } catch {
+      // ignore storage failures
+    }
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : {};
+    window.A8E_BOOT_OPTIONS = Object.assign({}, boot, {
+      vbxe: vbxeConfigForPreference(normalized),
+    });
+    return normalized;
+  }
+
   const LAYOUT_SCHEME_STORAGE_KEY = "a8e_layout_scheme";
   const LAYOUT_COLUMN_RATIO_STORAGE_KEY = "a8e_layout_column_ratio";
   const LAYOUT_SCHEMES = Object.freeze({
@@ -409,6 +485,7 @@
     const memoryExpansionPreference = persistMemoryExpansionPreference(
       resolveMemoryExpansionPreference(),
     );
+    const vbxePreference = persistVbxePreference(resolveVbxePreference());
     const layoutSchemePreference = persistLayoutSchemePreference(
       resolveLayoutSchemePreference(),
     );
@@ -436,7 +513,7 @@
     let romNoticeDismissed = false;
     let primaryDriveQueue = Promise.resolve();
     let standbyXexPromise = null;
-    const useWorkerApp =
+    const useWorkerApp = vbxePreference === "off" &&
       window.A8EApp &&
       ((typeof window.A8EApp.shouldUseWorker === "function" &&
         window.A8EApp.shouldUseWorker({
@@ -688,7 +765,7 @@
         false,
       );
     } else {
-      canvas.classList.remove("crtEnabled");
+      canvas.classList.add("crtEnabled");
       ctx2d = canvas.getContext("2d", { alpha: false });
     }
 
@@ -743,6 +820,7 @@
     const btnSnapshots = document.getElementById("btnSnapshots");
     const videoStandardSelect = document.getElementById("videoStandardSelect");
     const memoryExpansionSelect = document.getElementById("memoryExpansionSelect");
+    const vbxeSelect = document.getElementById("vbxeSelect");
     const uiThemeSelect = document.getElementById("uiThemeSelect");
     const layoutSchemeButtons = Array.from(
       document.querySelectorAll("[data-layout-scheme]"),
@@ -789,6 +867,16 @@
           : memoryExpansionPreference,
       ) || "130xe-128k";
       if (memoryExpansionSelect.value !== next) memoryExpansionSelect.value = next;
+    }
+
+    function syncVbxeUi() {
+      if (!vbxeSelect) return;
+      const next = normalizeVbxePreference(
+        app && typeof app.getVbxeConfig === "function"
+          ? app.getVbxeConfig()
+          : vbxePreference,
+      );
+      if (vbxeSelect.value !== next) vbxeSelect.value = next;
     }
 
     function isMobileViewport() {
@@ -1407,6 +1495,17 @@
       });
     }
 
+    if (vbxeSelect) {
+      vbxeSelect.value = vbxePreference;
+      vbxeSelect.addEventListener("change", function () {
+        const next = persistVbxePreference(vbxeSelect.value);
+        vbxeSelect.value = next;
+        if (app && typeof app.reset === "function") {
+          app.reset({ vbxe: vbxeConfigForPreference(next) });
+        }
+      });
+    }
+
     if (uiThemeSelect) {
       uiThemeSelect.value = uiThemePreference;
       uiThemeSelect.addEventListener("change", function () {
@@ -1451,6 +1550,7 @@
         keyboardMappingMode: getKeyboardMappingModeFromUi(),
         videoStandard: videoStandardPreference,
         memoryExpansion: memoryExpansionPreference,
+        vbxe: vbxeConfigForPreference(vbxePreference),
         pokeyTrace: pokeyTracePreference,
       }, workerPreference));
       resizeCrtCanvas();
@@ -1469,6 +1569,7 @@
           keyboardMappingMode: getKeyboardMappingModeFromUi(),
           videoStandard: videoStandardPreference,
           memoryExpansion: memoryExpansionPreference,
+          vbxe: vbxeConfigForPreference(vbxePreference),
           pokeyTrace: pokeyTracePreference,
         }, workerPreference));
       } catch (e) {
@@ -1504,6 +1605,7 @@
               keyboardMappingMode: getKeyboardMappingModeFromUi(),
               videoStandard: videoStandardPreference,
               memoryExpansion: memoryExpansionPreference,
+              vbxe: vbxeConfigForPreference(vbxePreference),
               pokeyTrace: pokeyTracePreference,
             }, workerPreference));
             resizeCrtCanvas();
@@ -1605,6 +1707,7 @@
 
     syncVideoStandardUi();
     syncMemoryExpansionUi();
+    syncVbxeUi();
 
     function focusCanvas(preventScroll) {
       if (!canvas || typeof canvas.focus !== "function") return;

@@ -36,6 +36,8 @@
         priority: new Uint16Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
         presentPixels: new Uint8Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
         presentPriority: new Uint16Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
+        vbxeRgb: new Uint32Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
+        presentVbxeRgb: new Uint32Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
         playfieldScratchPixels: new Uint8Array(
           PLAYFIELD_SCRATCH_WIDTH * LINES_PER_SCREEN_PAL,
         ),
@@ -45,6 +47,7 @@
         playfieldScratchWidth: PLAYFIELD_SCRATCH_WIDTH,
         paletteRgb: palette,
         paletteRgba32: buildPaletteRgba32(palette),
+        crtEnabled: true,
       };
     }
 
@@ -56,13 +59,22 @@
       );
       const pal32 = video.paletteRgba32;
       const srcPixels = video.presentPixels || video.pixels;
+      const vbxeRgb = video.presentVbxeRgb || video.vbxeRgb;
 
       let dstIdx = 0;
       for (let y = 0; y < VIEW_H; y++) {
         let src = (VIEW_Y + y) * PIXELS_PER_LINE + VIEW_X;
         const srcEnd = src + VIEW_W;
         while (src < srcEnd) {
-          dst32[dstIdx++] = pal32[srcPixels[src] & 0xff];
+          let pixel = vbxeRgb && vbxeRgb[src]
+            ? vbxeRgb[src]
+            : pal32[srcPixels[src] & 0xff];
+          if (video.crtEnabled && (y & 1) && IS_LITTLE_ENDIAN) {
+            pixel = ((pixel & 0xff000000) | (((pixel & 0xff) * 0.78) & 0xff) |
+              (((((pixel >>> 8) & 0xff) * 0.78) & 0xff) << 8) |
+              (((((pixel >>> 16) & 0xff) * 0.78) & 0xff) << 16)) >>> 0;
+          }
+          dst32[dstIdx++] = pixel;
           src++;
         }
       }

@@ -57,6 +57,9 @@
       cfg.pokeySerialOutputClockTimerExpired;
     const pokeyApplyTimerReset = cfg.pokeyApplyTimerReset;
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
+    const vbxeVerticalSync = cfg.vbxeVerticalSync;
+    const vbxeNextXdlLine = cfg.vbxeNextXdlLine;
+    const vbxeRenderXdlLine = cfg.vbxeRenderXdlLine;
     const PRIO_BKG = cfg.PRIO_BKG;
     const PRIO_PF0 = cfg.PRIO_PF0;
     const PRIO_PF1 = cfg.PRIO_PF1;
@@ -395,6 +398,7 @@
 
       if (io.video.currentDisplayLine >= LINES_PER_SCREEN_PAL) {
         io.video.currentDisplayLine = 0;
+        if (io.vbxe && vbxeVerticalSync) vbxeVerticalSync(io.vbxe);
         io.nextDisplayListLine = 8;
         io.currentDisplayListCommand = 0;
         io.modeLineRowCounter = 0;
@@ -444,6 +448,10 @@
         try {
           drawLine(ctx);
           if (!io.drawLine.playerMissileInterleaved) drawPlayerMissiles(ctx);
+          if (io.vbxe && vbxeNextXdlLine) {
+            const xdlLine = vbxeNextXdlLine(io.vbxe, io.video.currentDisplayLine);
+            if (xdlLine && vbxeRenderXdlLine) vbxeRenderXdlLine(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
+          }
           evaluateModeLineEnd(ctx);
           io.pmgPhantomMissileDmaPending =
             (sram[IO_DMACTL] & 0x2c) === 0x20 &&

@@ -268,6 +268,14 @@
                 <option value="ultimate1mb">Ultimate1MB (1MB) (WIP)</option>
               </select>
             </label>
+            <label class="toolbarSelectWrap" title="Enable an optional VideoBoard XE profile. The emulator restarts so the VBXE memory map is applied cleanly.">
+              <span>VBXE</span>
+              <select id="vbxeSelect" class="toolbarSelect toolbarSelectWide" aria-label="VideoBoard XE">
+                <option value="off" selected>Off</option>
+                <option value="fx1.26-d600">FX 1.26 ($D600)</option>
+                <option value="fx1.26-d700">FX 1.26 ($D700)</option>
+              </select>
+            </label>
             <label class="toolbarSelectWrap" title="Choose the interface colors inspired by Atari hardware models.">
               <span>Theme</span>
               <select id="uiThemeSelect" class="toolbarSelect toolbarSelectWide" aria-label="Interface theme">
@@ -851,6 +859,7 @@
     <script src="js/core/keys.js"></script>
     <script src="js/core/input.js"></script>
     <script src="js/core/hw.js"></script>
+    <script src="js/core/vbxe.js"></script>
     <script src="js/core/state.js"></script>
     <script src="js/core/snapshot_codec.js"></script>
     <script src="js/core/memory.js"></script>

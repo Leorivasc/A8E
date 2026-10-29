@@ -149,6 +149,19 @@
     return null;
   }
 
+  function normalizeVbxeConfig(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const profile = String(
+      typeof value === "string" ? value : (source.profile || "off"),
+    ).trim().toLowerCase();
+    const enabled = profile === "fx1.26" || profile === "fx126" || source.enabled === true;
+    return {
+      enabled: enabled,
+      profile: enabled ? "fx1.26" : "off",
+      page: (source.page | 0) === 0xd740 ? 0xd740 : 0xd640,
+    };
+  }
+
   function getQueryWorkerPreference() {
     if (
       !window.location ||
@@ -1236,6 +1249,7 @@
       optionOnStart: false,
       videoStandard: videoStandard,
       memoryExpansion: normalizeMemoryExpansion(opts && opts.memoryExpansion) || "130xe-128k",
+      vbxe: normalizeVbxeConfig(opts && opts.vbxe),
     };
 
     function applyWorkerStateSnapshot(snapshot) {
@@ -1268,6 +1282,8 @@
           {state.videoStandard = normalizeVideoStandard(snapshot.config.videoStandard) || state.videoStandard;}
         if (typeof snapshot.config.memoryExpansion === "string")
           {state.memoryExpansion = normalizeMemoryExpansion(snapshot.config.memoryExpansion) || state.memoryExpansion;}
+        if (snapshot.config.vbxe !== undefined)
+          {state.vbxe = normalizeVbxeConfig(snapshot.config.vbxe);}
       }
       if (snapshot.debug) emitDebugState(snapshot.debug);
       syncReadyFlag();
@@ -1600,6 +1616,7 @@
         optionOnStart: !!opts.optionOnStart,
         videoStandard: videoStandard,
         memoryExpansion: state.memoryExpansion,
+        vbxe: state.vbxe,
         pokeyTrace: opts.pokeyTrace === true,
         keyboardMappingMode: keyboardMappingMode,
       },
@@ -1628,6 +1645,9 @@
           state.memoryExpansion =
             normalizeMemoryExpansion(options.memoryExpansion) || state.memoryExpansion;
         }
+        if (options && typeof options === "object" && options.vbxe !== undefined) {
+          state.vbxe = normalizeVbxeConfig(options.vbxe);
+        }
         return sendRequest("reset", options || null);
       },
       powerCycle: function (options) {
@@ -1635,6 +1655,9 @@
         if (options && typeof options === "object" && options.memoryExpansion !== undefined) {
           state.memoryExpansion =
             normalizeMemoryExpansion(options.memoryExpansion) || state.memoryExpansion;
+        }
+        if (options && typeof options === "object" && options.vbxe !== undefined) {
+          state.vbxe = normalizeVbxeConfig(options.vbxe);
         }
         return sendRequest("powerCycle", options || null);
       },
@@ -1675,6 +1698,9 @@
       },
       getMemoryExpansion: function () {
         return state.memoryExpansion;
+      },
+      getVbxeConfig: function () {
+        return Object.assign({}, state.vbxe);
       },
       setKeyboardMappingMode: function (mode) {
         keyboardMappingMode = mode === "original" ? "original" : "translated";
@@ -1975,6 +2001,8 @@
       {app.getVideoStandard = function () { return normalizeVideoStandard(legacyOpts.videoStandard) || "ntsc"; };}
     if (app && typeof app.getMemoryExpansion !== "function")
       {app.getMemoryExpansion = function () { return normalizeMemoryExpansion(legacyOpts.memoryExpansion) || "130xe-128k"; };}
+    if (app && typeof app.getVbxeConfig !== "function")
+      {app.getVbxeConfig = function () { return normalizeVbxeConfig(legacyOpts.vbxe); };}
     if (app && typeof app.powerCycle !== "function")
       {app.powerCycle = function (options) {
         const result = app.reset(options);
