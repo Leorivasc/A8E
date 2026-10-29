@@ -89,6 +89,13 @@ state.vram[0x1000] = 0;
 video.vbxeRgb[10 * 456 + 128] = 0x12345678;
 vbxe.renderXdlLine(state, video, 10, { mode: "standard", address: 0x1000 });
 assert.equal(video.vbxeRgb[10 * 456 + 128], 0);
+video.priority = new Uint16Array(456 * 16);
+state.vram[0x1001] = 2;
+video.priority[11 * 456 + 128] = 0x01;
+vbxe.renderXdlLine(state, video, 11, { mode: "standard", address: 0x1001, priority: 0x00 });
+assert.equal(video.vbxeRgb[11 * 456 + 128], 0);
+vbxe.renderXdlLine(state, video, 11, { mode: "standard", address: 0x1001, priority: 0x10 });
+assert.equal(video.vbxeRgb[11 * 456 + 128], 0xff563412);
 
 vbxe.softReset(state);
 assert.equal(state.videoControlPending, 0);

@@ -81,6 +81,16 @@
   an explicit byte view. Main-thread WebGL remains the active VBXE renderer;
   worker VBXE presentation remains deferred.
 
+- 2026-10-29: added the initial FX 1.26 overlay-priority compositor for the
+  standard/lores subset. The XDL priority mask now gates background, PF0-3,
+  and P0-3 visibility against the existing Atari per-pixel priority plane;
+  focused tests cover priority blocking and allowing over PF0.
+
+- 2026-10-29: made the XDL priority diagnostic deterministic by clearing its
+  local VRAM row before use. Repeated Altirra runs show a valid 160-byte lores
+  row fills the full normal overlay width; jsA8E therefore scales lores 160 to
+  the same 256-pixel presentation aperture as standard graphics.
+
 - 2026-10-29: jsA8E now visually matches Altirra for the first XDL
   standard-resolution test (a uniform 320x192 red field). VBXE currently
   selects the software renderer while active, isolating the validated RGB

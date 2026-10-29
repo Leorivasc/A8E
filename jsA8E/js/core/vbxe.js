@@ -122,6 +122,7 @@
     const base = (scanline | 0) * 456 + 128;
     video.vbxeRgb.fill(0, base, base + 256);
     const pixelCount = line.mode === "lores" ? 160 : 320;
+    const priorityMask = line.priority === undefined ? 0xff : line.priority;
     for (let x = 0; x < 256; x++) {
       const sourceX = Math.floor(x * pixelCount / 256);
       const color = state.vram[(line.address + sourceX) & 0x7ffff] & 0xff;
@@ -130,7 +131,17 @@
       const p = ((((line.overlayPalette === undefined ? 1 : line.overlayPalette) * 256) + color) * 3) | 0;
       const rgb = ((255 << 24) | (state.palette[p + 2] << 16) |
         (state.palette[p + 1] << 8) | state.palette[p]) >>> 0;
-      video.vbxeRgb[base + x] = rgb;
+      const atariPriority = video.priority ? video.priority[base + x] : 0;
+      const wins = atariPriority === 0
+        ? (priorityMask & 0x80)
+        : ((atariPriority & 0x01) && (priorityMask & 0x10)) ||
+          ((atariPriority & 0x02) && (priorityMask & 0x20)) ||
+          ((atariPriority & 0x0c) && (priorityMask & 0x40)) ||
+          ((atariPriority & 0x10) && (priorityMask & 0x01)) ||
+          ((atariPriority & 0x20) && (priorityMask & 0x02)) ||
+          ((atariPriority & 0x40) && (priorityMask & 0x04)) ||
+          ((atariPriority & 0x80) && (priorityMask & 0x08));
+      if (wins) video.vbxeRgb[base + x] = rgb;
     }
   }
 
