@@ -1050,10 +1050,13 @@
       memoryHardReset(options || null);
       video.pixels.fill(0);
       video.priority.fill(0);
+      if (video.vbxeCollisionPriority) video.vbxeCollisionPriority.fill(0);
       if (video.vbxeRgb) video.vbxeRgb.fill(0);
       if (video.presentPixels) video.presentPixels.fill(0);
       if (video.presentPriority) video.presentPriority.fill(0);
       if (video.presentVbxeRgb) video.presentVbxeRgb.fill(0);
+      if (video.vbxeHiresRgb) video.vbxeHiresRgb.fill(0);
+      if (video.presentVbxeHiresRgb) video.presentVbxeHiresRgb.fill(0);
       debugRuntime.resetExecutionState();
       if (hDevice) {
         hDevice.resetChannels();
@@ -1131,6 +1134,10 @@
       }
       if (video.presentVbxeRgb && video.vbxeRgb && video.presentVbxeRgb !== video.vbxeRgb) {
         video.presentVbxeRgb.set(video.vbxeRgb);
+      }
+      if (video.presentVbxeHiresRgb && video.vbxeHiresRgb &&
+          video.presentVbxeHiresRgb !== video.vbxeHiresRgb) {
+        video.presentVbxeHiresRgb.set(video.vbxeHiresRgb);
       }
     }
 
@@ -1463,10 +1470,13 @@
       memoryPowerCycle(options || null);
       video.pixels.fill(0);
       video.priority.fill(0);
+      if (video.vbxeCollisionPriority) video.vbxeCollisionPriority.fill(0);
       if (video.vbxeRgb) video.vbxeRgb.fill(0);
       if (video.presentPixels) video.presentPixels.fill(0);
       if (video.presentPriority) video.presentPriority.fill(0);
       if (video.presentVbxeRgb) video.presentVbxeRgb.fill(0);
+      if (video.vbxeHiresRgb) video.vbxeHiresRgb.fill(0);
+      if (video.presentVbxeHiresRgb) video.presentVbxeHiresRgb.fill(0);
       publishVideoFrame();
       if (!skipRendering) paint();
       updateDebug("powercycle");

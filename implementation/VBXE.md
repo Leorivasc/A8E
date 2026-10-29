@@ -1,22 +1,43 @@
-# VBXE — design and implementation plan
+# VBXE — design and implementation status
 
 > Hardware reference: use [AHRM chapter 12.4, VideoBoard XE](/AHRM/12.%20Internal%20devices/4.%20VideoBoard%20XE.md) before changing this design or implementing VBXE behavior.
 
 ## Status
 
-The JavaScript core has the initial optional device shell: FX 1.26 revision
-reads, `$D640` register decoding, 512 KiB VRAM, palette/write latches,
-vertical-sync latching, soft-reset detection, MEMAC state, and snapshot
-persistence. MEMAC CPU accesses only replace RAM-mapped addresses; ANTIC DMA
-reads use VRAM when their separate enable bit is set, except where Ultimate1MB
-owns its extended-memory window. It does not yet parse an XDL, render an
-overlay, or execute blits. The native core remains planned.
+The JavaScript core implements an optional FX 1.26 device with revision reads,
+`$D640`/`$D740` register decoding, 512 KiB VRAM, palette/write latches,
+vertical-sync latching, soft reset, MEMAC state, and snapshot persistence.
+MEMAC CPU accesses only replace RAM-mapped addresses; ANTIC DMA reads use VRAM
+when their separate enable bit is set, except where Ultimate1MB owns its
+extended-memory window.
 
-The initial compatibility target is the VBXE FX 1.26 profile in the `$D600`
-device range, whose register bank is at `$D640-$D65F`. The device must be
-disabled by default. The `$D700` device range similarly exposes its register
-bank at `$D740-$D75F`; it and the FX 1.24 profile are compatibility work that
-must be selectable without duplicating the device implementation.
+The first XDL milestone is also implemented. At vertical sync the core latches
+the video control and XDL address, parses the per-line descriptor subset used
+by the diagnostics, and composes standard, lores, and hires graphics overlays into a
+separate RGB plane. The implemented compositor supports palette selection,
+color-0 and color-`$xF` transparency, and the initial FX 1.26 XDL priority mask
+against the existing Atari per-pixel priority metadata. This scope has focused
+device/XEX regression coverage and documented Altirra differential runs. The
+native core remains planned.
+
+The same graphics subset now latches `COLDETECT` for enabled `COLMASK`
+source-byte ranges against PF0-3/P5 and P0-3 layer metadata. `COLCLR` clears
+the latch without changing GTIA collision registers. GTIA P/M composition now
+also records a per-pixel final-contributor plane, so P/M graphics hidden by
+`PRIOR` bits 0-5 are excluded from both this collision subset and XDL priority
+comparison. The complex P5/multicolor and GTIA-special-mode combinations
+still need Altirra differential coverage. The initial attribute-map renderer
+selects a P0-P3 priority register and overlay palette per cell and records its
+overlay collision bit. Its playfield-color/PF3-mask and reverse-mode controls,
+which must participate in earlier ANTIC/GTIA composition, are not yet
+implemented.
+
+The compatibility target is the VBXE FX 1.26 profile in either the `$D600` or
+`$D700` device range, whose register banks are respectively
+`$D640-$D65F` and `$D740-$D75F`. The browser selector persists the choice and
+rebuilds the machine when it changes; the device is disabled by default. The
+FX 1.24 profile remains compatibility work and must be selectable without
+duplicating the device implementation.
 
 ## Emulation approach
 
@@ -117,7 +138,7 @@ At the beginning of vertical sync, latch `VIDEO_CONTROL` and the XDL address.
 If XDL is enabled, begin interpreting the XDL at scanline 8. It restarts every
 frame from the latched VRAM address; it does not need an ANTIC-style jump.
 
-For every scanline the device model must:
+For every scanline the completed model must:
 
 1. Preserve the ANTIC/GTIA pixel and layer-priority information already
    generated for that line.
@@ -137,17 +158,44 @@ For FX 1.26, the background, PF0, PF1, PF2/PF3/P5, and player bits have the
 priority meanings specified by AHRM. FX 1.24 differs in bits 6-7, so that
 difference belongs in the profile table rather than in call-site conditionals.
 
-The initial renderer should keep the current ANTIC/GTIA output path intact and
-apply VBXE as a final, per-line composition pass. It must not make VBXE a
-replacement for ANTIC, GTIA, DLI, or VBI.
+The current renderer keeps the ANTIC/GTIA path intact and applies the XDL
+overlay as a final, per-line composition pass. It must not make VBXE a
+replacement for ANTIC, GTIA, DLI, or VBI. The present scope renders a centered
+256-pixel (4:5) normal aperture from 320 standard pixels, 160 lores pixels,
+or 640 hires pixels. Hires unpacks source bytes MSB-first into 4-bit palette
+indices; transparency applies to color 0 and `$F` (hires) or `$xF`
+(standard/lores), while `COLMASK` still uses the complete source byte as
+specified by the AHRM. Standard and lores geometry are externally validated
+against Altirra. Hires graphics and text now use a separate 672-pixel
+presentation plane so their 640-pixel normal-width signal is not reduced to
+the 256-pixel Atari compositor aperture; text transparency and scroll
+diagnostics match Altirra's internal pattern density and phase. Fullscreen
+canvas aspect and margins remain host-presentation choices, not VBXE signal
+differences. The initial text
+renderer draws 80 columns from 8x8 local-VRAM fonts, honoring
+character/attribute foreground colors and the documented transparent versus
+opaque background. Text scroll diagnostics match Altirra; text collision and
+the initial attribute-map subset still need their own visual differential
+coverage.
 
 ## Attribute map and collisions
 
 Attribute maps are per-cell overrides for palette, priority, display controls,
 and text attributes. They can use cells from 8x1 through 32x32 standard
-resolution pixels. They are not part of the first visible milestone, but the
-XDL state model must leave room for them instead of baking priority into a
-single global value.
+resolution pixels. The initial implemented subset parses `AtMapOn`/`AtMapOff`,
+the map address/stride, scroll and cell layout. For each active cell it selects
+P0-P3 priority, overrides the overlay palette, and reports an attribute-map
+collision for a non-transparent overlay pixel. The documented 43-cell
+line-buffer limit is enforced. Playfield color overrides, the hires PF3 mask,
+and ANTIC lores/hires reversal remain pending because they have to alter the
+pre-GTIA playfield path rather than only the final overlay pass.
+
+Altirra differential scenes confirm 8x8 palette cells, map-row stride, and
+ordinary horizontal/vertical scrolling. Scroll values are stored in the XDL as
+pixel counts minus one; zero map scroll is therefore the VSync default and is
+retained by omitting the optional layout block. Differential checkerboards
+also confirm the partial first cell and continuing phase when the scroll is
+greater than an 8-pixel cell dimension.
 
 VBXE overlay collisions are separate from GTIA collision latches:
 
@@ -176,26 +224,37 @@ functional rendering and register/MEMAC compatibility; a simplistic immediate
 copy is permitted only in an explicitly marked interim implementation and
 must not claim timing accuracy.
 
-## Implementation order
+## Implementation status and next steps
 
-1. Add disabled-by-default configuration, a VBXE state object, 512 KiB VRAM,
-   snapshots, reset/power-cycle rules, revision reads, and `$D640` register
-   decoding.
-2. Implement MEMAC A/B for CPU and ANTIC separately, with memory-map
-   precedence tests for all existing expansion profiles.
-3. Implement palette programming, vertical-sync latching, minimal XDL parsing,
-   and the standard-resolution graphics overlay.
-4. Add priority and transparency composition against the existing GTIA layer
-   metadata, then VBXE collision latches.
-5. Add lores/hires graphics, text, scrolling, and attribute maps.
-6. Add blitter operations, bandwidth arbitration, IRQ, and exact collision
-   behavior.
-7. Add `$D740`, FX 1.24 profile differences, and optional RAMBO emulation.
+Completed in JavaScript:
 
-Each step lands in both the JavaScript and native cores only when it has a
-shared behavioral contract and automated coverage. UI exposure is deliberately
-later than the device API, so headless regression tests do not depend on the
-browser interface.
+1. Disabled-by-default configuration, state, VRAM, reset/power-cycle rules,
+   snapshots, FX 1.26 revision reads, and both supported register pages.
+2. MEMAC A/B CPU and ANTIC mapping, including A-over-B priority and Ultimate1MB
+   precedence.
+3. Palette programming, vertical-sync latching, the minimal XDL decoder, and
+   standard/lores/hires graphics overlays.
+4. The first XDL transparency and priority composition subset, including
+   per-cell attribute-map overlay palette/P0-P3 priority/collision handling.
+5. Browser selection for FX 1.26 at `$D600` or `$D700`. VBXE intentionally
+   uses the main-thread runtime because the worker presentation path does not
+   yet transfer the extra RGB plane.
+
+Still pending:
+
+1. Text collisions and the remaining attribute-map semantics: playfield color
+   overrides, the hires PF3 mask, reverse mode, exact scrolling/overscrolling,
+   and buffered-fetch timing. The initial text renderer covers 80-column
+   character/attribute pairs with 8x8 local fonts; the decoder also retains
+   text `ChBase`, scroll offsets, and its 8-line character-row cadence.
+2. Exact collision/priority coverage for remaining GTIA special-mode, P5,
+   multicolor, and profile combinations.
+3. Blitter operations, local-memory arbitration, IRQ behavior, and timing.
+4. FX 1.24 profile differences, optional RAMBO behavior, and native-core
+   implementation.
+
+Every later step needs a shared behavioral contract and automated coverage;
+visual behavior additionally needs an Altirra differential diagnostic.
 
 ## Validation without physical VBXE hardware
 

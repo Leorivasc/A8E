@@ -2,15 +2,27 @@
 
 > Hardware emulation reference: Before implementing any Atari 800 XL PAL/NTSC hardware emulation, use the [AHRM](/AHRM/index.md) as reference.
 
-- Files: `jsA8E/js/core/cpu.js`, `jsA8E/js/core/cpu_tables.js`, `jsA8E/js/core/antic.js`, `jsA8E/js/core/gtia.js`, `jsA8E/js/core/pokey.js`, `jsA8E/js/core/pokey_sio.js`, `jsA8E/js/core/memory.js`, `jsA8E/js/core/io.js`, `jsA8E/js/core/atari.js`, `jsA8E/js/core/hw.js`, `jsA8E/js/core/playfield/playfield.js`, `jsA8E/js/core/playfield/renderer_base.js`, `jsA8E/js/core/state.js`, `jsA8E/js/core/snapshot_codec.js`
+- Files: `jsA8E/js/core/cpu.js`, `jsA8E/js/core/cpu_tables.js`, `jsA8E/js/core/antic.js`, `jsA8E/js/core/gtia.js`, `jsA8E/js/core/pokey.js`, `jsA8E/js/core/pokey_sio.js`, `jsA8E/js/core/vbxe.js`, `jsA8E/js/core/memory.js`, `jsA8E/js/core/io.js`, `jsA8E/js/core/atari.js`, `jsA8E/js/core/hw.js`, `jsA8E/js/core/playfield/playfield.js`, `jsA8E/js/core/playfield/renderer_base.js`, `jsA8E/js/core/state.js`, `jsA8E/js/core/snapshot_codec.js`
 - Purpose: mirror Atari hardware behavior in JavaScript with timing-compatible execution.
-- Status: updated on 2026-09-25 (`implemented`, AHRM-07 probe-validated).
+- Status: updated on 2026-10-29 (`implemented`; AHRM-07 probe-validated and
+  initial optional VBXE FX 1.26 subset implemented).
 
 ## Architecture
 
 CPU/ANTIC/GTIA/POKEY execution is coordinated through shared machine state. `playfield/playfield.js` owns scanline orchestration, scratch-buffer setup, and active-line geometry. `playfield/renderer_base.js` owns `clockAction`, the DMA scheduler, CHBASE timing, PM interleave, and shared blank-line/background helpers. Per-mode pixel generators live in `playfield/mode_2_3.js`, `mode_4_5.js`, `mode_6_7.js`, and `mode_8_f.js`.
 
 State is created up-front by `state.js` into a fixed `ioData` shape. ANTIC and the playfield renderer rely on this fixed shape — `nmiTiming`, `chbaseTiming`, and per-line DMA buffers are never rebuilt lazily in hot paths. Media state is normalized through `getMediaState()` before reset/mount/snapshot work.
+
+The optional VBXE FX 1.26 path lives in `vbxe.js`. Its disabled-by-default
+state owns local VRAM, registers, MEMAC configuration, and XDL frame state.
+`memory.js` resolves CPU and ANTIC MEMAC accesses with explicit expansion-map
+precedence; `antic.js` latches and advances XDL state at its frame/scanline
+boundaries. The implemented standard/lores/hires XDL subset writes only to
+the separate RGB overlay plane, preserving the indexed Atari framebuffer and
+its priority metadata for composition. A second per-pixel contributor plane
+removes P/M graphics hidden by GTIA `PRIOR` before VBXE evaluates overlay
+priority and collisions. See [`VBXE.md`](../VBXE.md) for supported behavior
+and limits.
 
 ## Clock Domains
 

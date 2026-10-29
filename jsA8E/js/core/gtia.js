@@ -135,6 +135,19 @@
     const PRIO_M10_PM1 = cfg.PRIO_M10_PM1;
     const PRIO_M10_PM2 = cfg.PRIO_M10_PM2;
     const PRIO_M10_PM3 = cfg.PRIO_M10_PM3;
+    const VBXE_CONTRIBUTOR_VALID = 0x8000;
+
+    function visibleContributors(buffer, index, activeLayers) {
+      if (!buffer) return activeLayers & 0x7fff;
+      const stored = buffer[index] & 0xffff;
+      return (stored & VBXE_CONTRIBUTOR_VALID) !== 0
+        ? stored & 0x7fff
+        : activeLayers & 0x7fff;
+    }
+
+    function setVisibleContributors(buffer, index, layers) {
+      if (buffer) buffer[index] = (VBXE_CONTRIBUTOR_VALID | layers) & 0xffff;
+    }
 
     function drawPlayer(
       color,
@@ -143,6 +156,7 @@
       priorityMask,
       priorityBit,
       prio,
+      contributors,
       dst,
       startIndex,
       special,
@@ -181,6 +195,17 @@
               }
             }
 
+            const visible = visibleContributors(contributors, pi, p);
+            let nextVisible = visible;
+            if (special && (p & PRIO_PF1)) {
+              nextVisible = (visible & PRIO_PF1) | cPriorityBit;
+            } else if (!(p & cPriorityMask)) {
+              nextVisible = (cOverlap && (p & cOverlap))
+                ? visible | cPriorityBit
+                : cPriorityBit;
+            }
+            setVisibleContributors(contributors, pi, nextVisible);
+
             prio[pi] = (prio[pi] | cPriorityBit) & 0xffff;
             collision |= prio[pi] & 0xffff;
           }
@@ -206,10 +231,12 @@
       data,
       priorityMask,
       prio,
+      contributors,
       dst,
       startIndex,
       special,
       prior,
+      priorityBit,
     ) {
       let collision = 0;
       const cColor = color & 0xff;
@@ -240,6 +267,11 @@
             dst[pi] = cColor;
           }
         }
+        const visible = visibleContributors(contributors, pi, p);
+        const nextVisible = special && (p & PRIO_PF1)
+          ? (visible & PRIO_PF1) | priorityBit
+          : (!(p & cPriorityMask) ? priorityBit : visible);
+        setVisibleContributors(contributors, pi, nextVisible);
         collision |= p;
       }
 
@@ -316,6 +348,7 @@
       priorityMask,
       priorityBit,
       prio,
+      contributors,
       dst,
       startIndex,
       special,
@@ -346,6 +379,16 @@
             dst[pi] = cColor;
           }
         }
+        const visible = visibleContributors(contributors, pi, p);
+        let nextVisible = visible;
+        if (special && (p & PRIO_PF1)) {
+          nextVisible = (visible & PRIO_PF1) | cPriorityBit;
+        } else if (!(p & cPriorityMask)) {
+          nextVisible = (cOverlap && (p & cOverlap))
+            ? visible | cPriorityBit
+            : cPriorityBit;
+        }
+        setVisibleContributors(contributors, pi, nextVisible);
         prio[pi] = (p | cPriorityBit) & 0xffff;
         collision |= prio[pi] & 0xffff;
       }
@@ -363,9 +406,11 @@
       color,
       priorityMask,
       prio,
+      contributors,
       dst,
       startIndex,
       special,
+      priorityBit,
     ) {
       const cColor = color & 0xff;
       const cPriorityMask = priorityMask & 0xffff;
@@ -378,6 +423,11 @@
         } else if (!(p & cPriorityMask)) {
           dst[pi] = cColor;
         }
+        const visible = visibleContributors(contributors, pi, p);
+        const nextVisible = special && (p & PRIO_PF1)
+          ? (visible & PRIO_PF1) | priorityBit
+          : (!(p & cPriorityMask) ? priorityBit : visible);
+        setVisibleContributors(contributors, pi, nextVisible);
         collision |= p;
       }
 
@@ -753,6 +803,7 @@
 
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const contributors = io.videoOut.vbxeCollisionPriority || null;
       const prior = sram[IO_PRIOR] & 0xff;
       const mode = io.currentDisplayListCommand & 0x0f;
       const special =
@@ -843,6 +894,7 @@
             playerPriorityMask(prior, 3),
             PRIO_PM3,
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
@@ -863,6 +915,7 @@
             playerPriorityMask(prior, 2),
             PRIO_PM2,
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
@@ -883,6 +936,7 @@
             playerPriorityMask(prior, 1),
             PRIO_PM1,
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
@@ -903,6 +957,7 @@
             playerPriorityMask(prior, 0),
             PRIO_PM0,
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
@@ -922,9 +977,11 @@
             prior & 0x10 ? sram[IO_COLPF3] : sram[IO_COLPM3],
             missilePriorityMask(prior, 3),
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
+            prior & 0x10 ? PRIO_PF3 : PRIO_PM3,
           );
         }
         advanceMissileShift(missileShift, missileState, 3, size);
@@ -937,9 +994,11 @@
             prior & 0x10 ? sram[IO_COLPF3] : sram[IO_COLPM2_PAL],
             missilePriorityMask(prior, 2),
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
+            prior & 0x10 ? PRIO_PF3 : PRIO_PM2,
           );
         }
         advanceMissileShift(missileShift, missileState, 2, size);
@@ -952,9 +1011,11 @@
             prior & 0x10 ? sram[IO_COLPF3] : sram[IO_COLPM1_TRIG3],
             missilePriorityMask(prior, 1),
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
+            prior & 0x10 ? PRIO_PF3 : PRIO_PM1,
           );
         }
         advanceMissileShift(missileShift, missileState, 1, size);
@@ -967,9 +1028,11 @@
             prior & 0x10 ? sram[IO_COLPF3] : sram[IO_COLPM0_TRIG2],
             missilePriorityMask(prior, 0),
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
+            prior & 0x10 ? PRIO_PF3 : PRIO_PM0,
           );
         }
         advanceMissileShift(missileShift, missileState, 0, size);
@@ -1023,6 +1086,7 @@
 
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const contributors = io.videoOut.vbxeCollisionPriority || null;
       const prior = sram[IO_PRIOR] & 0xff;
       const mode = io.currentDisplayListCommand & 0x0f;
       const special =
@@ -1059,6 +1123,7 @@
           mask,
           PRIO_PM3,
           prio,
+          contributors,
           dst,
           start,
           special,
@@ -1091,6 +1156,7 @@
           mask,
           PRIO_PM2,
           prio,
+          contributors,
           dst,
           start2,
           special,
@@ -1122,6 +1188,7 @@
           mask,
           PRIO_PM1,
           prio,
+          contributors,
           dst,
           start1,
           special,
@@ -1153,6 +1220,7 @@
           mask,
           PRIO_PM0,
           prio,
+          contributors,
           dst,
           start0,
           special,
@@ -1182,10 +1250,12 @@
           data,
           mask,
           prio,
+          contributors,
           dst,
           startM3,
           special,
           prior,
+          prior & 0x10 ? PRIO_PF3 : PRIO_PM3,
         );
 
         ram[IO_HPOSP3_M3PF] |= colM3 & 0x0f;
@@ -1205,10 +1275,12 @@
           data,
           mask,
           prio,
+          contributors,
           dst,
           startM2,
           special,
           prior,
+          prior & 0x10 ? PRIO_PF3 : PRIO_PM2,
         );
 
         ram[IO_HPOSP2_M2PF] |= colM2 & 0x0f;
@@ -1228,10 +1300,12 @@
           data,
           mask,
           prio,
+          contributors,
           dst,
           startM1,
           special,
           prior,
+          prior & 0x10 ? PRIO_PF3 : PRIO_PM1,
         );
 
         ram[IO_HPOSP1_M1PF] |= colM1 & 0x0f;
@@ -1251,10 +1325,12 @@
           data,
           mask,
           prio,
+          contributors,
           dst,
           startM0,
           special,
           prior,
+          prior & 0x10 ? PRIO_PF3 : PRIO_PM0,
         );
 
         ram[IO_HPOSP0_M0PF] |= colM0 & 0x0f;

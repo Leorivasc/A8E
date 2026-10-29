@@ -28,20 +28,33 @@
     const VIEW_Y = cfg.VIEW_Y;
     const VIDEO_STANDARD = cfg.VIDEO_STANDARD;
     const PLAYFIELD_SCRATCH_WIDTH = PIXELS_PER_LINE + 184;
+    const VBXE_HIRES_WIDTH = VIEW_W * 2;
 
     function makeVideo() {
       const palette = Palette.createAtariPaletteRgb(VIDEO_STANDARD);
       return {
         pixels: new Uint8Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
         priority: new Uint16Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
+        // Tracks only GTIA layers contributing to the final pixel where P/M
+        // graphics were evaluated. VBXE uses it for PRIOR-sensitive overlay
+        // collisions; zero means the normal active-layer priority applies.
+        vbxeCollisionPriority: new Uint16Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
         presentPixels: new Uint8Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
         presentPriority: new Uint16Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
         vbxeRgb: new Uint32Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
         presentVbxeRgb: new Uint32Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
+        // Hires graphics and text need their 640-pixel normal-width signal
+        // preserved until presentation; the Atari line buffer is too narrow.
+        vbxeHiresRgb: new Uint32Array(VBXE_HIRES_WIDTH * VIEW_H),
+        presentVbxeHiresRgb: new Uint32Array(VBXE_HIRES_WIDTH * VIEW_H),
+        vbxeHiresWidth: VBXE_HIRES_WIDTH,
         playfieldScratchPixels: new Uint8Array(
           PLAYFIELD_SCRATCH_WIDTH * LINES_PER_SCREEN_PAL,
         ),
         playfieldScratchPriority: new Uint16Array(
+          PLAYFIELD_SCRATCH_WIDTH * LINES_PER_SCREEN_PAL,
+        ),
+        playfieldScratchVbxeCollisionPriority: new Uint16Array(
           PLAYFIELD_SCRATCH_WIDTH * LINES_PER_SCREEN_PAL,
         ),
         playfieldScratchWidth: PLAYFIELD_SCRATCH_WIDTH,
@@ -60,15 +73,19 @@
       const pal32 = video.paletteRgba32;
       const srcPixels = video.presentPixels || video.pixels;
       const vbxeRgb = video.presentVbxeRgb || video.vbxeRgb;
+      const vbxeHiresRgb = video.presentVbxeHiresRgb || video.vbxeHiresRgb;
+      const vbxeHiresWidth = video.vbxeHiresWidth | 0;
 
       let dstIdx = 0;
       for (let y = 0; y < VIEW_H; y++) {
         let src = (VIEW_Y + y) * PIXELS_PER_LINE + VIEW_X;
         const srcEnd = src + VIEW_W;
+        let viewX = 0;
         while (src < srcEnd) {
-          let pixel = vbxeRgb && vbxeRgb[src]
-            ? vbxeRgb[src]
-            : pal32[srcPixels[src] & 0xff];
+          const hiresPixel = vbxeHiresRgb && vbxeHiresWidth > 0
+            ? vbxeHiresRgb[y * vbxeHiresWidth + viewX * 2]
+            : 0;
+          let pixel = hiresPixel || (vbxeRgb && vbxeRgb[src]) || pal32[srcPixels[src] & 0xff];
           if (video.crtEnabled && (y & 1) && IS_LITTLE_ENDIAN) {
             pixel = ((pixel & 0xff000000) | (((pixel & 0xff) * 0.78) & 0xff) |
               (((((pixel >>> 8) & 0xff) * 0.78) & 0xff) << 8) |
@@ -76,6 +93,7 @@
           }
           dst32[dstIdx++] = pixel;
           src++;
+          viewX++;
         }
       }
     }

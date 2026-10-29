@@ -1,5 +1,108 @@
 # NOTES.md
 
+- 2026-10-29: implemented the first attribute-map subset from AHRM 12.4.
+  XDL now retains `AtMapOn`/`AtMapOff`, map address and four-byte stride,
+  scroll, and 8x1 through 32x32 cell layout. Active cells select P0-P3
+  priority, override the overlay palette, and raise the attribute-map
+  collision bit for non-transparent overlay pixels; the documented 43-cell
+  line-buffer limit is applied. The playfield-color/PF3-mask and reverse-mode
+  controls still require earlier ANTIC/GTIA composition work and are not
+  claimed. Added the reproducible `VBXE_XDL_ATTRMAP_TEST.XEX` (227 bytes),
+  which should show alternating green/blue 16-pixel stripes in a centered
+  normal-width text field. Its attribute-map row stride uses the AHRM's native bits 7-2
+  encoding (`$A0` for 160 bytes), rather than a shifted byte. Its palette
+  setup writes CR/CG/CB in order because CB increments CSEL. It sets MAPSTEP
+  to zero, deliberately reusing one initialized 40-cell row for the complete
+  field; its text stride is also zero, because only one character row is
+  initialized. Attribute-layout scroll values are now decoded as the AHRM's
+  documented pixel counts minus one; static diagnostics omit that optional
+  block and use the VSync default of zero scroll. `VBXE_XDL_ATTRMAP_V2_TEST.XEX` is byte-identical to the
+  corrected diagnostic under a distinct filename, so visual testers cannot
+  accidentally rerun the prior 227-byte artifact. Its vertical MAPSTEP
+  companion validates map-row advancement independently. Added a separate
+  checkerboard scroll diagnostic with four-pixel horizontal/vertical map
+  offsets. Altirra and jsA8E now match for its cell order and scroll phase;
+  their field dimensions differ only with host presentation. Focused state
+  and assembler regressions pass. Attribute-map overscrolling beyond a cell
+  dimension is validated by the 12-pixel checkerboard diagnostic: Altirra and
+  jsA8E match for the initial partial cell and the continuing checker phase.
+  The remaining Attribute Map scope is playfield-color/PF3-mask and reversal,
+  which requires work in the pre-GTIA playfield path.
+
+- 2026-10-29: external text diagnostics exposed that the original VBXE RGB
+  plane reduced hires/text to the 256-pixel Atari compositor aperture. The
+  colors matched Altirra, but high-frequency text stripes and scroll patterns
+  did not. Hires/text now render into a 672-pixel scene-width RGB plane with a
+  centered 640-pixel normal overlay, which WebGL composites after the indexed
+  Atari plane; the 2D fallback samples that plane at its available resolution.
+  Presentation, reset, and snapshots preserve the additional plane. Focused
+  regressions cover adjacent hires nibbles and the expanded buffer. The text
+  diagnostics now match Altirra in their internal stripe/checker density and
+  phase; the remaining fullscreen height and margin difference is host
+  presentation, not emulated VBXE signal behavior.
+
+- 2026-10-29: added the first XDL hires graphics subset. The compositor now
+  projects the 640-pixel mode into the same normal 256-pixel aperture as the
+  externally validated standard/lores paths, unpacking each source byte
+  MSB-first into two 4-bit palette indices. It applies VIDEO_CONTROL color-0/
+  color-`$F` transparency to the unpacked pixel but uses the original complete
+  byte for COLMASK, as required by AHRM 12.4. Focused regressions cover nibble
+  order, palette lookup, transparency, and byte-group collision selection.
+  The shared transparency path now also distinguishes standard/lores `$xF`
+  from hires `$F`, including collision suppression for those transparent
+  pixels. XDL priority now uses the same final-contributor plane as VBXE
+  collisions, so hidden P/M graphics cannot spuriously block or admit the
+  overlay.
+- 2026-10-29: added `VBXE_XDL_HIRES_TEST.asm` and its reproducible XEX
+  artifact, an FX 1.26 diagnostic for a uniform 640x192 hires overlay. It
+  writes `$11` bytes to the 320-byte local-VRAM row and programs palette-1
+  color 1 blue, making nibble ordering and width errors immediately visible.
+  Altirra and jsA8E both display its expected centered, top-aligned uniform
+  blue field, externally validating the first hires geometry and nibble path.
+
+- 2026-10-29: extended the XDL decoder with the text-mode state that can be
+  established unambiguously from AHRM 12.4: `ChBase`, horizontal/vertical text
+  scroll offsets, and a row counter. Text lines now retain their character
+  row address for eight scanlines and advance by overlay stride only after row
+  7. This state underpins the initial text renderer; its transparency and
+  scrolling diagnostics now match Altirra. Attribute maps still await their
+  own diagnostics.
+
+- 2026-10-29: rendered the first XDL text subset: 80-column character/
+  attribute pairs reference an 8x8, 2 KiB-aligned local font through `ChBase`;
+  foreground colors and opaque or transparent backgrounds follow the text
+  attribute and VIDEO_CONTROL rules. Text collision detection, scrolling, and
+  attribute-map overrides remain excluded. Added a reproducible uniform-field
+  `VBXE_XDL_TEXT_TEST` XEX. Altirra and jsA8E both show its expected uniform
+  yellow field, externally validating this initial text geometry and `ChBase`
+  path.
+
+- 2026-10-29: implemented initial XDL text scrolling. Horizontal scroll
+  offsets the 640-pixel font stream; vertical scroll offsets the font row and
+  selects the next character row after crossing row 7. Focused tests cover
+  both axes, and `VBXE_XDL_TEXT_SCROLL_TEST` provides the first Altirra
+  differential scene. Its internal checker/stripe density and phase now
+  match Altirra; exact scroll range and edge-fetch behavior remain outside
+  this first diagnostic.
+
+- 2026-10-29: implemented the first VBXE overlay-collision subset in jsA8E.
+  Standard/lores XDL source bytes now consult `COLMASK` and accumulate the
+  PF0-3/P5 and P0-3 layer bits in `COLDETECT`; collision capture is independent
+  of XDL overlay priority, and `COLCLR` clears only the VBXE latch. GTIA now
+  records a final-contributor plane during P/M composition, so a P/M graphic
+  hidden by `PRIOR` is excluded before VBXE samples the line. The scope still
+  excludes attribute-map collisions, and complex P5/multicolor/GTIA-special
+  combinations need differential validation. Focused device and GTIA
+  regressions cover mask groups, PF/PM mapping, priority independence,
+  transparency, clearing, and a hidden-versus-visible P0 case.
+
+- 2026-10-29: synchronized the implementation documentation with the current
+  VBXE branch. `VBXE.md` now records the implemented FX 1.26 `$D600`/`$D700`
+  selection, MEMAC A/B, and initial standard/lores XDL compositor rather than
+  describing them as future work. Core, render, worker, and UI notes now
+  document the separate RGB plane and the main-thread-only limitation while
+  VBXE is enabled.
+
 - 2026-10-29: started the optional jsA8E VBXE device foundation. The new
   `js/core/vbxe.js` models a disabled-by-default FX 1.26 board with 512 KiB
   local VRAM, `$D640` register decoding, palette/write latches, VSync-latched
@@ -97,9 +200,10 @@
   plane from the still-in-progress WebGL path. Added the corresponding lores
   160-pixel renderer path with two-pixel horizontal expansion.
 
-- 2026-10-29: added tested color-0 and color-15 overlay transparency for the
-  standard/lores renderer subset, gated by the VSync-latched VIDEO_CONTROL
-  transparency field. Without that field, zero remains an opaque black pixel.
+- 2026-10-29: added tested color-0 and color-`$xF` overlay transparency for
+  the standard/lores renderer subset, gated by the VSync-latched
+  VIDEO_CONTROL transparency field. Without that field, zero remains an
+  opaque black pixel.
 
 - 2026-10-29: the XDL graphics descriptor now retains `OvMisc` overlay
   palette and priority fields, and the separate VBXE RGB plane is cleared at

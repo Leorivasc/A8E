@@ -163,10 +163,22 @@
     return {
       pixels: new Uint8Array(video.pixels),
       priority: new Uint16Array(video.priority),
+      vbxeCollisionPriority: video.vbxeCollisionPriority
+        ? new Uint16Array(video.vbxeCollisionPriority)
+        : null,
       presentPixels: new Uint8Array(video.presentPixels || video.pixels),
       presentPriority: new Uint16Array(video.presentPriority || video.priority),
+      vbxeRgb: video.vbxeRgb ? new Uint32Array(video.vbxeRgb) : null,
+      presentVbxeRgb: video.presentVbxeRgb ? new Uint32Array(video.presentVbxeRgb) : null,
+      vbxeHiresRgb: video.vbxeHiresRgb ? new Uint32Array(video.vbxeHiresRgb) : null,
+      presentVbxeHiresRgb: video.presentVbxeHiresRgb
+        ? new Uint32Array(video.presentVbxeHiresRgb)
+        : null,
       playfieldScratchPixels: new Uint8Array(video.playfieldScratchPixels),
       playfieldScratchPriority: new Uint16Array(video.playfieldScratchPriority),
+      playfieldScratchVbxeCollisionPriority: video.playfieldScratchVbxeCollisionPriority
+        ? new Uint16Array(video.playfieldScratchVbxeCollisionPriority)
+        : null,
     };
   }
 
@@ -207,15 +219,25 @@
 
     video.pixels.fill(0);
     video.priority.fill(0);
+    if (video.vbxeCollisionPriority) video.vbxeCollisionPriority.fill(0);
     if (video.presentPixels) video.presentPixels.fill(0);
     if (video.presentPriority) video.presentPriority.fill(0);
+    if (video.vbxeRgb) video.vbxeRgb.fill(0);
+    if (video.presentVbxeRgb) video.presentVbxeRgb.fill(0);
+    if (video.vbxeHiresRgb) video.vbxeHiresRgb.fill(0);
+    if (video.presentVbxeHiresRgb) video.presentVbxeHiresRgb.fill(0);
     video.playfieldScratchPixels.fill(0);
     video.playfieldScratchPriority.fill(0);
+    if (video.playfieldScratchVbxeCollisionPriority)
+      {video.playfieldScratchVbxeCollisionPriority.fill(0);}
     if (state.pixels) {
       video.pixels.set(new Uint8Array(state.pixels).subarray(0, video.pixels.length), 0);
     }
     if (state.priority) {
       restorePriorityBuffer(video.priority, state.priority);
+    }
+    if (state.vbxeCollisionPriority && video.vbxeCollisionPriority) {
+      restorePriorityBuffer(video.vbxeCollisionPriority, state.vbxeCollisionPriority);
     }
     if (state.presentPixels && video.presentPixels) {
       video.presentPixels.set(
@@ -233,6 +255,24 @@
     } else if (state.priority && video.presentPriority) {
       restorePriorityBuffer(video.presentPriority, state.priority);
     }
+    if (state.vbxeRgb && video.vbxeRgb) {
+      video.vbxeRgb.set(new Uint32Array(state.vbxeRgb).subarray(0, video.vbxeRgb.length), 0);
+    }
+    if (state.presentVbxeRgb && video.presentVbxeRgb) {
+      video.presentVbxeRgb.set(
+        new Uint32Array(state.presentVbxeRgb).subarray(0, video.presentVbxeRgb.length), 0,
+      );
+    }
+    if (state.vbxeHiresRgb && video.vbxeHiresRgb) {
+      video.vbxeHiresRgb.set(
+        new Uint32Array(state.vbxeHiresRgb).subarray(0, video.vbxeHiresRgb.length), 0,
+      );
+    }
+    if (state.presentVbxeHiresRgb && video.presentVbxeHiresRgb) {
+      video.presentVbxeHiresRgb.set(
+        new Uint32Array(state.presentVbxeHiresRgb).subarray(0, video.presentVbxeHiresRgb.length), 0,
+      );
+    }
     if (state.playfieldScratchPixels) {
       video.playfieldScratchPixels.set(
         new Uint8Array(state.playfieldScratchPixels).subarray(
@@ -244,6 +284,12 @@
     }
     if (state.playfieldScratchPriority) {
       restorePriorityBuffer(video.playfieldScratchPriority, state.playfieldScratchPriority);
+    }
+    if (state.playfieldScratchVbxeCollisionPriority && video.playfieldScratchVbxeCollisionPriority) {
+      restorePriorityBuffer(
+        video.playfieldScratchVbxeCollisionPriority,
+        state.playfieldScratchVbxeCollisionPriority,
+      );
     }
   }
 

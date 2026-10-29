@@ -7,10 +7,31 @@
   const PALETTE_COMPONENTS = 3;
   const REGISTER_COUNT = 0x20;
   const DEFAULT_PAGE = 0xd640;
+  const VBXE_CONTRIBUTOR_VALID = 0x8000;
+  // These match the shared GTIA layer bits in hw.js. VBXE deliberately reads
+  // per-pixel layer metadata rather than the final RGB value: different GTIA
+  // layers can have the same visible color but have distinct collision
+  // meanings in COLDETECT.
+  const PRIO_PF0 = 0x0001;
+  const PRIO_PF1 = 0x0002;
+  const PRIO_PF2 = 0x0004;
+  const PRIO_PF3 = 0x0008;
+  const PRIO_PM0 = 0x0010;
+  const PRIO_PM1 = 0x0020;
+  const PRIO_PM2 = 0x0040;
+  const PRIO_PM3 = 0x0080;
+  const PRIO_M10_PM0 = 0x0100;
+  const PRIO_M10_PM1 = 0x0200;
+  const PRIO_M10_PM2 = 0x0400;
+  const PRIO_M10_PM3 = 0x0800;
 
   function createXdlState() {
     return { address: 0, overlayAddress: 0, overlayStride: 0, mode: "off",
-      enabled: false, repeat: 0, ended: false, overlayPalette: 1, priority: 0xff };
+      enabled: false, repeat: 0, ended: false, overlayPalette: 1, priority: 0xff,
+      textScrollX: 0, textScrollY: 0, characterBase: 0, textRow: 0,
+      attributeMapEnabled: false, attributeAddress: 0, attributeStride: 0,
+      attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 8,
+      attributeCellHeight: 8, attributeRow: 0 };
   }
 
   function normalizeConfig(value) {
@@ -102,46 +123,209 @@
       if (c0 & 1) { x.mode = "text"; x.enabled = true; }
       if (c0 & 2) { x.mode = (c1 & 0x10) ? "hires" : ((c1 & 0x20) ? "lores" : "standard"); x.enabled = true; }
       if (c0 & 4) x.enabled = false;
+      if (c0 & 0x08) x.attributeMapEnabled = true;
+      if (c0 & 0x10) x.attributeMapEnabled = false;
       if (c0 & 0x20) x.repeat = read();
       if (c0 & 0x40) { x.overlayAddress = read() | (read() << 8) | ((read() & 7) << 16); x.overlayStride = read() | ((read() & 15) << 8); }
-      if (c0 & 0x80) x.address += 2;
-      if (c1 & 1) x.address++;
-      if (c1 & 2) x.address += 5;
-      if (c1 & 4) x.address += 4;
+      if (c0 & 0x80) { x.textScrollX = read(); x.textScrollY = read(); }
+      if (c1 & 1) x.characterBase = read() << 11;
+      if (c1 & 2) {
+        x.attributeAddress = read() | (read() << 8) | ((read() & 7) << 16);
+        // AHRM 12.4 stores stride bits 7-2 in their native byte positions;
+        // bits 1-0 are zero because attribute-map rows are four-byte aligned.
+        x.attributeStride = (read() & 0xfc) | ((read() & 0x0f) << 8);
+      }
+      if (c1 & 4) {
+        // AHRM 12.4 encodes both map scroll values and cell dimensions as
+        // pixel counts minus one. A zero scroll is retained only by omitting
+        // this optional block (the VSync default).
+        x.attributeScrollX = (read() & 0x1f) + 1;
+        x.attributeScrollY = (read() & 0x1f) + 1;
+        x.attributeCellWidth = (read() & 0x1f) + 1;
+        x.attributeCellHeight = (read() & 0x1f) + 1;
+      }
       if (c1 & 8) { const misc = read(); x.overlayPalette = (misc >> 2) & 3; x.priority = read(); }
       if (c1 & 0x80) x.ended = true;
     }
-    const line = x.enabled ? { mode: x.mode, address: x.overlayAddress & 0x7ffff, stride: x.overlayStride & 0xfff, overlayPalette: x.overlayPalette, priority: x.priority } : null;
-    if (x.enabled) x.overlayAddress = (x.overlayAddress + x.overlayStride) & 0x7ffff;
+    const line = x.enabled ? {
+      mode: x.mode,
+      address: x.overlayAddress & 0x7ffff,
+      stride: x.overlayStride & 0xfff,
+      overlayPalette: x.overlayPalette,
+      priority: x.priority,
+      characterBase: x.characterBase & 0x7ffff,
+      textScrollX: x.textScrollX & 0xff,
+      textScrollY: x.textScrollY & 0xff,
+      textRow: x.textRow & 7,
+      attributeMapEnabled: !!x.attributeMapEnabled,
+      attributeAddress: x.attributeAddress & 0x7ffff,
+      attributeStride: x.attributeStride & 0xffc,
+      attributeScrollX: x.attributeScrollX,
+      attributeScrollY: x.attributeScrollY,
+      attributeCellWidth: x.attributeCellWidth,
+      attributeCellHeight: x.attributeCellHeight,
+      attributeRow: x.attributeRow,
+    } : null;
+    if (x.enabled) {
+      if (x.mode === "text") {
+        x.textRow = (x.textRow + 1) & 7;
+        if (x.textRow === 0) x.overlayAddress = (x.overlayAddress + x.overlayStride) & 0x7ffff;
+      } else {
+        x.overlayAddress = (x.overlayAddress + x.overlayStride) & 0x7ffff;
+      }
+    }
     if (x.repeat > 0) x.repeat--;
+    if (x.attributeMapEnabled) x.attributeRow++;
     return line;
   }
 
-  function renderXdlLine(state, video, scanline, line) {
-    if (!line || (line.mode !== "standard" && line.mode !== "lores") || !video || !video.vbxeRgb) return;
-    const base = (scanline | 0) * 456 + 128;
-    video.vbxeRgb.fill(0, base, base + 256);
-    const pixelCount = line.mode === "lores" ? 160 : 320;
+  function collisionBitsForPriority(priority) {
+    const layers = priority & 0xffff;
+    let result = 0;
+    if (layers & (PRIO_PM0 | PRIO_M10_PM0)) result |= 0x01;
+    if (layers & (PRIO_PM1 | PRIO_M10_PM1)) result |= 0x02;
+    if (layers & (PRIO_PM2 | PRIO_M10_PM2)) result |= 0x04;
+    if (layers & (PRIO_PM3 | PRIO_M10_PM3)) result |= 0x08;
+    if (layers & PRIO_PF0) result |= 0x10;
+    if (layers & PRIO_PF1) result |= 0x20;
+    if (layers & (PRIO_PF2 | PRIO_PF3)) result |= 0x40;
+    return result;
+  }
+
+  function overlayCollisionEnabled(state, color) {
+    return (state.collisionMask & (1 << ((color & 0xff) >>> 5))) !== 0;
+  }
+
+  function attributeMapCell(state, line, standardX) {
+    if (!line || !line.attributeMapEnabled) return null;
+    const width = line.attributeCellWidth | 0;
+    const height = line.attributeCellHeight | 0;
+    if (width < 8 || width > 32 || height < 1 || height > 32) return null;
+    const x = (standardX | 0) + (line.attributeScrollX | 0);
+    const y = (line.attributeRow | 0) + (line.attributeScrollY | 0);
+    const column = Math.floor(x / width);
+    // AHRM 12.4 limits the buffered line to 43 four-byte cells.
+    if (column < 0 || column >= 43) return null;
+    const row = Math.floor(y / height);
+    const address = (line.attributeAddress + row * line.attributeStride + (column << 2)) & 0x7ffff;
+    const control = state.vram[(address + 3) & 0x7ffff] & 0xff;
+    return { control: control, overlayPalette: (control >>> 4) & 0x03,
+      priority: state.priority[control & 0x03] & 0xff };
+  }
+
+  function compositeOverlayPixel(state, video, target, targetPixel, priorityPixel, color, sourceByte, overlayPalette, priorityMask, attribute) {
+    if (attribute && (attribute.control & 0x08)) state.collisionDetect |= 0x80;
+    if (attribute) {
+      overlayPalette = attribute.overlayPalette;
+      priorityMask = attribute.priority;
+    }
+    const p = ((((overlayPalette === undefined ? 1 : overlayPalette) * 256) + color) * 3) | 0;
+    const rgb = ((255 << 24) | (state.palette[p + 2] << 16) |
+      (state.palette[p + 1] << 8) | state.palette[p]) >>> 0;
+    const atariPriority = video.priority ? video.priority[priorityPixel] : 0;
+    const storedContributors = video.vbxeCollisionPriority
+      ? video.vbxeCollisionPriority[priorityPixel] & 0xffff
+      : 0;
+    const visiblePriority = (storedContributors & VBXE_CONTRIBUTOR_VALID) !== 0
+      ? storedContributors & ~VBXE_CONTRIBUTOR_VALID
+      : atariPriority;
+    if (sourceByte !== null && overlayCollisionEnabled(state, sourceByte)) {
+      // AHRM 12.4: COLMASK selects source-byte ranges and collision
+      // detection is independent of whether the overlay wins its priority
+      // comparison. Attribute-map and text collision handling belongs with
+      // their renderers and is intentionally not synthesized here.
+      state.collisionDetect |= collisionBitsForPriority(visiblePriority);
+    }
+    // AHRM 12.4 defines both collision and overlay priority against the
+    // color inputs that survive GTIA PRIOR processing. The raw priority plane
+    // retains hidden P/M layers for normal GTIA collision handling, while this
+    // optional plane removes them for VBXE.
+    const wins = visiblePriority === 0
+      ? (priorityMask & 0x80)
+      : ((visiblePriority & 0x01) && (priorityMask & 0x10)) ||
+        ((visiblePriority & 0x02) && (priorityMask & 0x20)) ||
+        ((visiblePriority & 0x0c) && (priorityMask & 0x40)) ||
+        ((visiblePriority & 0x10) && (priorityMask & 0x01)) ||
+        ((visiblePriority & 0x20) && (priorityMask & 0x02)) ||
+        ((visiblePriority & 0x40) && (priorityMask & 0x04)) ||
+        ((visiblePriority & 0x80) && (priorityMask & 0x08));
+    if (wins) target[targetPixel] = rgb;
+  }
+
+  function hiresTarget(video, scanline) {
+    const width = video.vbxeHiresWidth | 0;
+    const line = (scanline | 0) - 8;
+    if (!video.vbxeHiresRgb || width < 640 || line < 0) return null;
+    const base = line * width;
+    return base + width <= video.vbxeHiresRgb.length
+      ? { pixels: video.vbxeHiresRgb, width: width, base: base + ((width - 640) >> 1), rowBase: base }
+      : null;
+  }
+
+  function renderTextXdlLine(state, video, scanline, line) {
+    const atariBase = (scanline | 0) * 456 + 128;
+    const target = hiresTarget(video, scanline);
+    const pixels = target ? target.pixels : video.vbxeRgb;
+    const base = target ? target.base : atariBase;
+    const outputPixels = target ? 640 : 256;
+    if (target) pixels.fill(0, target.rowBase, target.rowBase + target.width);
+    else pixels.fill(0, base, base + 256);
     const priorityMask = line.priority === undefined ? 0xff : line.priority;
-    for (let x = 0; x < 256; x++) {
-      const sourceX = Math.floor(x * pixelCount / 256);
-      const color = state.vram[(line.address + sourceX) & 0x7ffff] & 0xff;
+    const transparency = (state.videoControlActive >> 2) & 0x03;
+    for (let x = 0; x < outputPixels; x++) {
+      const sourceX = (target ? x : Math.floor(x * 640 / 256)) + (line.textScrollX || 0);
+      const sourceRow = (line.textRow & 7) + (line.textScrollY || 0);
+      const cell = sourceX >> 3;
+      const rowAddress = (line.address + Math.floor(sourceRow / 8) * (line.stride || 0)) & 0x7ffff;
+      const cellAddress = (rowAddress + (cell << 1)) & 0x7ffff;
+      const character = state.vram[cellAddress] & 0xff;
+      const attribute = state.vram[(cellAddress + 1) & 0x7ffff] & 0xff;
+      const glyph = state.vram[((line.characterBase || 0) + (character << 3) + (sourceRow & 7)) & 0x7ffff];
+      const foreground = attribute & 0x7f;
+      const glyphSet = (glyph & (0x80 >>> (sourceX & 7))) !== 0;
+      if (!glyphSet && !(attribute & 0x80) && transparency >= 1) continue;
+      const color = glyphSet ? foreground : ((attribute & 0x80) ? foreground | 0x80 : 0x80);
+      if (color === 0 && transparency >= 1) continue;
+      const priorityPixel = atariBase + (target ? Math.floor(x * 256 / 640) : x);
+      const map = attributeMapCell(state, line, target ? (x >> 1) : Math.floor(x * 320 / 256));
+      compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, null, line.overlayPalette, priorityMask, map);
+    }
+  }
+
+  function renderXdlLine(state, video, scanline, line) {
+    if (!line || !video || !video.vbxeRgb) return;
+    if (line.mode === "text") {
+      renderTextXdlLine(state, video, scanline, line);
+      return;
+    }
+    if (line.mode !== "standard" && line.mode !== "lores" && line.mode !== "hires") return;
+    const atariBase = (scanline | 0) * 456 + 128;
+    const hires = line.mode === "hires";
+    const target = hires ? hiresTarget(video, scanline) : null;
+    const pixels = target ? target.pixels : video.vbxeRgb;
+    const base = target ? target.base : atariBase;
+    const outputPixels = target ? 640 : 256;
+    if (target) pixels.fill(0, target.rowBase, target.rowBase + target.width);
+    else pixels.fill(0, base, base + 256);
+    const pixelCount = hires ? 640 : (line.mode === "lores" ? 160 : 320);
+    const priorityMask = line.priority === undefined ? 0xff : line.priority;
+    for (let x = 0; x < outputPixels; x++) {
+      const sourceX = target ? x : Math.floor(x * pixelCount / 256);
+      // AHRM 12.4: hires graphics store two 4-bit pixels per byte, most
+      // significant nibble first. COLMASK still selects the complete source
+      // byte range rather than the unpacked nibble.
+      const sourceByte = state.vram[(line.address + (hires ? (sourceX >> 1) : sourceX)) & 0x7ffff] & 0xff;
+      const color = hires
+        ? ((sourceX & 1) !== 0 ? sourceByte & 0x0f : sourceByte >>> 4)
+        : sourceByte;
       const transparency = (state.videoControlActive >> 2) & 0x03;
-      if ((color === 0 && transparency >= 1) || (color === 15 && transparency === 3)) continue;
-      const p = ((((line.overlayPalette === undefined ? 1 : line.overlayPalette) * 256) + color) * 3) | 0;
-      const rgb = ((255 << 24) | (state.palette[p + 2] << 16) |
-        (state.palette[p + 1] << 8) | state.palette[p]) >>> 0;
-      const atariPriority = video.priority ? video.priority[base + x] : 0;
-      const wins = atariPriority === 0
-        ? (priorityMask & 0x80)
-        : ((atariPriority & 0x01) && (priorityMask & 0x10)) ||
-          ((atariPriority & 0x02) && (priorityMask & 0x20)) ||
-          ((atariPriority & 0x0c) && (priorityMask & 0x40)) ||
-          ((atariPriority & 0x10) && (priorityMask & 0x01)) ||
-          ((atariPriority & 0x20) && (priorityMask & 0x02)) ||
-          ((atariPriority & 0x40) && (priorityMask & 0x04)) ||
-          ((atariPriority & 0x80) && (priorityMask & 0x08));
-      if (wins) video.vbxeRgb[base + x] = rgb;
+      const transparent = (color === 0 && transparency >= 1) ||
+        (transparency === 3 && (hires ? color === 0x0f : (color & 0x0f) === 0x0f));
+      if (transparent) continue;
+      const priorityPixel = atariBase + (target ? Math.floor(x * 256 / 640) : x);
+      const map = attributeMapCell(state, line,
+        target ? (x >> 1) : Math.floor(x * 320 / 256));
+      compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, sourceByte, line.overlayPalette, priorityMask, map);
     }
   }
 
@@ -334,6 +518,8 @@
     verticalSync: verticalSync,
     nextXdlLine: nextXdlLine,
     renderXdlLine: renderXdlLine,
+    attributeMapCell: attributeMapCell,
+    collisionBitsForPriority: collisionBitsForPriority,
     isAddress: isAddress,
     memacAddress: memacAddress,
     access: access,
