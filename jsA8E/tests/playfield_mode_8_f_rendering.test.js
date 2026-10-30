@@ -138,6 +138,82 @@ function testModeAUsesAllFourBitPairs() {
   assert.equal(ctx.ioData.videoOut.pixels[15], 0x43);
 }
 
+function testMode8AndModeAPreserveLoresPairsForVbxeReverse() {
+  const api = loadApiWithBitmapColors();
+
+  const mode8 = createCtx();
+  mode8.ioData.videoOut.anticSourceLores = new Uint8Array(64);
+  mode8.ioData.videoOut.anticSourceLores.fill(0xff);
+  mode8.ram[0] = 0x1b;
+  api.drawLineMode8(mode8);
+  assert.deepEqual(
+    Array.from(mode8.ioData.videoOut.anticSourceLores.slice(0, 32)),
+    [0, 0, 0, 0, 0, 0, 0, 0,
+      1, 1, 1, 1, 1, 1, 1, 1,
+      2, 2, 2, 2, 2, 2, 2, 2,
+      3, 3, 3, 3, 3, 3, 3, 3],
+    "mode 8 must retain its repeated two-bit lores values",
+  );
+
+  const modeA = createCtx();
+  modeA.ioData.videoOut.anticSourceLores = new Uint8Array(64);
+  modeA.ioData.videoOut.anticSourceLores.fill(0xff);
+  modeA.ram[0] = 0x1b;
+  api.drawLineModeA(modeA);
+  assert.deepEqual(
+    Array.from(modeA.ioData.videoOut.anticSourceLores.slice(0, 16)),
+    [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3],
+    "mode A must retain all of its two-bit lores values",
+  );
+}
+
+function testTwoColorLoresModesCollapseToHiresPairZero() {
+  const api = loadApiWithBitmapColors();
+
+  const mode9 = createCtx();
+  mode9.ioData.videoOut.anticSourceLores = new Uint8Array(64);
+  mode9.ioData.videoOut.anticSourceLores.fill(0xff);
+  mode9.ram[0] = 0xff;
+  api.drawLineMode9(mode9);
+  assert.deepEqual(
+    Array.from(mode9.ioData.videoOut.anticSourceLores.slice(0, 32)),
+    new Array(32).fill(0),
+    "mode 9 PF0 and background must both become hires pair 00",
+  );
+
+  const modeB = createCtx();
+  modeB.ioData.videoOut.anticSourceLores = new Uint8Array(64);
+  modeB.ioData.videoOut.anticSourceLores.fill(0xff);
+  modeB.ram[0] = 0xff;
+  api.drawLineModeB(modeB);
+  assert.deepEqual(
+    Array.from(modeB.ioData.videoOut.anticSourceLores.slice(0, 16)),
+    new Array(16).fill(0),
+    "mode B PF0 and background must both become hires pair 00",
+  );
+}
+
+function testModeFPreservesHiresBitsInGtiaSpecialMode() {
+  const api = loadMode8FApi({
+    fillGtiaColorTable: function (sram, table) {
+      for (let i = 0; i < table.length; i++) table[i] = i;
+    },
+  });
+  const ctx = createCtx();
+  ctx.sram[IO_PRIOR] = 0x80;
+  ctx.ioData.videoOut.anticSourceBits = new Uint8Array(64);
+  ctx.ioData.videoOut.anticSourceBits.fill(0xff);
+  ctx.ram[0] = 0x1b;
+
+  api.drawLineModeF(ctx);
+
+  assert.deepEqual(
+    Array.from(ctx.ioData.videoOut.anticSourceBits.slice(0, 8)),
+    [0, 0, 0, 1, 1, 0, 1, 1],
+    "mode F special output must retain its original hires source bits",
+  );
+}
+
 function testModeFPriorMode0WidthIsNotDoubled() {
   const api = loadMode8FApi();
   const ctx = createCtx();
@@ -177,6 +253,9 @@ function testModeFDmaOnlyOccursOnFirstScanline() {
 
 testMode8RepeatsEachBitPairForEightPixels();
 testModeAUsesAllFourBitPairs();
+testMode8AndModeAPreserveLoresPairsForVbxeReverse();
+testTwoColorLoresModesCollapseToHiresPairZero();
+testModeFPreservesHiresBitsInGtiaSpecialMode();
 testModeFPriorMode0WidthIsNotDoubled();
 testModeFDmaOnlyOccursOnFirstScanline();
 console.log("playfield_mode_8_f_rendering tests passed");

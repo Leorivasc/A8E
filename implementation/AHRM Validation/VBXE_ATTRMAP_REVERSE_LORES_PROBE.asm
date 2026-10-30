@@ -1,0 +1,167 @@
+; FX 1.26 AttrMap Rev lores probe. Four horizontal source bands are 00, 01,
+; 10, and 11. Map PF0/PF1/PF2 are red/blue/green respectively. This uses a
+; narrow ANTIC field (32 bytes/line), which divides ANTIC's 4 KiB display
+; window exactly and keeps every source row phase-identical.
+.ORG $2000
+DMACTL=$D400
+DLISTL=$D402
+DLISTH=$D403
+NMIEN=$D40E
+COLBK=$D01A
+COLPF0=$D016
+COLPF1=$D017
+COLPF2=$D018
+PRIOR=$D01B
+MEMACB=$D65D
+VIDEO=$D640
+XDL0=$D641
+XDL1=$D642
+XDL2=$D643
+CSEL=$D644
+PSEL=$D645
+CR=$D646
+CG=$D647
+CB=$D648
+START:
+ LDA #0
+ STA NMIEN
+ STA COLBK
+ STA COLPF0
+ STA COLPF1
+ STA COLPF2
+ STA PRIOR
+ LDA #$C0
+ STA MEMACB
+ ; Fill the 4 KiB ANTIC window: eight bytes each of 00,55,AA,FF per row.
+ LDA #0
+ STA $80
+ LDA #$40
+ STA $81
+ LDX #128
+FILLROW:
+ LDY #0
+ LDA #0
+FILL00:
+ STA ($80),Y
+ INY
+ CPY #8
+ BNE FILL00
+ LDA #$55
+FILL01:
+ STA ($80),Y
+ INY
+ CPY #16
+ BNE FILL01
+ LDA #$AA
+FILL10:
+ STA ($80),Y
+ INY
+ CPY #24
+ BNE FILL10
+ LDA #$FF
+FILL11:
+ STA ($80),Y
+ INY
+ CPY #32
+ BNE FILL11
+ CLC
+ LDA $80
+ ADC #32
+ STA $80
+ BCC NOCARRY
+ INC $81
+NOCARRY:
+ DEX
+ BNE FILLROW
+ ; LMS mode E, 191 more lines, then JVB.
+ LDA #$4E
+ STA $3000
+ LDA #0
+ STA $3001
+ LDA #$40
+ STA $3002
+ LDX #191
+ LDA #$0E
+FILLDL:
+ DEX
+ STA $3003,X
+ BNE FILLDL
+ LDA #$41
+ STA $30C2
+ LDA #0
+ STA $30C3
+ LDA #$30
+ STA $30C4
+ LDA #0
+ STA DLISTL
+ LDA #$30
+ STA DLISTH
+ ; Palette 0 map values: PF0 red, PF1 blue, PF2 green.
+ LDA #0
+ STA PSEL
+ LDA #$42
+ STA CSEL
+ LDA #$FE
+ STA CR
+ LDA #0
+ STA CG
+ STA CB
+ LDA #$84
+ STA CSEL
+ LDA #0
+ STA CR
+ STA CG
+ LDA #$FE
+ STA CB
+ LDA #$26
+ STA CSEL
+ LDA #0
+ STA CR
+ LDA #$FE
+ STA CG
+ LDA #0
+ STA CB
+ ; XDL local $01E00: AtMapOn + repeat; map address/stride only.
+ LDA #$28
+ STA $5E00
+ LDA #$02
+ STA $5E01
+ LDA #$BF
+ STA $5E02
+ LDA #0
+ STA $5E03
+ LDA #$20
+ STA $5E04
+ LDA #0
+ STA $5E05
+ STA $5E06
+ STA $5E07
+ LDX #0
+ LDY #40
+FILLMAP:
+ LDA #$42
+ STA $6000,X
+ LDA #$84
+ STA $6001,X
+ LDA #$26
+ STA $6002,X
+ LDA #$04
+ STA $6003,X
+ TXA
+ CLC
+ ADC #4
+ TAX
+ DEY
+ BNE FILLMAP
+ LDA #0
+ STA XDL0
+ LDA #$1E
+ STA XDL1
+ LDA #0
+ STA XDL2
+ LDA #$21
+ STA DMACTL
+ LDA #1
+ STA VIDEO
+LOOP: JMP LOOP
+.RUN START

@@ -48,7 +48,13 @@
     };
   }
 
-  function createState(config) {
+  function loadPowerUpPalette(state, gtiaPalette) {
+    if (!state || !gtiaPalette) return;
+    const colors = new Uint8Array(gtiaPalette);
+    state.palette.set(colors.subarray(0, PALETTE_ENTRIES * PALETTE_COMPONENTS), 0);
+  }
+
+  function createState(config, gtiaPalette) {
     const normalized = normalizeConfig(config);
     const state = {
       enabled: normalized.enabled,
@@ -75,6 +81,9 @@
       memacBankSelect: 0,
       xdl: createXdlState(),
     };
+    // AHRM 12.4: power-up loads palette 0 from the GTIA palette; the other
+    // three palettes remain clear until software writes them.
+    loadPowerUpPalette(state, gtiaPalette);
     return state;
   }
 
@@ -94,11 +103,12 @@
     state.memacBankSelect = 0;
   }
 
-  function powerCycle(state) {
+  function powerCycle(state, gtiaPalette) {
     if (!state) return;
     softReset(state);
     state.vram.fill(0);
     state.palette.fill(0);
+    loadPowerUpPalette(state, gtiaPalette);
     state.colorSelect = 0;
     state.paletteSelect = 0;
     state.collisionMask = 0;
@@ -146,8 +156,13 @@
       }
       if (c1 & 8) { const misc = read(); x.overlayPalette = (misc >> 2) & 3; x.priority = read(); }
       if (c1 & 0x80) x.ended = true;
+    } else {
+      // The repeat byte is the number of *additional* mode lines.  Keep its
+      // full value for the line that loaded the entry, then consume one on
+      // each following line (AHRM 12.4, XDL repeat count).
+      x.repeat--;
     }
-    const line = x.enabled ? {
+    const line = (x.enabled || x.attributeMapEnabled) ? {
       mode: x.mode,
       address: x.overlayAddress & 0x7ffff,
       stride: x.overlayStride & 0xfff,
@@ -174,7 +189,6 @@
         x.overlayAddress = (x.overlayAddress + x.overlayStride) & 0x7ffff;
       }
     }
-    if (x.repeat > 0) x.repeat--;
     if (x.attributeMapEnabled) x.attributeRow++;
     return line;
   }
@@ -208,9 +222,130 @@
     if (column < 0 || column >= 43) return null;
     const row = Math.floor(y / height);
     const address = (line.attributeAddress + row * line.attributeStride + (column << 2)) & 0x7ffff;
+    const playfield0 = state.vram[address] & 0xff;
+    const playfield1 = state.vram[(address + 1) & 0x7ffff] & 0xff;
+    const playfield2 = state.vram[(address + 2) & 0x7ffff] & 0xff;
     const control = state.vram[(address + 3) & 0x7ffff] & 0xff;
-    return { control: control, overlayPalette: (control >>> 4) & 0x03,
+    return { control: control, playfield0: playfield0, playfield1: playfield1,
+      playfield2: playfield2, reverse: (control & 0x04) !== 0,
+      playfieldPalette: (control >>> 6) & 0x03,
+      overlayPalette: (control >>> 4) & 0x03,
       priority: state.priority[control & 0x03] & 0xff };
+  }
+
+  // AHRM 12.4 calls out the PF3 bitmap separately from the map cell itself:
+  // the mask begins at the left edge of each scrolled cell and is sampled at
+  // 1, 2, or 4 standard-resolution pixels per bit according to cell width.
+  function attributeMapPf3MaskBit(line, standardX, mask) {
+    const width = line.attributeCellWidth | 0;
+    if (width < 8 || width > 32) return false;
+    const x = (standardX | 0) + (line.attributeScrollX | 0);
+    const cellX = ((x % width) + width) % width;
+    const bitPixelWidth = width <= 8 ? 1 : (width <= 16 ? 2 : 4);
+    const bit = 7 - Math.floor(cellX / bitPixelWidth);
+    return (mask & (1 << bit)) !== 0;
+  }
+
+  function isAnticHiresSource(line) {
+    // AHRM 4.2 identifies modes 2, 3, and F as ANTIC hires modes. Reverse
+    // groups their decoded bit stream into PF0-PF3 pairs.
+    const mode = line.anticMode & 0x0f;
+    return mode === 0x02 || mode === 0x03 || mode === 0x0f;
+  }
+
+  function isAnticModeF(line) {
+    // The separate PF3-mask behavior is specific to Graphics 8 / mode F.
+    return (line.anticMode & 0x0f) === 0x0f;
+  }
+
+  function hasGtiaSpecialMode(line) {
+    return !!line && (line.anticGtiaMode & 0x03) !== 0;
+  }
+
+  function isGtiaReverseBlackMode(line) {
+    const mode = line ? line.anticGtiaMode & 0x03 : 0;
+    // FX 1.26 makes the validated reversed-hires combinations in every GTIA
+    // special mode opaque palette color 0. The rule is intentionally limited
+    // to valid raw hires pairs; other source-mode combinations remain open.
+    return mode !== 0;
+  }
+
+  function isGtiaMode10(line) {
+    return !!line && (line.anticGtiaMode & 0x03) === 2;
+  }
+
+  function isGtiaMode9Or11(line) {
+    const mode = line ? line.anticGtiaMode & 0x03 : 0;
+    return mode === 1 || mode === 3;
+  }
+
+  function reverseHiresColor(line, map, sourceBits, pixel) {
+    if (!sourceBits) return -1;
+    const pair = pixel & ~1;
+    const left = sourceBits[pair];
+    const right = sourceBits[pair + 1];
+    // $ff marks a position outside mode-F's fetched ANTIC data. Do not let
+    // border/special-mode pixels acquire a fabricated playfield color.
+    if (left > 1 || right > 1) return -1;
+    switch ((left << 1) | right) {
+      case 0: return map.playfield0;
+      case 1: return map.playfield1;
+      case 2: return map.playfield2;
+      default: return line.anticPf3 & 0xff;
+    }
+  }
+
+  function isAnticLoresMode(line) {
+    const mode = line.anticMode & 0x0f;
+    // AHRM defines modes 4-E as lores. Two-bit sources retain their value;
+    // modes 6/7 derive that value from the glyph bit and its PF0-PF3 character
+    // color selector. ANTIC holds a lower-resolution source value across its
+    // emitted pixels; each emitted copy is reinterpreted as the hires pair.
+    return mode >= 0x04 && mode <= 0x0e;
+  }
+
+  function isAnticLoresCharacterMode(line) {
+    const mode = line.anticMode & 0x0f;
+    return mode === 0x04 || mode === 0x05;
+  }
+
+  function isAnticLoresSelectorCharacterMode(line) {
+    const mode = line.anticMode & 0x0f;
+    return mode === 0x06 || mode === 0x07;
+  }
+
+  function reverseLoresColor(map, sourceValues, pixel) {
+    if (!sourceValues) return -1;
+    const source = sourceValues[pixel];
+    if (source > 3) return -1;
+    // Rev changes a two-bit lores value into two hires samples. Its high and
+    // low bits select the PF1 luminance over a PF2 base respectively; they
+    // are not remapped to PF1/PF2 colors. This follows AHRM's lores-to-hires
+    // rule and preserves the original two-pixel phase.
+    const highBit = (source >>> 1) & 1;
+    const lowBit = source & 1;
+    const bit = (pixel & 1) === 0 ? highBit : lowBit;
+    return bit
+      ? ((map.playfield2 & 0xf0) | (map.playfield1 & 0x0f))
+      : map.playfield2;
+  }
+
+  function reverseLoresMode10Color(map, sourceValues, pixel) {
+    if (!sourceValues) return -1;
+    // In the externally validated FX 1.26 mode-4 case, GTIA mode 10 consumes
+    // two adjacent two-bit lores values as one raw nibble. Of the measured
+    // values, only nibble 1 selects the attribute cell's PF0; 2, 3, and $B
+    // produce palette color 0. Keep this deliberately narrow until the other
+    // lores modes and raw-nibble values have their own evidence.
+    const group = pixel & ~3;
+    const high = sourceValues[group];
+    const low = sourceValues[group + 2];
+    if (high > 3 || low > 3) return -1;
+    return ((high << 2) | low) === 1 ? map.playfield0 : 0;
+  }
+
+  function hasReverseLoresSource(sourceValues, pixel) {
+    return !!sourceValues && sourceValues[pixel] <= 3;
   }
 
   function compositeOverlayPixel(state, video, target, targetPixel, priorityPixel, color, sourceByte, overlayPalette, priorityMask, attribute) {
@@ -298,7 +433,16 @@
       renderTextXdlLine(state, video, scanline, line);
       return;
     }
-    if (line.mode !== "standard" && line.mode !== "lores" && line.mode !== "hires") return;
+    if (line.mode !== "standard" && line.mode !== "lores" && line.mode !== "hires") {
+      // Attribute-map-only XDL entries have no overlay renderer to clear the
+      // RGB plane.  Leaving its prior line contents in place both hides the
+      // current map output and makes stale pixels survive across frames.
+      const atariBase = (scanline | 0) * 456 + 128;
+      video.vbxeRgb.fill(0, atariBase, atariBase + 256);
+      const target = hiresTarget(video, scanline);
+      if (target) target.pixels.fill(0, target.rowBase, target.rowBase + target.width);
+      return;
+    }
     const atariBase = (scanline | 0) * 456 + 128;
     const hires = line.mode === "hires";
     const target = hires ? hiresTarget(video, scanline) : null;
@@ -326,6 +470,120 @@
       const map = attributeMapCell(state, line,
         target ? (x >> 1) : Math.floor(x * 320 / 256));
       compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, sourceByte, line.overlayPalette, priorityMask, map);
+    }
+  }
+
+  function applyPlayfieldAttributes(state, video, scanline, line) {
+    if (!line || !line.attributeMapEnabled || !video || !video.vbxeRgb) return;
+    const atariBase = (scanline | 0) * 456 + 128;
+    if (atariBase < 0 || atariBase + 256 > video.vbxeRgb.length) return;
+    const extendedColor = (state.videoControlActive & 0x02) !== 0;
+
+    // ANTIC normal-width playfields occupy 320 physical hires samples from
+    // x=96 through x=415 (AHRM 6.2). Attribute maps are specified in VBXE
+    // standard pixels, so drawing only through the old 256-sample viewport
+    // silently shrinks their signal. Mirror the final map color into the
+    // 640-sample presentation plane, two samples per ANTIC source pixel.
+    const nativeTarget = hiresTarget(video, scanline);
+    const nativeAtariBase = (scanline | 0) * 456 + 96;
+    if (nativeTarget && nativeAtariBase >= 0 &&
+        nativeAtariBase + 320 <= video.priority.length) {
+      // Direct state callers do not have renderXdlLine's off-overlay clear.
+      if (!line.mode || line.mode === "off") {
+        nativeTarget.pixels.fill(0, nativeTarget.rowBase,
+          nativeTarget.rowBase + nativeTarget.width);
+      }
+      for (let standardX = 0; standardX < 320; standardX++) {
+        const sourcePixel = nativeAtariBase + standardX;
+        const targetPixel = nativeTarget.base + standardX * 2;
+        // A legacy standard/lores overlay is still stored in vbxeRgb. Do not
+        // let a playfield override appear above it while that renderer path is
+        // migrated to the native plane.
+        const legacyOverlay = video.vbxeRgb[
+          atariBase + Math.floor(standardX * 256 / 320)
+        ];
+        if (nativeTarget.pixels[targetPixel] !== 0 || legacyOverlay !== 0) continue;
+        const visible = video.vbxeCollisionPriority &&
+            (video.vbxeCollisionPriority[sourcePixel] & VBXE_CONTRIBUTOR_VALID) !== 0
+          ? video.vbxeCollisionPriority[sourcePixel] & ~VBXE_CONTRIBUTOR_VALID
+          : (video.priority ? video.priority[sourcePixel] : 0);
+        const map = attributeMapCell(state, line, standardX);
+        if (!map) continue;
+        let color = -1;
+        if (map.reverse && isGtiaReverseBlackMode(line) && isAnticHiresSource(line) &&
+            reverseHiresColor(line, map, video.anticSourceBits, sourcePixel) >= 0) {
+          // The raw GTIA mode-9/11 fields are visible without VBXE, but FX
+          // 1.26 composes these validated reversed cells as opaque palette 0.
+          color = 0;
+        } else if (map.reverse && isGtiaMode10(line) && isAnticLoresCharacterMode(line)) {
+          color = reverseLoresMode10Color(map, video.anticSourceLores, sourcePixel);
+        } else if (map.reverse && isGtiaMode10(line) && isAnticLoresSelectorCharacterMode(line) &&
+            hasReverseLoresSource(video.anticSourceLores, sourcePixel)) {
+          color = 0;
+        } else if (map.reverse && isGtiaMode9Or11(line) && isAnticLoresCharacterMode(line) &&
+            hasReverseLoresSource(video.anticSourceLores, sourcePixel)) {
+          color = 0;
+        } else if (map.reverse && !hasGtiaSpecialMode(line) && isAnticHiresSource(line)) {
+          color = reverseHiresColor(line, map, video.anticSourceBits, sourcePixel);
+        } else if (map.reverse && !hasGtiaSpecialMode(line) && isAnticLoresMode(line)) {
+          color = reverseLoresColor(map, video.anticSourceLores, sourcePixel);
+        } else if (!map.reverse && isAnticModeF(line) &&
+            (visible & PRIO_PF2) &&
+            attributeMapPf3MaskBit(line, standardX, map.playfield0)) {
+          color = line.anticPf3 & 0xff;
+        } else if (visible & PRIO_PF0) color = map.playfield0;
+        else if (visible & PRIO_PF1) color = map.playfield1;
+        else if (visible & PRIO_PF2) color = map.playfield2;
+        if (color === undefined || color === null || color < 0) continue;
+        color = extendedColor ? color & 0xff : color & 0xfe;
+        const p = ((map.playfieldPalette * 256 + color) * 3) | 0;
+        const rgb = ((255 << 24) | (state.palette[p + 2] << 16) |
+          (state.palette[p + 1] << 8) | state.palette[p]) >>> 0;
+        nativeTarget.pixels[targetPixel] = rgb;
+        nativeTarget.pixels[targetPixel + 1] = rgb;
+      }
+    }
+
+    for (let x = 0; x < 256; x++) {
+      const pixel = atariBase + x;
+      // A visible overlay already has its final RGB value in this plane and
+      // must remain above the playfield override.
+      if (video.vbxeRgb[pixel] !== 0) continue;
+      const visible = video.vbxeCollisionPriority &&
+          (video.vbxeCollisionPriority[pixel] & VBXE_CONTRIBUTOR_VALID) !== 0
+        ? video.vbxeCollisionPriority[pixel] & ~VBXE_CONTRIBUTOR_VALID
+        : (video.priority ? video.priority[pixel] : 0);
+      const standardX = Math.floor(x * 320 / 256);
+      const map = attributeMapCell(state, line, standardX);
+      if (!map) continue;
+      let color = -1;
+      if (map.reverse && isGtiaReverseBlackMode(line) && isAnticHiresSource(line) &&
+          reverseHiresColor(line, map, video.anticSourceBits, pixel) >= 0) {
+        color = 0;
+      } else if (map.reverse && isGtiaMode10(line) && isAnticLoresCharacterMode(line)) {
+        color = reverseLoresMode10Color(map, video.anticSourceLores, pixel);
+      } else if (map.reverse && isGtiaMode10(line) && isAnticLoresSelectorCharacterMode(line) &&
+          hasReverseLoresSource(video.anticSourceLores, pixel)) {
+        color = 0;
+      } else if (map.reverse && isGtiaMode9Or11(line) && isAnticLoresCharacterMode(line) &&
+          hasReverseLoresSource(video.anticSourceLores, pixel)) {
+        color = 0;
+      } else if (map.reverse && !hasGtiaSpecialMode(line) && isAnticHiresSource(line)) {
+        color = reverseHiresColor(line, map, video.anticSourceBits, pixel);
+      } else if (map.reverse && !hasGtiaSpecialMode(line) && isAnticLoresMode(line)) {
+        color = reverseLoresColor(map, video.anticSourceLores, pixel);
+      } else if (!map.reverse && isAnticModeF(line) &&
+          (visible & PRIO_PF2) &&
+          attributeMapPf3MaskBit(line, standardX, map.playfield0)) {
+        color = line.anticPf3 & 0xff;
+      } else if (visible & PRIO_PF0) color = map.playfield0;
+      else if (visible & PRIO_PF1) color = map.playfield1;
+      else if (visible & PRIO_PF2) color = map.playfield2;
+      if (color === undefined || color === null || color < 0) continue;
+      color = extendedColor ? color & 0xff : color & 0xfe;
+      const p = ((map.playfieldPalette * 256 + color) * 3) | 0;
+      video.vbxeRgb[pixel] = ((255 << 24) | (state.palette[p + 2] << 16) |
+        (state.palette[p + 1] << 8) | state.palette[p]) >>> 0;
     }
   }
 
@@ -518,6 +776,7 @@
     verticalSync: verticalSync,
     nextXdlLine: nextXdlLine,
     renderXdlLine: renderXdlLine,
+    applyPlayfieldAttributes: applyPlayfieldAttributes,
     attributeMapCell: attributeMapCell,
     collisionBitsForPriority: collisionBitsForPriority,
     isAddress: isAddress,

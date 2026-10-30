@@ -98,6 +98,7 @@
       const playfieldCycles = bytesPerLine * bytesPerLineFactor;
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const sourceLores = io.videoOut.anticSourceLores || null;
       let dstIndex = io.drawLine.destIndex | 0;
       let dispAddr = io.drawLine.displayMemoryAddress & 0xffff;
 
@@ -115,6 +116,12 @@
         fillBkgPf012ColorTable(sram, aColorTable);
         const bitPair = bitPairPhaseShift ? phase >> bitPairPhaseShift : phase;
         const idx = (data >> (6 - (bitPair * 2))) & 0x03;
+        if (sourceLores) {
+          sourceLores[dstIndex] = idx;
+          sourceLores[dstIndex + 1] = idx;
+          sourceLores[dstIndex + 2] = idx;
+          sourceLores[dstIndex + 3] = idx;
+        }
         const c = aColorTable[idx] & 0xff;
         const p = PRIORITY_TABLE_BKG_PF012[idx] & 0xff;
         dstIndex = writePixelQuad(dst, prio, dstIndex, c, p);
@@ -138,6 +145,7 @@
       const playfieldCycles = bytesPerLine * 8;
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const sourceLores = io.videoOut.anticSourceLores || null;
       let dstIndex = io.drawLine.destIndex | 0;
       let dispAddr = io.drawLine.displayMemoryAddress & 0xffff;
 
@@ -154,6 +162,14 @@
 
         const c = data & mask ? (sram[IO_COLPF0] & 0xff) : (sram[IO_COLBK] & 0xff);
         const p = data & mask ? PRIO_PF0 : PRIO_BKG;
+        // Both lores encodings in this two-color mode carry AN0-1 = 00:
+        // background is 000 and PF0 is 100. Reverse therefore sees 00.
+        if (sourceLores) {
+          sourceLores[dstIndex] = 0;
+          sourceLores[dstIndex + 1] = 0;
+          sourceLores[dstIndex + 2] = 0;
+          sourceLores[dstIndex + 3] = 0;
+        }
         dstIndex = writePixelQuad(dst, prio, dstIndex, c, p);
         mask >>= 1;
         clockAction(ctx);
@@ -174,6 +190,7 @@
       const playfieldCycles = bytesPerLine * 4;
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const sourceLores = io.videoOut.anticSourceLores || null;
       let dstIndex = io.drawLine.destIndex | 0;
       let dispAddr = io.drawLine.displayMemoryAddress & 0xffff;
 
@@ -190,11 +207,19 @@
 
         let c = data & mask ? (sram[IO_COLPF0] & 0xff) : (sram[IO_COLBK] & 0xff);
         let p = data & mask ? PRIO_PF0 : PRIO_BKG;
+        if (sourceLores) {
+          sourceLores[dstIndex] = 0;
+          sourceLores[dstIndex + 1] = 0;
+        }
         dstIndex = writePixelPair(dst, prio, dstIndex, c, p);
         mask >>= 1;
 
         c = data & mask ? (sram[IO_COLPF0] & 0xff) : (sram[IO_COLBK] & 0xff);
         p = data & mask ? PRIO_PF0 : PRIO_BKG;
+        if (sourceLores) {
+          sourceLores[dstIndex] = 0;
+          sourceLores[dstIndex + 1] = 0;
+        }
         dstIndex = writePixelPair(dst, prio, dstIndex, c, p);
         mask >>= 1;
         clockAction(ctx);
@@ -217,6 +242,7 @@
       const playfieldCycles = bytesPerLine * 2;
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const sourceLores = io.videoOut.anticSourceLores || null;
       let dstIndex = io.drawLine.destIndex | 0;
       let dispAddr = io.drawLine.displayMemoryAddress & 0xffff;
 
@@ -232,14 +258,24 @@
         }
 
         fillBkgPf012ColorTable(sram, aColorTable);
-        let c = aColorTable[(data >> 6) & 0x3] & 0xff;
-        let p = PRIORITY_TABLE_BKG_PF012[(data >> 6) & 0x3] & 0xff;
+        let source = (data >> 6) & 0x3;
+        if (sourceLores) {
+          sourceLores[dstIndex] = source;
+          sourceLores[dstIndex + 1] = source;
+        }
+        let c = aColorTable[source] & 0xff;
+        let p = PRIORITY_TABLE_BKG_PF012[source] & 0xff;
         dstIndex = writePixelPair(dst, prio, dstIndex, c, p);
 
         data = (data << 2) & 0xff;
 
-        c = aColorTable[(data >> 6) & 0x3] & 0xff;
-        p = PRIORITY_TABLE_BKG_PF012[(data >> 6) & 0x3] & 0xff;
+        source = (data >> 6) & 0x3;
+        if (sourceLores) {
+          sourceLores[dstIndex] = source;
+          sourceLores[dstIndex + 1] = source;
+        }
+        c = aColorTable[source] & 0xff;
+        p = PRIORITY_TABLE_BKG_PF012[source] & 0xff;
         dstIndex = writePixelPair(dst, prio, dstIndex, c, p);
 
         data = (data << 2) & 0xff;
@@ -262,6 +298,7 @@
       const playfieldCycles = bytesPerLine * 2;
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const sourceBits = io.videoOut.anticSourceBits || null;
       let dstIndex = io.drawLine.destIndex | 0;
       let dispAddr = io.drawLine.displayMemoryAddress & 0xffff;
       const colorTable = SCRATCH_GTIA_COLOR_TABLE;
@@ -278,13 +315,24 @@
           mask = 0x80;
         }
 
+        // In GTIA special modes the four hires bits are emitted as one
+        // expanded pixel group. Retain the original bit stream for VBXE Rev.
+        if (sourceBits && priorMode !== 0) {
+          sourceBits[dstIndex] = data & mask ? 1 : 0;
+          sourceBits[dstIndex + 1] = data & (mask >> 1) ? 1 : 0;
+          sourceBits[dstIndex + 2] = data & (mask >> 2) ? 1 : 0;
+          sourceBits[dstIndex + 3] = data & (mask >> 3) ? 1 : 0;
+        }
+
         if (priorMode === 0) {
           const cColor0 = sram[IO_COLPF2] & 0xff;
           const cColor1 =
             ((sram[IO_COLPF2] & 0xf0) | (sram[IO_COLPF1] & 0x0f)) & 0xff;
 
           for (let k = 0; k < 4; k++) {
-            if (data & mask) {
+            const sourceBit = data & mask ? 1 : 0;
+            if (sourceBits) sourceBits[dstIndex] = sourceBit;
+            if (sourceBit) {
               dstIndex = writePixel(dst, prio, dstIndex, cColor1, PRIO_PF1);
             } else {
               dstIndex = writePixel(dst, prio, dstIndex, cColor0, PRIO_PF2);

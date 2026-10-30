@@ -594,6 +594,7 @@
           vbxeVerticalSync: vbxeApi.verticalSync,
           vbxeNextXdlLine: vbxeApi.nextXdlLine,
           vbxeRenderXdlLine: vbxeApi.renderXdlLine,
+          vbxeApplyPlayfieldAttributes: vbxeApi.applyPlayfieldAttributes,
           PRIO_BKG: PRIO_BKG,
           PRIO_PF0: PRIO_PF0,
           PRIO_PF1: PRIO_PF1,
@@ -895,7 +896,7 @@
       onDiskActivity: notifyDiskActivity,
       memoryExpansion: memoryExpansion,
       createVbxeState: function () {
-        return vbxeApi.createState(vbxeConfig);
+        return vbxeApi.createState(vbxeConfig, video.paletteRgb);
       },
       cloneVbxeState: vbxeApi.cloneState,
       restoreVbxeState: vbxeApi.restoreState,
@@ -1051,6 +1052,8 @@
       video.pixels.fill(0);
       video.priority.fill(0);
       if (video.vbxeCollisionPriority) video.vbxeCollisionPriority.fill(0);
+      if (video.anticSourceBits) video.anticSourceBits.fill(0xff);
+      if (video.anticSourceLores) video.anticSourceLores.fill(0xff);
       if (video.vbxeRgb) video.vbxeRgb.fill(0);
       if (video.presentPixels) video.presentPixels.fill(0);
       if (video.presentPriority) video.presentPriority.fill(0);
@@ -1096,7 +1099,7 @@
     const syncAudioTurboMode = audioRuntime.syncAudioTurboMode;
 
     machine.ctx.ioData = makeIoData(video);
-    machine.ctx.ioData.vbxe = vbxeApi.createState(vbxeConfig);
+    machine.ctx.ioData.vbxe = vbxeApi.createState(vbxeConfig, video.paletteRgb);
     machine.ctx.ioData.vbxeMapSync = memoryRuntime.setupMemoryMap;
     machine.ctx.ioData.optionOnStart = optionOnStart;
     machine.ctx.ioData.sioTurbo = sioTurbo;
@@ -1471,6 +1474,8 @@
       video.pixels.fill(0);
       video.priority.fill(0);
       if (video.vbxeCollisionPriority) video.vbxeCollisionPriority.fill(0);
+      if (video.anticSourceBits) video.anticSourceBits.fill(0xff);
+      if (video.anticSourceLores) video.anticSourceLores.fill(0xff);
       if (video.vbxeRgb) video.vbxeRgb.fill(0);
       if (video.presentPixels) video.presentPixels.fill(0);
       if (video.presentPriority) video.presentPriority.fill(0);

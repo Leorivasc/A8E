@@ -179,6 +179,18 @@
       playfieldScratchVbxeCollisionPriority: video.playfieldScratchVbxeCollisionPriority
         ? new Uint16Array(video.playfieldScratchVbxeCollisionPriority)
         : null,
+      anticSourceBits: video.anticSourceBits
+        ? new Uint8Array(video.anticSourceBits)
+        : null,
+      anticSourceLores: video.anticSourceLores
+        ? new Uint8Array(video.anticSourceLores)
+        : null,
+      playfieldScratchAnticSourceBits: video.playfieldScratchAnticSourceBits
+        ? new Uint8Array(video.playfieldScratchAnticSourceBits)
+        : null,
+      playfieldScratchAnticSourceLores: video.playfieldScratchAnticSourceLores
+        ? new Uint8Array(video.playfieldScratchAnticSourceLores)
+        : null,
     };
   }
 
@@ -226,10 +238,16 @@
     if (video.presentVbxeRgb) video.presentVbxeRgb.fill(0);
     if (video.vbxeHiresRgb) video.vbxeHiresRgb.fill(0);
     if (video.presentVbxeHiresRgb) video.presentVbxeHiresRgb.fill(0);
+    if (video.anticSourceBits) video.anticSourceBits.fill(0xff);
+    if (video.anticSourceLores) video.anticSourceLores.fill(0xff);
     video.playfieldScratchPixels.fill(0);
     video.playfieldScratchPriority.fill(0);
     if (video.playfieldScratchVbxeCollisionPriority)
       {video.playfieldScratchVbxeCollisionPriority.fill(0);}
+    if (video.playfieldScratchAnticSourceBits)
+      {video.playfieldScratchAnticSourceBits.fill(0xff);}
+    if (video.playfieldScratchAnticSourceLores)
+      {video.playfieldScratchAnticSourceLores.fill(0xff);}
     if (state.pixels) {
       video.pixels.set(new Uint8Array(state.pixels).subarray(0, video.pixels.length), 0);
     }
@@ -289,6 +307,36 @@
       restorePriorityBuffer(
         video.playfieldScratchVbxeCollisionPriority,
         state.playfieldScratchVbxeCollisionPriority,
+      );
+    }
+    if (state.anticSourceBits && video.anticSourceBits) {
+      video.anticSourceBits.set(
+        new Uint8Array(state.anticSourceBits).subarray(0, video.anticSourceBits.length),
+        0,
+      );
+    }
+    if (state.anticSourceLores && video.anticSourceLores) {
+      video.anticSourceLores.set(
+        new Uint8Array(state.anticSourceLores).subarray(0, video.anticSourceLores.length),
+        0,
+      );
+    }
+    if (state.playfieldScratchAnticSourceBits && video.playfieldScratchAnticSourceBits) {
+      video.playfieldScratchAnticSourceBits.set(
+        new Uint8Array(state.playfieldScratchAnticSourceBits).subarray(
+          0,
+          video.playfieldScratchAnticSourceBits.length,
+        ),
+        0,
+      );
+    }
+    if (state.playfieldScratchAnticSourceLores && video.playfieldScratchAnticSourceLores) {
+      video.playfieldScratchAnticSourceLores.set(
+        new Uint8Array(state.playfieldScratchAnticSourceLores).subarray(
+          0,
+          video.playfieldScratchAnticSourceLores.length,
+        ),
+        0,
       );
     }
   }

@@ -26,8 +26,160 @@
   and assembler regressions pass. Attribute-map overscrolling beyond a cell
   dimension is validated by the 12-pixel checkerboard diagnostic: Altirra and
   jsA8E match for the initial partial cell and the continuing checker phase.
-  The remaining Attribute Map scope is playfield-color/PF3-mask and reversal,
-  which requires work in the pre-GTIA playfield path.
+  Attribute-map cells now retain their three playfield values, playfield
+  palette, and reverse flag as well as their already-rendered overlay fields.
+  The first playfield subset applies per-cell PF0-PF2 palette colors to
+  visible normal playfield pixels while preserving an overlay that won
+  priority. `VBXE_ATTRMAP_PF0_V4_TEST.XEX` is the first external differential
+  for that path: it contains no overlay and uses palette-0 PF0 overrides;
+  it clears the whole attribute row and sets the ordinary Atari PF0 to black,
+  so the region outside the normal-width map aperture is deterministic too.
+  The reproducible `VBXE_ATTRMAP_PF12_TEST.XEX` extends the external
+  differential scene to the PF1/PF2 byte fields with a mode-F bit pattern;
+  it stores the complete 7.5 KiB mode-F screen, XDL, and map in known local
+  VRAM through MEMAC B, eliminating CPU/ANTIC extended-RAM bank ambiguity;
+  it also clears GTIA `PRIOR`, which fixes mode F to its documented PF1/PF2
+  interpretation before comparison. PF3 masks and reversal remain pending.
+  Its 191-line display-list loop uses `BNE` rather than signed `BPL`: the
+  original `$BE` counter was negative on its first iteration and generated
+  only one mode-F line. The ROM-backed `vbxe_attrmap_pf12_boot` regression
+  now checks all 191 non-LMS lines plus the complete 192-line VBXE RGB field.
+  Altirra and jsA8E externally match for that field, validating PF1/PF2 as
+  well as the earlier PF0 path. Added a deterministic XCOLOR diagnostic with
+  odd map entries and a state regression that verifies odd values are retained
+  when VIDEO_CONTROL enables extended color; Altirra and jsA8E also match for
+  its green/magenta result. The per-cell playfield-palette diagnostic also
+  matches externally: alternating cells select palette 0 red and palette 3
+  blue for the identical PF0 color index.
+  Headless automation now loads the VBXE device module too, so its XEX runs
+  can inspect the same VBXE configuration and render path as the browser.
+  Attribute composition now also receives the active ANTIC mode at the
+  ANTIC/VBXE boundary. This is deliberately preparatory: exact PF3-mask and
+  reverse behavior must use the source mode and raw ANTIC bits, rather than
+  incorrectly infer either from the final GTIA color. The first PF3-mask
+  subset now covers ordinary non-reversed ANTIC mode F: a set map-mask bit
+  replaces a visible PF2 source with the palette-selected GTIA PF3 color,
+  at AHRM's 1/2/4 standard-pixel mask resolutions. Reverse interpretation,
+  character sources, and GTIA-special modes remain pending.
+  `VBXE_ATTRMAP_PF3_TEST.XEX` supplies an all-PF2 mode-F field with an `$AA`
+  PF3 mask per 8-pixel cell, producing alternating green PF3 and blue PF2
+  pixels. Its ROM-backed regression verifies those two colors on all 192
+  display lines. Altirra and jsA8E externally match in the active field for
+  mask phase, density, and green/blue colors; isolated Altirra pixels below
+  the 192-line field are outside the diagnostic's active display and are
+  treated as host presentation.
+  Reverse mode now preserves the raw mode-F ANTIC bit stream through the
+  playfield scratch/copy path. For a reverse attribute cell, adjacent source
+  bits are decoded as PF0/PF1/PF2/PF3, with byte 0 again acting as PF0 and
+  PF3 coming from the shadowed GTIA register; unfetched/border positions are
+  explicitly excluded. `VBXE_ATTRMAP_REVERSE_TEST.XEX` repeats source pairs
+  `$1B` and expects doubled red/blue/green/magenta PF0-PF3 stripes. Its
+  ROM-backed 192-line assertion and the complete focused VBXE suite pass.
+  Altirra and jsA8E externally match for color order, phase, and stripe
+  width. Reverse decoding for GTIA-special modes remains pending. AHRM
+  identifies ANTIC character modes 2 and 3 as hires, so their decoded glyph
+  bits now share the mode-F PF0-PF3 pair interpretation.
+  `VBXE_ATTRMAP_REVERSE_CHAR_TEST.asm` renders a mode-2 `$1B`
+  glyph pattern and its ROM-backed regression verifies the PF0/PF1/PF2/PF3
+  sequence across all 192 scanlines. Multicolor character modes 4 and 5 use
+  two-bit lores glyph values at the same cadence as D/E, so they now use the
+  same lores-to-hires rule. `VBXE_ATTRMAP_REVERSE_LORES_CHAR_TEST.asm` covers
+  mode 4 with `00`/`01`/`10`/`11` glyph pairs and its ROM-backed assertion
+  verifies the full 192-line field. The D/E lores subset follows AHRM's rule
+  that lores data becomes
+  pairs of hires pixels: each original two-bit lores value becomes two hires
+  samples, on a PF2 base, and each set source bit substitutes PF1's luminance
+  while retaining PF2's hue. It is therefore not a PF0-PF3 lookup. Raw D/E
+  values are carried through the scratch/copy and snapshot paths; borders and
+  unrelated modes remain marked invalid. `VBXE_ATTRMAP_REVERSE_LORES_PROBE.XEX`
+  uses wide `00`/`01`/`10`/`11` source bands and distinct PF0/PF1/PF2 map
+  colors to identify the real hardware mapping without high-frequency display
+  ambiguity. It uses a narrow 32-byte ANTIC row because it divides ANTIC's
+  4 KiB display-memory window exactly; the earlier 40-byte version crossed
+  that window and therefore changed phase after its wrap. Video snapshots
+  retain raw hires bits from modes 2/3/F and raw lores values from 4-E used
+  by the reverse paths. Modes 8/A retain each repeated two-bit source value
+  so Reverse preserves its lower-resolution phase. Modes 6/7 combine the
+  glyph bit with their PF0-PF3 character selector, while binary modes 9/B/C
+  correctly collapse background and PF0 to the same hires `00` pair. Unit
+  coverage verifies each of those source encodings. Modes 2/3/F now also
+  retain their raw hires bits during the currently supported GTIA-special
+  rendering paths, so a later special-mode compositor does not lose Reverse's
+  input; special-mode composition semantics themselves remain pending.
+  External comparison then exposed that the attribute-map output was still
+  presented through the legacy 256-pixel Atari compositor aperture, shrinking
+  a normal-width 320-pixel field. Attribute-map colors now also enter the
+  640-sample presentation plane directly from ANTIC's native normal-width
+  span (physical x=96-415), with two presentation samples per ANTIC pixel.
+  This is a signal-geometry correction, not a host-window scaling change.
+  The legacy plane remains only as a compatibility mirror while standard and
+  lores overlay rendering are migrated to the same native plane.
+  The probe also exposed two independent jsA8E XDL errors before the lores
+  behavior could be compared: repeat values were consumed on their loading
+  line (so `$BF` lasted 191 rather than 192 lines), and an attribute-map-only
+  entry did not clear stale overlay RGB before playfield composition. Both are
+  now corrected and covered by device-state regressions. The reverse diagnostic now also places an explicit `AtMapOff` +
+  `End` entry immediately after its 192-line repeat: per AHRM, a repeat does
+  not terminate an XDL, so this prevents later VRAM from being interpreted as
+  more attribute-map lines.
+  `VBXE_ATTRMAP_REVERSE_GTIA9_TEST.XEX` reuses the same raw `$1B` source with
+  GTIA mode 9 enabled. Altirra shows ordinary Rev stripes only for the setup
+  frame, then its stable mode-9 background is black. As AHRM specifies the
+  individual Rev and GTIA mechanisms but not their final combined compositor.
+  The paired no-XDL baseline confirms AHRM mode-9 luminance bands in both
+  emulators; with the reversed attribute map active, Altirra instead produces
+  opaque palette color 0. jsA8E now implements that limited FX 1.26 mode-9
+  result. Other source-mode combinations remain explicitly pending.
+  `GTIA_MODE9_BASELINE_TEST.XEX` uses the same `$1B` ANTIC source but disables
+  VBXE VIDEO_CONTROL, isolating AHRM mode 9's raw-nibble luminance result from
+  any XDL or attribute-map behavior.
+  The paired mode-11 baseline/reverse diagnostics set `COLBK` to `$0E`, making
+  AHRM's raw-nibble hue selection observable before composition. Both
+  emulators show the same cyan/yellow baseline; with the reversed map,
+  Altirra's stable result is opaque palette color 0 after the setup frame.
+  jsA8E now implements that equally narrow FX 1.26 mode-11 result. The
+  validated mode-F behavior was then confirmed with both other AHRM hires
+  character sources: mode 2 in modes 9/10/11 and tall mode 3 in mode 10.
+  Other source-mode combinations remain pending.
+  `GTIA_MODE10_BASELINE_TEST.XEX` and
+  `VBXE_ATTRMAP_REVERSE_GTIA10_TEST.XEX` use the same controlled `$1B`
+  source and bright `$0E` background to isolate the remaining mode-10
+  baseline and reverse composition. Both emulators show the same grayscale
+  baseline; with Reverse, Altirra makes the 192-line active field opaque
+  palette color 0 (apart from its final presentation-edge line). jsA8E now
+  applies the same narrow FX 1.26 result to valid hires pairs in all three
+  GTIA special modes; other source-mode combinations remain pending.
+  `VBXE_ATTRMAP_REVERSE_CHAR_GTIA10_TEST.XEX` carries that check to AHRM's
+  other hires source, ANTIC mode 2, before generalizing the externally
+  established mode-F result to character data.
+  The analogous mode-4 lores probe explicitly clears all four playfield
+  registers, including `COLPF0`; its `$1B` source uses that register, so
+  omitting it makes a cold-reset color difference look like a GTIA/VBXE
+  composition difference.
+  The resulting controlled mode-10 lores probes show that `$1B` renders as
+  alternating PF0/color-0 groups; changing map PF0 changes the visible
+  Altirra group, while raw `$23` (nibbles 2 and 3) is black. jsA8E now
+  implements only that observed mode-4/GTIA-10 subset by combining each two
+  adjacent two-bit sources into one raw nibble: nibble 1 selects map PF0, and
+  measured 2, 3, and `$B` select palette color 0. Other lores special-mode
+  combinations remain pending.
+  Its stable PF0/color-0 alternation externally matches Altirra for the
+  controlled mode-4/GTIA-10 `$1B` field. Mode-4 combinations with GTIA 9 and
+  11 are separate from mode 10: both externally produce opaque palette color
+  0 for valid lores sources, which jsA8E now implements without generalizing
+  to graphics modes 6-E. Tall lores character mode 5 externally confirms the
+  same GTIA-10 PF0/color-0 pattern, so the shared mode-4/5 source path now
+  implements it; its GTIA-9 and GTIA-11 probes likewise confirm opaque color
+  0 in both emulators.
+  ANTIC modes 6/7 are separate again: their glyph-bit/PF-selector sources
+  produce opaque palette color 0 in the controlled GTIA-10 reverse probes,
+  now covered by jsA8E without extrapolating to other special modes.
+  The lores reverse rule is covered both by an isolated four-value test and by a ROM-backed
+  192-line D/E probe regression before the external probes are used for
+  full-frame comparison.
+  The vertical companion probe holds each of `00`, `01`, `10`, and `11` for
+  32 complete lines, making any hardware reinterpretation visible without
+  horizontal resampling ambiguity.
 
 - 2026-10-29: external text diagnostics exposed that the original VBXE RGB
   plane reduced hires/text to the 256-pixel Atari compositor aperture. The

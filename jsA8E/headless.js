@@ -30,6 +30,7 @@ const SCRIPT_PATHS = [
   "js/core/keys.js",
   "js/core/input.js",
   "js/core/hw.js",
+  "js/core/vbxe.js",
   "js/core/state.js",
   "js/core/snapshot_codec.js",
   "js/core/memory.js",

@@ -290,6 +290,29 @@ function testMode45MasksChbaseTo1kAndPassesReflectBit() {
   assert.deepEqual(captures.mode5, [{ chBase: 0xfc00, chactl: 0x04 }]);
 }
 
+function testMode4PreservesTwoBitLoresSourceForVbxeReverse() {
+  const context = createContext();
+  const baseApi = createBaseApi(context);
+  const mode45 = createModeApi(context, "mode_4_5.js", baseApi, {
+    fetchCharacterRow8: function () {
+      return 0x1b;
+    },
+  });
+  const ctx = makeCtx(1);
+  ctx.sram[IO_PRIOR] = 0x00;
+  ctx.ioData.videoOut.anticSourceLores = new Uint8Array(512);
+  ctx.ioData.videoOut.anticSourceLores.fill(0xff);
+  ctx.ram[0] = 0x00;
+
+  mode45.drawLineMode4(ctx);
+
+  assert.deepEqual(
+    Array.from(ctx.ioData.videoOut.anticSourceLores.slice(0, 8)),
+    [0, 0, 1, 1, 2, 2, 3, 3],
+    "mode 4 must preserve each two-bit glyph value at its lores pixel width",
+  );
+}
+
 function testMode67MasksChbaseTo512AndPassesReflectBit() {
   const context = createContext();
   const baseApi = createBaseApi(context);
@@ -326,6 +349,29 @@ function testMode67MasksChbaseTo512AndPassesReflectBit() {
   assert.deepEqual(captures.mode7, [{ chBase: 0xfe00, chactl: 0x04 }]);
 }
 
+function testMode6PreservesGlyphAndCharacterColorAsLoresSource() {
+  const context = createContext();
+  const baseApi = createBaseApi(context);
+  const mode67 = createModeApi(context, "mode_6_7.js", baseApi, {
+    fetchCharacterRow8: function () {
+      return 0xa0;
+    },
+  });
+  const ctx = makeCtx(1);
+  ctx.sram[IO_PRIOR] = 0x00;
+  ctx.ioData.videoOut.anticSourceLores = new Uint8Array(512);
+  ctx.ioData.videoOut.anticSourceLores.fill(0xff);
+  ctx.ram[0] = 0xc0; // PF3 character color, glyph index 0.
+
+  mode67.drawLineMode6(ctx);
+
+  assert.deepEqual(
+    Array.from(ctx.ioData.videoOut.anticSourceLores.slice(0, 8)),
+    [3, 3, 0, 0, 3, 3, 0, 0],
+    "mode 6 must retain its PF selector with each set glyph bit",
+  );
+}
+
 function testMode57StillStealsCharacterDmaOnOddRepeatedScanlines() {
   const context = createContext();
   const baseApi = createBaseApi(context);
@@ -358,6 +404,8 @@ function testMode57StillStealsCharacterDmaOnOddRepeatedScanlines() {
 testCharacterRowReflectsVertically();
 testMode23UsesDelayedChbaseAndLatchesChactlPerScanline();
 testMode45MasksChbaseTo1kAndPassesReflectBit();
+testMode4PreservesTwoBitLoresSourceForVbxeReverse();
 testMode67MasksChbaseTo512AndPassesReflectBit();
+testMode6PreservesGlyphAndCharacterColorAsLoresSource();
 testMode57StillStealsCharacterDmaOnOddRepeatedScanlines();
 console.log("playfield_charset_timing_regression tests passed");

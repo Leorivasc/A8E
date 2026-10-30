@@ -7,6 +7,8 @@
 The JavaScript core implements an optional FX 1.26 device with revision reads,
 `$D640`/`$D740` register decoding, 512 KiB VRAM, palette/write latches,
 vertical-sync latching, soft reset, MEMAC state, and snapshot persistence.
+On power-up palette 0 is initialized from the current GTIA colors; soft reset
+leaves all palettes unchanged, as required by AHRM.
 MEMAC CPU accesses only replace RAM-mapped addresses; ANTIC DMA reads use VRAM
 when their separate enable bit is set, except where Ultimate1MB owns its
 extended-memory window.
@@ -28,9 +30,27 @@ also records a per-pixel final-contributor plane, so P/M graphics hidden by
 comparison. The complex P5/multicolor and GTIA-special-mode combinations
 still need Altirra differential coverage. The initial attribute-map renderer
 selects a P0-P3 priority register and overlay palette per cell and records its
-overlay collision bit. Its playfield-color/PF3-mask and reverse-mode controls,
-which must participate in earlier ANTIC/GTIA composition, are not yet
-implemented.
+overlay collision bit. It also applies palette-selected PF0-PF2 overrides and
+the non-reversed mode-F PF3 mask after the final GTIA contributors are known.
+Mode-F and hires character-mode (2/3) reversal preserve and decode raw ANTIC
+source-bit pairs. For ANTIC lores modes 4-E, reversal retains the AN0-1
+two-bit source value and interprets its bits as the corresponding pair of
+hires pixels, per AHRM; this is distinct from the mode-F PF0-PF3 lookup.
+Modes 6/7 derive that value from the glyph bit and its PF selector; modes
+9/B/C correctly collapse background and PF0 to the shared hires `00` pair.
+Modes 2/3/F also retain raw hires bits while GTIA-special rendering is active.
+The focused FX 1.26 mode-9/10/11 reversed-attribute paths produce opaque
+palette color 0 after their raw-pair validity check. The remaining
+GTIA-special source-mode composition combinations are not yet implemented.
+The separately validated lores-character subset is narrower: ANTIC modes 4/5
+in GTIA mode 10 pack two two-bit sources as a raw nibble; measured nibble 1 selects the
+attribute cell's PF0 and measured nibbles 2, 3, and `$B` select palette color
+0. In the equally focused mode-4/5 probes, GTIA modes 9 and 11 produce opaque
+palette color 0 for valid lores sources. No other lores/GTIA-special
+combination is inferred from these rules.
+For the separately measured mode-6/7 selector-character sources in GTIA mode
+10, valid reverse source values instead produce opaque palette color 0. Other
+mode-6/7 GTIA-special combinations remain unimplemented.
 
 The compatibility target is the VBXE FX 1.26 profile in either the `$D600` or
 `$D700` device range, whose register banks are respectively
@@ -160,9 +180,12 @@ difference belongs in the profile table rather than in call-site conditionals.
 
 The current renderer keeps the ANTIC/GTIA path intact and applies the XDL
 overlay as a final, per-line composition pass. It must not make VBXE a
-replacement for ANTIC, GTIA, DLI, or VBI. The present scope renders a centered
-256-pixel (4:5) normal aperture from 320 standard pixels, 160 lores pixels,
-or 640 hires pixels. Hires unpacks source bytes MSB-first into 4-bit palette
+replacement for ANTIC, GTIA, DLI, or VBI. Standard/lores overlay rendering
+still uses the legacy centered 256-pixel (4:5) compositor aperture, while
+hires uses its native 640-pixel plane. Attribute-map playfield overrides now
+also use that native plane: a normal ANTIC field spans its documented 320
+physical pixels and is written as 640 presentation samples, rather than being
+reduced through the 256-pixel aperture. Hires unpacks source bytes MSB-first into 4-bit palette
 indices; transparency applies to color 0 and `$F` (hires) or `$xF`
 (standard/lores), while `COLMASK` still uses the complete source byte as
 specified by the AHRM. Standard and lores geometry are externally validated
@@ -186,9 +209,26 @@ resolution pixels. The initial implemented subset parses `AtMapOn`/`AtMapOff`,
 the map address/stride, scroll and cell layout. For each active cell it selects
 P0-P3 priority, overrides the overlay palette, and reports an attribute-map
 collision for a non-transparent overlay pixel. The documented 43-cell
-line-buffer limit is enforced. Playfield color overrides, the hires PF3 mask,
-and ANTIC lores/hires reversal remain pending because they have to alter the
-pre-GTIA playfield path rather than only the final overlay pass.
+line-buffer limit is enforced. The map-cell decoder retains the PF0/PF1/PF2
+values, playfield palette, and reverse bit from the exact four-byte hardware
+block.
+The first integration subset applies per-cell PF0-PF2 colors from the selected
+VBXE playfield palette only to visible normal playfield pixels, after the
+existing P/M composition. In non-reversed Graphics 8 / ANTIC mode F, byte 0
+is instead sampled as the documented PF3 mask: a set bit replaces visible PF2
+with palette-selected GTIA PF3 at 1/2/4 pixels per bit according to map-cell
+width. GTIA-special modes and other source-mode combinations remain pending.
+In a reverse mode-F cell, two adjacent saved
+ANTIC bits select PF0, PF1, PF2, or GTIA PF3 respectively; byte 0 is then
+again the palette-selected PF0 override rather than a PF3 mask.
+The mode-F reverse diagnostic has matched Altirra for PF0-PF3 order, phase,
+and doubled-pixel width. The mode-2 character diagnostic applies the same
+AHRM-defined pair mapping to decoded glyph bits. In a reverse
+mode-4-E lores cell, the saved two-bit lores
+value yields two hires pixels on the PF2 base; a set bit substitutes the PF1
+luminance while preserving PF2 hue. This derives directly from AHRM's
+"lores data is reinterpreted as pairs of hires pixels" rule, rather than from
+the appearance of any one emulator.
 
 Altirra differential scenes confirm 8x8 palette cells, map-row stride, and
 ordinary horizontal/vertical scrolling. Scroll values are stored in the XDL as
@@ -232,8 +272,9 @@ Completed in JavaScript:
    snapshots, FX 1.26 revision reads, and both supported register pages.
 2. MEMAC A/B CPU and ANTIC mapping, including A-over-B priority and Ultimate1MB
    precedence.
-3. Palette programming, vertical-sync latching, the minimal XDL decoder, and
-   standard/lores/hires graphics overlays.
+3. Palette programming (including AHRM palette-0 power-up initialization),
+   vertical-sync latching, the minimal XDL decoder, and standard/lores/hires
+   graphics overlays.
 4. The first XDL transparency and priority composition subset, including
    per-cell attribute-map overlay palette/P0-P3 priority/collision handling.
 5. Browser selection for FX 1.26 at `$D600` or `$D700`. VBXE intentionally
@@ -242,9 +283,11 @@ Completed in JavaScript:
 
 Still pending:
 
-1. Text collisions and the remaining attribute-map semantics: playfield color
-   overrides, the hires PF3 mask, reverse mode, exact scrolling/overscrolling,
-   and buffered-fetch timing. The initial text renderer covers 80-column
+1. Text collisions and the remaining attribute-map semantics: reverse mode
+   for GTIA-special and other unimplemented lores sources, non-mode-F
+   PF3/source-mode behavior, exact
+   scrolling/overscrolling, and
+   buffered-fetch timing. The initial text renderer covers 80-column
    character/attribute pairs with 8x8 local fonts; the decoder also retains
    text `ChBase`, scroll offsets, and its 8-line character-row cadence.
 2. Exact collision/priority coverage for remaining GTIA special-mode, P5,
@@ -277,8 +320,10 @@ Tests are to be self-contained XEX diagnostics plus host assertions:
 
 Store generated diagnostics and their expected behavior under
 `implementation/AHRM Validation/` only after their target behavior has been
-verified against AHRM and Altirra. Do not mark a result as hardware-certified
-without a physical-device comparison.
+verified against AHRM. Use Altirra differential runs to expose discrepancies,
+but do not replace an AHRM-defined rule merely to duplicate an emulator's
+output. Do not mark a result as hardware-certified without a physical-device
+comparison.
 
 ## Explicit non-goals for the first milestone
 

@@ -48,6 +48,13 @@
         vbxeHiresRgb: new Uint32Array(VBXE_HIRES_WIDTH * VIEW_H),
         presentVbxeHiresRgb: new Uint32Array(VBXE_HIRES_WIDTH * VIEW_H),
         vbxeHiresWidth: VBXE_HIRES_WIDTH,
+        // Raw mode-F ANTIC bits survive GTIA composition so VBXE attribute
+        // map reverse mode can reinterpret adjacent hires pixels.
+        anticSourceBits: new Uint8Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
+        // Raw mode-D/E ANTIC values survive independently of the final GTIA
+        // color so a reverse attribute cell can switch them to hires pixels.
+        // $ff marks border, blank, and non-lores positions.
+        anticSourceLores: new Uint8Array(PIXELS_PER_LINE * LINES_PER_SCREEN_PAL),
         playfieldScratchPixels: new Uint8Array(
           PLAYFIELD_SCRATCH_WIDTH * LINES_PER_SCREEN_PAL,
         ),
@@ -55,6 +62,12 @@
           PLAYFIELD_SCRATCH_WIDTH * LINES_PER_SCREEN_PAL,
         ),
         playfieldScratchVbxeCollisionPriority: new Uint16Array(
+          PLAYFIELD_SCRATCH_WIDTH * LINES_PER_SCREEN_PAL,
+        ),
+        playfieldScratchAnticSourceBits: new Uint8Array(
+          PLAYFIELD_SCRATCH_WIDTH * LINES_PER_SCREEN_PAL,
+        ),
+        playfieldScratchAnticSourceLores: new Uint8Array(
           PLAYFIELD_SCRATCH_WIDTH * LINES_PER_SCREEN_PAL,
         ),
         playfieldScratchWidth: PLAYFIELD_SCRATCH_WIDTH,

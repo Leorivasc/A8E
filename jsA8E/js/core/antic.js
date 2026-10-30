@@ -60,6 +60,7 @@
     const vbxeVerticalSync = cfg.vbxeVerticalSync;
     const vbxeNextXdlLine = cfg.vbxeNextXdlLine;
     const vbxeRenderXdlLine = cfg.vbxeRenderXdlLine;
+    const vbxeApplyPlayfieldAttributes = cfg.vbxeApplyPlayfieldAttributes;
     const PRIO_BKG = cfg.PRIO_BKG;
     const PRIO_PF0 = cfg.PRIO_PF0;
     const PRIO_PF1 = cfg.PRIO_PF1;
@@ -450,7 +451,19 @@
           if (!io.drawLine.playerMissileInterleaved) drawPlayerMissiles(ctx);
           if (io.vbxe && vbxeNextXdlLine) {
             const xdlLine = vbxeNextXdlLine(io.vbxe, io.video.currentDisplayLine);
-            if (xdlLine && vbxeRenderXdlLine) vbxeRenderXdlLine(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
+            // Attribute-map PF3 and reverse interpretation depend on the
+            // source ANTIC mode, not merely on the composited GTIA color.
+            // Preserve that context at the ANTIC/VBXE boundary for the
+            // attribute compositor.
+            if (xdlLine) {
+              xdlLine.anticMode = io.currentDisplayListCommand & 0x0f;
+              xdlLine.anticPf3 = sram[IO_COLPF3] & 0xff;
+              xdlLine.anticGtiaMode = (sram[IO_PRIOR] >>> 6) & 0x03;
+            }
+            if (xdlLine && vbxeRenderXdlLine)
+              vbxeRenderXdlLine(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
+            if (xdlLine && vbxeApplyPlayfieldAttributes)
+              vbxeApplyPlayfieldAttributes(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
           }
           evaluateModeLineEnd(ctx);
           io.pmgPhantomMissileDmaPending =
