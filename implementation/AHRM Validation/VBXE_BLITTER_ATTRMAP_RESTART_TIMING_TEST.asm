@@ -1,0 +1,142 @@
+; FX 1.26 VBXE attribute-map restart timing probe.
+;
+; The first map row lasts four scanlines. A second AtMapOn + MAPADR then
+; restarts the row on scanline 12, before its normal eight-line rollover.
+; This forces exactly one additional 172-byte attribute-map buffer fetch
+; relative to VBXE_BLITTER_SHORT_ATTRMAP_TIMING_TEST.XEX. The 512x64 mode-0
+; copy records its completion IRQ VCOUNT at $0082.
+.ORG $2000
+DMACTL=$D400
+DLISTL=$D402
+DLISTH=$D403
+NMIEN=$D40E
+VCOUNT=$D40B
+VIDEO=$D640
+XDL0=$D641
+XDL1=$D642
+XDL2=$D643
+MEMACB=$D65D
+BLT0=$D650
+BLT1=$D651
+BLT2=$D652
+BLTSTART=$D653
+IRQCONTROL=$D654
+IRQVEC=$0216
+ROWS=$82
+
+START:
+ LDA #0
+ STA NMIEN
+ STA ROWS
+ LDA #$C0
+ STA MEMACB
+ LDA #<DISPLAY_LIST
+ STA DLISTL
+ LDA #>DISPLAY_LIST
+ STA DLISTH
+ LDA #$22
+ STA DMACTL
+ ; XDL at local $01000: initial map row for four lines, then restart it.
+ LDA #$28
+ STA $5000
+ LDA #2
+ STA $5001
+ LDA #3
+ STA $5002
+ LDA #0
+ STA $5003
+ LDA #$20
+ STA $5004
+ LDA #2
+ STA $5005
+ LDA #$A0
+ STA $5006
+ LDA #0
+ STA $5007
+ LDA #$28
+ STA $5008
+ LDA #2
+ STA $5009
+ LDA #$BB
+ STA $500A
+ LDA #0
+ STA $500B
+ LDA #$20
+ STA $500C
+ LDA #2
+ STA $500D
+ LDA #$A0
+ STA $500E
+ LDA #0
+ STA $500F
+ LDA #$10
+ STA $5010
+ LDA #$80
+ STA $5011
+ LDA #0
+ STA XDL0
+ LDA #$10
+ STA XDL1
+ LDA #0
+ STA XDL2
+ LDA #5
+ STA VIDEO
+ LDA #<IRQ_HANDLER
+ STA IRQVEC
+ LDA #>IRQ_HANDLER
+ STA IRQVEC+1
+ LDY #0
+COPY_BLOCK:
+ LDA BLIT_BLOCK,Y
+ STA $7000,Y
+ INY
+ CPY #21
+ BNE COPY_BLOCK
+ LDA #0
+ STA BLT0
+ LDA #$30
+ STA BLT1
+ STA BLT2
+ LDA #1
+ STA IRQCONTROL
+ CLI
+WAIT_NOT_ZERO:
+ LDA VCOUNT
+ BEQ WAIT_NOT_ZERO
+WAIT_ZERO:
+ LDA VCOUNT
+ BNE WAIT_ZERO
+ LDA #1
+ STA BLTSTART
+WAIT:
+ LDA BLTSTART
+ AND #3
+ BNE WAIT
+ SEI
+READY:
+ JMP READY
+
+IRQ_HANDLER:
+ PHA
+ LDA VCOUNT
+ STA ROWS
+ LDA #0
+ STA IRQCONTROL
+ PLA
+ RTI
+
+; Source $30000, destination $00000, 512 bytes x 64 rows, copy mode.
+BLIT_BLOCK:
+ .BYTE $00,$00,$03, $00,$00,$00, $00,$00,$00, $00,$02,$01
+ .BYTE $FF,$01,$3F, $FF,$00,$00, $00,$00,$00
+
+.ORG $3000
+DISPLAY_LIST:
+ .BYTE $70,$70,$70
+ .BYTE $4F,$00,$40
+ .REPT 191
+ .BYTE $0F
+ .ENDR
+ .BYTE $41,<DISPLAY_LIST,>DISPLAY_LIST
+
+.RUN START

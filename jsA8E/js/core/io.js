@@ -98,6 +98,7 @@
     const vbxeAccess = cfg.vbxeAccess;
     const vbxeSoftReset = cfg.vbxeSoftReset;
     const vbxeMemacAddress = cfg.vbxeMemacAddress;
+    const vbxeNoteMemacAccess = cfg.vbxeNoteMemacAccess;
     const TRIG_REGS = [
       IO_GRAFP3_TRIG0,
       IO_GRAFM_TRIG1,
@@ -453,12 +454,18 @@
         if (vbxeValue !== null && vbxeValue !== undefined) {
           if (value != null && addr >= io.vbxe.page + 0x1d && addr <= io.vbxe.page + 0x1f &&
               typeof io.vbxeMapSync === "function") io.vbxeMapSync(ctx);
+          // IRQ_CONTROL both configures and acknowledges the VBXE's
+          // level-sensitive blitter-complete source. Reconcile every VBXE
+          // write so its clear takes effect before the following instruction.
+          if (value != null && CPU && typeof CPU.reconcileIrq === "function")
+            CPU.reconcileIrq(ctx);
           return vbxeValue & 0xff;
         }
       }
       if (io && io.vbxe && io.vbxe.enabled && vbxeMemacAddress) {
         const localAddress = vbxeMemacAddress(io.vbxe, addr, false);
         if (localAddress >= 0) {
+          if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe);
           if (value != null) io.vbxe.vram[localAddress] = value & 0xff;
           return io.vbxe.vram[localAddress] & 0xff;
         }

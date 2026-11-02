@@ -58,6 +58,10 @@
     const pokeyApplyTimerReset = cfg.pokeyApplyTimerReset;
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
     const vbxeVerticalSync = cfg.vbxeVerticalSync;
+    const vbxeAdvanceBlitter = cfg.vbxeAdvanceBlitter;
+    const vbxeScheduleBlitterIrq = cfg.vbxeScheduleBlitterIrq;
+    const vbxeRaiseScheduledBlitterIrq = cfg.vbxeRaiseScheduledBlitterIrq;
+    const vbxeLocalBusBudget = cfg.vbxeLocalBusBudget;
     const vbxeNextXdlLine = cfg.vbxeNextXdlLine;
     const vbxeRenderXdlLine = cfg.vbxeRenderXdlLine;
     const vbxeApplyPlayfieldAttributes = cfg.vbxeApplyPlayfieldAttributes;
@@ -449,8 +453,9 @@
         try {
           drawLine(ctx);
           if (!io.drawLine.playerMissileInterleaved) drawPlayerMissiles(ctx);
+          let xdlLine = null;
           if (io.vbxe && vbxeNextXdlLine) {
-            const xdlLine = vbxeNextXdlLine(io.vbxe, io.video.currentDisplayLine);
+            xdlLine = vbxeNextXdlLine(io.vbxe, io.video.currentDisplayLine);
             // Attribute-map PF3 and reverse interpretation depend on the
             // source ANTIC mode, not merely on the composited GTIA color.
             // Preserve that context at the ANTIC/VBXE boundary for the
@@ -460,10 +465,33 @@
               xdlLine.anticPf3 = sram[IO_COLPF3] & 0xff;
               xdlLine.anticGtiaMode = (sram[IO_PRIOR] >>> 6) & 0x03;
             }
-            if (xdlLine && vbxeRenderXdlLine)
+            if (vbxeRenderXdlLine)
               vbxeRenderXdlLine(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
             if (xdlLine && vbxeApplyPlayfieldAttributes)
               vbxeApplyPlayfieldAttributes(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
+          }
+          // AHRM 12.4 gives the 14MHz local bus 912 slots per scanline. The
+          // The blitter consumes its documented per-byte local-cycle cost
+          // from the local-bus residue after display/XDL/MEMAC reservation.
+          if (io.vbxe && vbxeAdvanceBlitter) {
+            const blitterBudget = vbxeLocalBusBudget
+              ? vbxeLocalBusBudget(io.vbxe, xdlLine) : 912;
+            vbxeAdvanceBlitter(io.vbxe, blitterBudget, true);
+            if (vbxeScheduleBlitterIrq) {
+              const residual = vbxeScheduleBlitterIrq(io.vbxe);
+              if (residual >= 0) {
+                // Eight local slots map to one CPU cycle.  This is the same
+                // aggregate completion placement used by the reference FX
+                // model, and lets guest IRQ code observe a stable in-line
+                // phase rather than an artificial scanline-start edge.
+                io.vbxeBlitterIrqCycle = io.displayListFetchCycle +
+                  CYCLES_PER_LINE - (residual >> 3);
+                cycleTimedEventUpdate(ctx);
+              }
+            }
+            // AHRM 5.7 / 12.4: an enabled completed blit is an external,
+            // level-sensitive CPU IRQ source until IRQ_CONTROL is written.
+            if (CPU && typeof CPU.reconcileIrq === "function") CPU.reconcileIrq(ctx);
           }
           evaluateModeLineEnd(ctx);
           io.pmgPhantomMissileDmaPending =
@@ -479,6 +507,14 @@
 
       const masterEff = ctx.cycleCounter;
       const beamEff = io.clock;
+
+      if (masterEff >= io.vbxeBlitterIrqCycle) {
+        if (vbxeRaiseScheduledBlitterIrq && vbxeRaiseScheduledBlitterIrq(io.vbxe) &&
+            CPU && typeof CPU.reconcileIrq === "function") {
+          CPU.reconcileIrq(ctx);
+        }
+        io.vbxeBlitterIrqCycle = CYCLE_NEVER;
+      }
 
       if (masterEff >= io.pokeyTimerResetCycle) {
         if (typeof pokeyApplyTimerReset === "function")

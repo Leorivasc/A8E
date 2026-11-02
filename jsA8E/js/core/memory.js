@@ -1542,6 +1542,8 @@
           mem.ultimate1mb && addr >= 0x4000 && addr < 0x8000 &&
           (mem.sharedWindow ? mem.cpuWindowEnabled : mem.anticWindowEnabled);
         if (vbxeLocalAddress >= 0 && !u1mbWindowOwnsAddress) {
+          if (typeof window.A8EVbxe.noteMemacAccess === "function")
+            window.A8EVbxe.noteMemacAccess(vbxe);
           return vbxe.vram[vbxeLocalAddress] & 0xff;
         }
         if (!mem.enabled || addr < 0x4000 || addr > 0x7fff) {

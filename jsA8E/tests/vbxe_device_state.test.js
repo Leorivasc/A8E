@@ -20,13 +20,33 @@ assert.deepEqual(
   vbxe.normalizeConfig({ profile: "fx1.26", page: 0xd740 }),
   { enabled: true, profile: "fx1.26", page: 0xd740 },
 );
+assert.deepEqual(
+  vbxe.normalizeConfig({ profile: "fx1.24", page: 0xd640 }),
+  { enabled: true, profile: "fx1.24", page: 0xd640 },
+);
+assert.deepEqual(
+  vbxe.normalizeConfig("fx120"),
+  { enabled: true, profile: "fx1.20", page: 0xd640 },
+);
 
 const state = vbxe.createState("fx1.26");
 assert.equal(state.enabled, true);
 assert.equal(state.vram.length, 512 * 1024);
-assert.equal(vbxe.access(state, 0xd640), 0x11);
+assert.equal(vbxe.access(state, 0xd640), 0x10);
 assert.equal(vbxe.access(state, 0xd641), 0x26);
 assert.equal(vbxe.access(state, 0xd642), 0xff);
+const legacyState = vbxe.createState("fx1.24");
+assert.equal(vbxe.access(legacyState, 0xd640), 0x10);
+assert.equal(vbxe.access(legacyState, 0xd641), 0x24);
+const earlyState = vbxe.createState("fx1.20");
+assert.equal(vbxe.access(earlyState, 0xd641), 0x20);
+const alternateLegacyState = vbxe.createState({ profile: "fx1.24", page: 0xd740 });
+assert.equal(vbxe.access(alternateLegacyState, 0xd640), null);
+assert.equal(vbxe.access(alternateLegacyState, 0xd740), 0x10);
+assert.equal(vbxe.access(alternateLegacyState, 0xd741), 0x24);
+const restoredLegacyState = vbxe.restoreState(vbxe.cloneState(alternateLegacyState));
+assert.equal(restoredLegacyState.profile, "fx1.24");
+assert.equal(restoredLegacyState.page, 0xd740);
 
 const powerUpPalette = new Uint8Array(256 * 3);
 powerUpPalette.set([0x12, 0x34, 0x56], 0x24 * 3);
@@ -52,7 +72,7 @@ vbxe.access(state, 0xd648, 0xfe);
 const colorOffset = ((3 * 256 + 0x22) * 3) | 0;
 assert.deepEqual(
   Array.from(state.palette.subarray(colorOffset, colorOffset + 3)),
-  [0xaa, 0x54, 0xfe],
+  [0xab, 0x54, 0xff],
 );
 assert.equal(state.colorSelect, 0x23);
 
@@ -65,6 +85,14 @@ assert.equal(vbxe.memacAddress(state, 0x9000, true), 0x60000);
 vbxe.access(state, 0xd65d, 0xc5);
 assert.equal(vbxe.memacAddress(state, 0x4000, false), 0x14000);
 assert.equal(vbxe.memacAddress(state, 0x7fff, true), 0x17fff);
+// MEMAC B bit 7 grants CPU access; bit 6 independently grants ANTIC DMA.
+// DACTest relies on the CPU-only $80 form while probing the VBXE base.
+vbxe.access(state, 0xd65d, 0x80);
+assert.equal(vbxe.memacAddress(state, 0x4000, false), 0);
+assert.equal(vbxe.memacAddress(state, 0x4000, true), -1);
+vbxe.access(state, 0xd65d, 0x40);
+assert.equal(vbxe.memacAddress(state, 0x4000, false), -1);
+assert.equal(vbxe.memacAddress(state, 0x4000, true), 0);
 state.vram[0x1234] = 0x5a;
 const restored = vbxe.restoreState(vbxe.cloneState(state));
 assert.equal(restored.vram[0x1234], 0x5a);
@@ -73,21 +101,40 @@ assert.equal(restored.memacControl, 0x9f);
 
 state.videoControlPending = 1;
 state.xdlAddressPending = 0x20;
-state.vram.set([0x62, 0x00, 0x00, 0x00, 0x10, 0x00, 0x40, 0x01], 0x20);
+state.vram.set([0x62, 0x08, 0x00, 0x00, 0x10, 0x00, 0x40, 0x01, 0x61, 0xff], 0x20);
 vbxe.verticalSync(state);
 const xdlLine = vbxe.nextXdlLine(state, 8);
 assert.equal(xdlLine.mode, "standard");
+assert.equal(state.xdlSlots, 10,
+  "XDL DMA reservation must equal the bytes actually decoded");
 assert.equal(xdlLine.address, 0x1000);
 assert.equal(xdlLine.stride, 0x140);
-assert.equal(xdlLine.overlayPalette, 1);
+assert.equal(xdlLine.overlayWidth, 1, "width code 1 is normal");
+assert.equal(xdlLine.playfieldPalette, 1);
+assert.equal(xdlLine.overlayPalette, 2);
 assert.equal(xdlLine.priority, 0xff);
+// Width code 3 aliases narrow, while palette fields remain independently
+// latched from the two high bit pairs of OvMisc.
+state.xdlAddressPending = 0x2c;
+state.vram.set([0x02, 0x08, 0xc3, 0x5a], 0x2c);
+vbxe.verticalSync(state);
+const narrowLine = vbxe.nextXdlLine(state, 8);
+assert.equal(narrowLine.overlayWidth, 0);
+assert.equal(narrowLine.playfieldPalette, 3);
+assert.equal(narrowLine.overlayPalette, 0);
+assert.equal(narrowLine.priority, 0x5a);
+state.xdlAddressPending = 0x20;
+vbxe.verticalSync(state);
+const xdlLineAgain = vbxe.nextXdlLine(state, 8);
+assert.equal(xdlLineAgain.overlayPalette, 2);
+assert.equal(xdlLineAgain.priority, 0xff);
 assert.equal(vbxe.nextXdlLine(state, 9).address, 0x1140);
 state.xdlAddressPending = 0x30;
 state.vram.set([0x42, 0x10, 0x00, 0x10, 0x00, 0x40], 0x30);
 vbxe.verticalSync(state);
 assert.equal(vbxe.nextXdlLine(state, 8).mode, "hires");
 state.xdlAddressPending = 0x40;
-state.vram.set([0xe1, 0x01, 0x07, 0x00, 0x10, 0x00, 0xa0, 0x00, 0x03, 0x04, 0x20], 0x40);
+state.vram.set([0xe1, 0x01, 0x07, 0x00, 0x10, 0x00, 0xa0, 0x00, 0xfb, 0xfc, 0x20], 0x40);
 vbxe.verticalSync(state);
 for (let row = 0; row < 8; row++) {
   const textLine = vbxe.nextXdlLine(state, 8 + row);
@@ -95,8 +142,8 @@ for (let row = 0; row < 8; row++) {
   assert.equal(textLine.address, 0x1000);
   assert.equal(textLine.stride, 0xa0);
   assert.equal(textLine.characterBase, 0x10000);
-  assert.equal(textLine.textScrollX, 3);
-  assert.equal(textLine.textScrollY, 4);
+  assert.equal(textLine.textScrollX, 3, "text horizontal scroll is three bits");
+  assert.equal(textLine.textScrollY, 4, "text vertical scroll is three bits");
   assert.equal(textLine.textRow, row);
 }
 assert.equal(state.xdl.overlayAddress, 0x10a0);
@@ -115,11 +162,13 @@ const attributeLine = vbxe.nextXdlLine(state, 8);
 assert.equal(attributeLine.attributeMapEnabled, true);
 assert.equal(attributeLine.attributeAddress, 0x2000);
 assert.equal(attributeLine.attributeStride, 0xa0);
-assert.equal(attributeLine.attributeScrollX, 1);
-assert.equal(attributeLine.attributeScrollY, 1);
+assert.equal(attributeLine.attributeScrollX, 0);
+assert.equal(attributeLine.attributeScrollY, 0);
 assert.equal(attributeLine.attributeCellWidth, 8);
 assert.equal(attributeLine.attributeCellHeight, 8);
 assert.equal(attributeLine.attributeRow, 0);
+assert.equal(attributeLine.attributeMapReload, true,
+  "AtMapOn/address update starts with a freshly buffered map row");
 // A repeat count is the number of additional lines, so $BF supplies this
 // attribute-map entry for 192 scanlines in total before the following XDL
 // entry is fetched.
@@ -132,6 +181,8 @@ vbxe.verticalSync(state);
 for (let line = 0; line < 192; line++) {
   const repeated = vbxe.nextXdlLine(state, 8 + line);
   assert.equal(repeated.attributeMapEnabled, true, "repeat line " + line);
+  assert.equal(state.xdlSlots, line === 0 ? 8 : 0,
+    "only the first line of a repeated XDL entry fetches its eight bytes");
 }
 assert.equal(state.xdl.address, 0x88, "repeat must not consume the next XDL entry early");
 assert.equal(vbxe.nextXdlLine(state, 200), null,
@@ -139,18 +190,74 @@ assert.equal(vbxe.nextXdlLine(state, 200), null,
 assert.equal(state.xdl.ended, true, "End terminates the XDL");
 assert.equal(state.xdl.attributeMapEnabled, false, "AtMapOff clears the map before End");
 assert.equal(state.xdl.address, 0x8a, "termination entry is fetched after the repeated field");
+// XDLC_END takes effect after, rather than instead of, the terminating
+// entry's repeat count. Altirra keeps the decoded mode active for both lines.
+state.xdlAddressPending = 0x90;
+state.vram.set([0x22, 0x80, 0x01], 0x90);
+vbxe.verticalSync(state);
+assert.equal(vbxe.nextXdlLine(state, 8).mode, "standard");
+assert.equal(vbxe.nextXdlLine(state, 9).mode, "standard");
+assert.equal(vbxe.nextXdlLine(state, 10), null,
+  "End must stop only after the final repeated line");
 state.vram[0x1000] = 0x02;
 state.palette.set([0x12, 0x34, 0x56], (256 + 2) * 3);
 const video = {
   vbxeRgb: new Uint32Array(456 * 16),
   vbxeHiresRgb: new Uint32Array(672 * 16),
   vbxeHiresWidth: 672,
+  pixels: new Uint8Array(456 * 16),
 };
 vbxe.renderXdlLine(state, video, 8, { mode: "standard", address: 0x1000 });
-assert.equal(video.vbxeRgb[8 * 456 + 128], 0xff563412);
+assert.equal(video.vbxeRgb[8 * 456 + 96], 0xff563412);
+assert.equal(video.vbxeRgb[8 * 456 + 95], 0,
+  "normal-width standard overlay begins at the hardware $30 boundary");
 vbxe.renderXdlLine(state, video, 9, { mode: "lores", address: 0x1000 });
-assert.equal(video.vbxeRgb[9 * 456 + 128], 0xff563412);
-assert.equal(video.vbxeRgb[9 * 456 + 129], 0xff563412);
+assert.equal(video.vbxeRgb[9 * 456 + 96], 0xff563412);
+assert.equal(video.vbxeRgb[9 * 456 + 97], 0xff563412);
+// OvMisc selects an alternate palette for the normal ANTIC/GTIA playfield
+// even if an attribute map is not enabled. P/M winners remain GTIA colors.
+state.palette.set([0x22, 0x44, 0x66], (3 * 256 + 0x2a) * 3);
+video.pixels[13 * 456 + 96] = 0x2a;
+video.priority = new Uint16Array(456 * 16);
+vbxe.applyPlayfieldAttributes(state, video, 13, {
+  overlayWidth: 1, playfieldPalette: 3,
+});
+assert.equal(video.vbxeRgb[13 * 456 + 96], 0xff664422);
+video.vbxeRgb[13 * 456 + 97] = 0;
+video.pixels[13 * 456 + 97] = 0x2a;
+video.priority[13 * 456 + 97] = 0x10;
+vbxe.applyPlayfieldAttributes(state, video, 13, {
+  overlayWidth: 1, playfieldPalette: 3,
+});
+assert.equal(video.vbxeRgb[13 * 456 + 97], 0,
+  "playfield-palette selection must not recolor a visible player");
+state.vram[0x1000] = 0x02;
+state.vram[0x10ff] = 0x02;
+vbxe.renderXdlLine(state, video, 10, {
+  mode: "standard", address: 0x1000, overlayWidth: 0,
+});
+assert.equal(video.vbxeRgb[10 * 456 + 127], 0,
+  "narrow overlay leaves the normal-width margin untouched");
+assert.equal(video.vbxeRgb[10 * 456 + 128], 0xff563412);
+assert.equal(video.vbxeRgb[10 * 456 + 383], 0xff563412);
+state.vram[0x114f] = 0x02;
+vbxe.renderXdlLine(state, video, 11, {
+  mode: "standard", address: 0x1000, overlayWidth: 2,
+});
+assert.equal(video.vbxeRgb[11 * 456 + 87], 0,
+  "wide overlay begins at the VBXE $2C boundary");
+assert.equal(video.vbxeRgb[11 * 456 + 88], 0xff563412);
+assert.equal(video.vbxeRgb[11 * 456 + 423], 0xff563412);
+state.vram[0x1010] = 0xa5;
+state.vram[0x110f] = 0xa5;
+state.palette.set([0x9a, 0xbc, 0xde], (256 + 0x0a) * 3);
+state.palette.set([0x45, 0x67, 0x89], (256 + 0x05) * 3);
+vbxe.renderXdlLine(state, video, 12, {
+  mode: "hires", address: 0x1010, overlayWidth: 0,
+});
+const narrowHiresBase = 4 * 672 + 80;
+assert.equal(video.vbxeHiresRgb[narrowHiresBase], 0xffdebc9a);
+assert.equal(video.vbxeHiresRgb[narrowHiresBase + 511], 0xff896745);
 video.vbxeRgb.fill(0x12345678, 10 * 456 + 128, 10 * 456 + 384);
 vbxe.renderXdlLine(state, video, 10, { mode: "off", attributeMapEnabled: true });
 assert.equal(video.vbxeRgb[10 * 456 + 128], 0,
@@ -284,6 +391,22 @@ vbxe.applyPlayfieldAttributes(state, video, 9, {
 });
 assert.equal(video.vbxeRgb[9 * 456 + 128], 0xff665544);
 assert.equal(video.vbxeRgb[9 * 456 + 129], 0xff332211);
+// AHRM 12.4 defines the same PF3-mask byte for all ANTIC hires sources,
+// including character modes 2 and 3, not only Graphics 8 / mode F.
+video.vbxeRgb.fill(0);
+video.priority.fill(0);
+video.priority[9 * 456 + 128] = 0x04;
+video.priority[9 * 456 + 129] = 0x04;
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x02, anticPf3: 0x78,
+  attributeMapEnabled: true, attributeAddress: 0x2040, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 8,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.equal(video.vbxeRgb[9 * 456 + 128], 0xff665544,
+  "mode-2 PF3 mask bit must replace PF2");
+assert.equal(video.vbxeRgb[9 * 456 + 129], 0xff332211,
+  "mode-2 cleared PF3 mask bit must retain PF2");
 // Rev turns Graphics 8's adjacent source bits into a PF0-PF3 value. The
 // map's byte 0 returns to PF0 while PF3 comes from the shadowed GTIA color.
 state.vram.set([0x12, 0x34, 0x56, 0x04], 0x2050);
@@ -313,6 +436,28 @@ video.vbxeRgb.fill(0);
 video.priority.fill(0);
 vbxe.applyPlayfieldAttributes(state, video, 9, {
   anticMode: 0x0f, anticGtiaMode: 1, anticPf3: 0x78,
+  attributeMapEnabled: true, attributeAddress: 0x2050, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.deepEqual(Array.from(video.vbxeRgb.slice(reverseBase, reverseBase + 8)),
+  [0xff000000, 0xff000000, 0xff000000, 0xff000000,
+    0xff000000, 0xff000000, 0xff000000, 0xff000000]);
+// Tall hires character mode 3 supplies the same raw bit pairs. Its focused
+// Altirra GTIA-9 differential has the same opaque palette-0 result.
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x03, anticGtiaMode: 1, anticPf3: 0x78,
+  attributeMapEnabled: true, attributeAddress: 0x2050, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.deepEqual(Array.from(video.vbxeRgb.slice(reverseBase, reverseBase + 8)),
+  [0xff000000, 0xff000000, 0xff000000, 0xff000000,
+    0xff000000, 0xff000000, 0xff000000, 0xff000000]);
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x03, anticGtiaMode: 3, anticPf3: 0x78,
   attributeMapEnabled: true, attributeAddress: 0x2050, attributeStride: 0,
   attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
   attributeCellHeight: 8, attributeRow: 0,
@@ -389,6 +534,46 @@ assert.deepEqual(Array.from(video.vbxeRgb.slice(reverseBase, reverseBase + 8)), 
   0xff605040, 0xff605040, 0xff302010, 0xff302010,
   0xff605040, 0xff605040, 0xff302010, 0xff302010,
 ]);
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x06, anticGtiaMode: 1,
+  attributeMapEnabled: true, attributeAddress: 0x2060, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.deepEqual(Array.from(video.vbxeRgb.slice(reverseBase, reverseBase + 8)),
+  new Array(8).fill(0xff000000),
+  "validated GTIA-9 mode-6 Rev field is opaque palette color 0");
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x06, anticGtiaMode: 3,
+  attributeMapEnabled: true, attributeAddress: 0x2060, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.deepEqual(Array.from(video.vbxeRgb.slice(reverseBase, reverseBase + 8)),
+  new Array(8).fill(0xff000000),
+  "validated GTIA-11 mode-6 Rev field is opaque palette color 0");
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x07, anticGtiaMode: 1,
+  attributeMapEnabled: true, attributeAddress: 0x2060, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.deepEqual(Array.from(video.vbxeRgb.slice(reverseBase, reverseBase + 8)),
+  new Array(8).fill(0xff000000),
+  "validated GTIA-9 mode-7 Rev field is opaque palette color 0");
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x07, anticGtiaMode: 3,
+  attributeMapEnabled: true, attributeAddress: 0x2060, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.deepEqual(Array.from(video.vbxeRgb.slice(reverseBase, reverseBase + 8)),
+  new Array(8).fill(0xff000000),
+  "validated GTIA-11 mode-7 Rev field is opaque palette color 0");
 // Two-color lores modes use only background (000) and PF0 (100), whose
 // AN0-1 portions both decode to the hires pair 00 under Reverse.
 video.vbxeRgb.fill(0);
@@ -435,7 +620,7 @@ state.palette.set([0x10, 0x20, 0x30], (2 * 256 + 2) * 3);
 state.palette.set([0x40, 0x50, 0x60], (3 * 256 + 2) * 3);
 state.priority[0] = 0x10; // Above PF0.
 video.priority = new Uint16Array(456 * 16);
-video.priority.fill(0x01, 9 * 456 + 128, 10 * 456 + 128);
+video.priority.fill(0x01, 9 * 456 + 96, 10 * 456 + 96);
 state.collisionDetect = 0;
 vbxe.renderXdlLine(state, video, 9, {
   mode: "text", address: 0x1200, characterBase: 0x1100, textRow: 0,
@@ -448,7 +633,7 @@ assert.equal(video.vbxeHiresRgb[hiresBase + 16], 0xff605040);
 assert.equal(vbxe.access(state, 0xd64a), 0x80);
 // A zero map step reuses that initialized map row after every 8-line cell
 // row. This is also the compact external diagnostic layout.
-video.priority.fill(0x01, 10 * 456 + 128, 11 * 456 + 128);
+video.priority.fill(0x01, 10 * 456 + 96, 11 * 456 + 96);
 vbxe.renderXdlLine(state, video, 10, {
   mode: "text", address: 0x1200, characterBase: 0x1100, textRow: 0,
   priority: 0x00, attributeMapEnabled: true, attributeAddress: 0x2000,
@@ -461,21 +646,37 @@ assert.equal(video.vbxeHiresRgb[secondMapRowBase + 16], 0xff605040);
 state.palette.set([0x12, 0x34, 0x56], (256 + 2) * 3);
 state.videoControlActive = 0x05;
 state.vram[0x1000] = 0;
-video.vbxeRgb[10 * 456 + 128] = 0x12345678;
+video.vbxeRgb[10 * 456 + 96] = 0x12345678;
 vbxe.renderXdlLine(state, video, 10, { mode: "standard", address: 0x1000 });
-assert.equal(video.vbxeRgb[10 * 456 + 128], 0);
+assert.equal(video.vbxeRgb[10 * 456 + 96], 0);
+video.vbxeRgb[10 * 456 + 96] = 0x12345678;
+video.vbxeHiresRgb[2 * 672 + 16] = 0x12345678;
+vbxe.renderXdlLine(state, video, 10, null);
+assert.equal(video.vbxeRgb[10 * 456 + 96], 0,
+  "disabling XDL must clear the legacy overlay plane for this scanline");
+assert.equal(video.vbxeHiresRgb[2 * 672 + 16], 0,
+  "disabling XDL must clear the attribute-map presentation plane for this scanline");
 state.videoControlActive = 0x0d;
 state.vram[0x1000] = 0x2f;
-video.vbxeRgb[10 * 456 + 128] = 0x12345678;
+video.vbxeRgb[10 * 456 + 96] = 0x12345678;
 vbxe.renderXdlLine(state, video, 10, { mode: "standard", address: 0x1000 });
-assert.equal(video.vbxeRgb[10 * 456 + 128], 0);
+assert.equal(video.vbxeRgb[10 * 456 + 96], 0);
 video.priority = new Uint16Array(456 * 16);
 state.vram[0x1001] = 2;
-video.priority[11 * 456 + 128] = 0x01;
+video.priority[11 * 456 + 96] = 0x01;
 vbxe.renderXdlLine(state, video, 11, { mode: "standard", address: 0x1001, priority: 0x00 });
-assert.equal(video.vbxeRgb[11 * 456 + 128], 0);
+assert.equal(video.vbxeRgb[11 * 456 + 96], 0);
 vbxe.renderXdlLine(state, video, 11, { mode: "standard", address: 0x1001, priority: 0x10 });
-assert.equal(video.vbxeRgb[11 * 456 + 128], 0xff563412);
+assert.equal(video.vbxeRgb[11 * 456 + 96], 0xff563412);
+// Before FX 1.26, $00 remains visible over the background and only PF2 and
+// PF3/P5 are addressable by priority bits 6 and 7 (AHRM table 109).
+assert.equal(vbxe.overlayWinsPriority("fx1.24", 0, 0x00), true);
+assert.equal(vbxe.overlayWinsPriority("fx1.24", 0x0004, 0x00), false);
+assert.equal(vbxe.overlayWinsPriority("fx1.24", 0x0004, 0x40), true);
+assert.equal(vbxe.overlayWinsPriority("fx1.24", 0x0008, 0x40), false);
+assert.equal(vbxe.overlayWinsPriority("fx1.24", 0x0008, 0x80), true);
+assert.equal(vbxe.overlayWinsPriority("fx1.24", 0x0010, 0xff), false);
+assert.equal(vbxe.overlayWinsPriority("fx1.26", 0, 0x00), false);
 
 // Overlay collisions use the source-byte COLMASK groups and GTIA layer
 // metadata. They do not depend on whether the XDL priority lets the overlay
@@ -487,24 +688,46 @@ state.collisionDetect = 0;
 vbxe.access(state, 0xd649, 0x02); // $20-$3F source-byte group only.
 state.vram[0x1002] = 0x22;
 state.palette.set([0x12, 0x34, 0x56], (256 + 0x22) * 3);
-video.priority[12 * 456 + 128] = 0x0001 | 0x0004 | 0x0020 | 0x0800;
+video.priority[12 * 456 + 96] = 0x0001 | 0x0004 | 0x0020 | 0x0800;
 vbxe.renderXdlLine(state, video, 12, { mode: "standard", address: 0x1002, priority: 0x00 });
-assert.equal(video.vbxeRgb[12 * 456 + 128], 0);
+assert.equal(video.vbxeRgb[12 * 456 + 96], 0);
 assert.equal(vbxe.access(state, 0xd64a), 0x5a);
 vbxe.access(state, 0xd64a, 0xff);
 assert.equal(vbxe.access(state, 0xd64a), 0);
 video.vbxeCollisionPriority = new Uint16Array(456 * 16);
-video.priority[12 * 456 + 128] = 0x11; // PF0 plus an active, hidden P0.
-video.vbxeCollisionPriority[12 * 456 + 128] = 0x8001; // PF0 alone contributes.
+video.priority[12 * 456 + 96] = 0x11; // PF0 plus an active, hidden P0.
+video.vbxeCollisionPriority[12 * 456 + 96] = 0x8001; // PF0 alone contributes.
 vbxe.renderXdlLine(state, video, 12, { mode: "standard", address: 0x1002, priority: 0x01 });
-assert.equal(video.vbxeRgb[12 * 456 + 128], 0);
+assert.equal(video.vbxeRgb[12 * 456 + 96], 0);
 vbxe.renderXdlLine(state, video, 12, { mode: "standard", address: 0x1002, priority: 0x10 });
-assert.equal(video.vbxeRgb[12 * 456 + 128], 0xff563412);
+assert.equal(video.vbxeRgb[12 * 456 + 96], 0xff563412);
 vbxe.renderXdlLine(state, video, 12, { mode: "standard", address: 0x1002 });
 assert.equal(vbxe.access(state, 0xd64a), 0x10);
 vbxe.access(state, 0xd64a, 0xff);
 vbxe.access(state, 0xd649, 0x01);
 vbxe.renderXdlLine(state, video, 12, { mode: "standard", address: 0x1002 });
+assert.equal(vbxe.access(state, 0xd64a), 0);
+// Altirra FX 1.26 identifies a text overlay collision by the cell attribute
+// byte, not its character code or the fetched glyph byte.
+state.videoControlActive = 0x01;
+state.vram[0x1210] = 0x21;
+state.vram[0x1211] = 0x41;
+state.vram[0x1008] = 0xff;
+video.priority.fill(0);
+video.vbxeCollisionPriority.fill(0);
+video.priority[12 * 456 + 96] = 0x40;
+vbxe.access(state, 0xd649, 0x04); // $40-$5F: attribute $41.
+vbxe.access(state, 0xd64a, 0xff);
+vbxe.renderXdlLine(state, video, 12, {
+  mode: "text", address: 0x1210, characterBase: 0x0f00, textRow: 0,
+});
+assert.notEqual(vbxe.access(state, 0xd64a), 0,
+  "text attribute byte must select a collision range");
+vbxe.access(state, 0xd649, 0x02); // $20-$3F: character $21.
+vbxe.access(state, 0xd64a, 0xff);
+vbxe.renderXdlLine(state, video, 12, {
+  mode: "text", address: 0x1210, characterBase: 0x0f00, textRow: 0,
+});
 assert.equal(vbxe.access(state, 0xd64a), 0);
 state.videoControlActive = 0x05; // Color zero transparent.
 state.vram[0x1002] = 0;
@@ -513,7 +736,7 @@ vbxe.renderXdlLine(state, video, 12, { mode: "standard", address: 0x1002 });
 assert.equal(vbxe.access(state, 0xd64a), 0);
 state.videoControlActive = 0x0d; // Color 0 and 15 transparent.
 state.vram[0x1002] = 0xf5;
-video.priority[12 * 456 + 128] = 0x0001;
+video.priority[12 * 456 + 96] = 0x0001;
 vbxe.access(state, 0xd649, 0x20); // $A0-$BF source-byte group.
 vbxe.renderXdlLine(state, video, 12, { mode: "hires", address: 0x1002 });
 assert.equal(video.vbxeRgb[12 * 456 + 128], 0);
@@ -528,11 +751,100 @@ vbxe.access(state, 0xd649, 0x20);
 vbxe.renderXdlLine(state, video, 12, { mode: "hires", address: 0x1002 });
 assert.equal(vbxe.access(state, 0xd64a), 0x10);
 
+// GTIA 9/11's opaque palette-0 Reverse result is externally established for
+// graphics C-E, plus every graphics mode 8-E in GTIA 9 and Graphics 8 in
+// GTIA 11. The complete graphics 8-E source family is now externally
+// validated for both GTIA 9 and 11.
+// their Altirra observations are recorded.
+state.vram.set([0x00, 0x00, 0x00, 0x04], 0x2070);
+state.palette.set([0xaa, 0xbb, 0xcc], 0);
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x08, anticGtiaMode: 1,
+  attributeMapEnabled: true, attributeAddress: 0x2070, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.equal(video.vbxeRgb[reverseBase], 0xffccbbaa,
+  "validated GTIA-9 graphics 8 uses opaque palette color 0");
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x08, anticGtiaMode: 3,
+  attributeMapEnabled: true, attributeAddress: 0x2070, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.equal(video.vbxeRgb[reverseBase], 0xffccbbaa,
+  "validated GTIA-11 graphics 8 uses opaque palette color 0");
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x0a, anticGtiaMode: 3,
+  attributeMapEnabled: true, attributeAddress: 0x2070, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.equal(video.vbxeRgb[reverseBase], 0xffccbbaa,
+  "validated GTIA-11 graphics A uses opaque palette color 0");
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x0b, anticGtiaMode: 3,
+  attributeMapEnabled: true, attributeAddress: 0x2070, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.equal(video.vbxeRgb[reverseBase], 0xffccbbaa,
+  "validated GTIA-11 graphics B uses opaque palette color 0");
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x0a, anticGtiaMode: 1,
+  attributeMapEnabled: true, attributeAddress: 0x2070, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.equal(video.vbxeRgb[reverseBase], 0xffccbbaa,
+  "validated GTIA-9 graphics A uses opaque palette color 0");
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x0b, anticGtiaMode: 1,
+  attributeMapEnabled: true, attributeAddress: 0x2070, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.equal(video.vbxeRgb[reverseBase], 0xffccbbaa,
+  "validated GTIA-9 graphics B uses opaque palette color 0");
+video.vbxeRgb.fill(0);
+vbxe.applyPlayfieldAttributes(state, video, 9, {
+  anticMode: 0x0c, anticGtiaMode: 1,
+  attributeMapEnabled: true, attributeAddress: 0x2070, attributeStride: 0,
+  attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 32,
+  attributeCellHeight: 8, attributeRow: 0,
+});
+assert.equal(video.vbxeRgb[reverseBase], 0xffccbbaa,
+  "validated GTIA-9 graphics C uses opaque palette color 0");
+
+state.priority[0] = 0x5a;
+state.blitCollisionCode = 0xa5;
+state.collisionDetect = 0x3c;
+state.xdlAddressPending = 0x61234;
+state.xdlAddressActive = 0x51234;
+state.memacBControl = 0xdf;
+state.memacControl = 0x9f;
+state.memacBankSelect = 0xe7;
 vbxe.softReset(state);
 assert.equal(state.videoControlPending, 0);
-assert.equal(state.memacControl, 0);
+assert.equal(state.xdlAddressPending, 0x61234);
+assert.equal(state.xdlAddressActive, 0x51234);
+assert.equal(state.collisionDetect, 0x3c);
+assert.equal(state.memacBControl, 0x1f);
+assert.equal(state.memacControl, 0x93);
+assert.equal(state.memacBankSelect, 0x67);
+assert.equal(state.blitCollisionCode, 0, "soft reset clears the blit collision code");
+assert.equal(state.priority[0], 0x5a, "the configured priority latch survives reset");
 assert.equal(state.vram[0x1234], 0x5a);
 vbxe.powerCycle(state);
+assert.equal(state.xdlAddressPending, 0);
+assert.equal(state.memacControl, 0);
+assert.equal(state.collisionDetect, 0);
 assert.equal(state.vram[0x1234], 0);
 
 console.log("vbxe_device_state.test.js passed");

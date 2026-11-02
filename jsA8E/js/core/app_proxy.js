@@ -151,13 +151,16 @@
 
   function normalizeVbxeConfig(value) {
     const source = value && typeof value === "object" ? value : {};
-    const profile = String(
+    const profileText = String(
       typeof value === "string" ? value : (source.profile || "off"),
     ).trim().toLowerCase();
-    const enabled = profile === "fx1.26" || profile === "fx126" || source.enabled === true;
+    const profile = profileText === "fx1.20" || profileText === "fx120" ? "fx1.20" :
+      profileText === "fx1.24" || profileText === "fx124" ? "fx1.24" :
+        profileText === "fx1.26" || profileText === "fx126" ? "fx1.26" : "off";
+    const enabled = source.enabled === false ? false : profile !== "off" || source.enabled === true;
     return {
       enabled: enabled,
-      profile: enabled ? "fx1.26" : "off",
+      profile: enabled ? (profile !== "off" ? profile : "fx1.26") : "off",
       page: (source.page | 0) === 0xd740 ? 0xd740 : 0xd640,
     };
   }

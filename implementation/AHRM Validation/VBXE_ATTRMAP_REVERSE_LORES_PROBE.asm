@@ -2,6 +2,15 @@
 ; 10, and 11. Map PF0/PF1/PF2 are red/blue/green respectively. This uses a
 ; narrow ANTIC field (32 bytes/line), which divides ANTIC's 4 KiB display
 ; window exactly and keeps every source row phase-identical.
+.ifndef ANTIC_MODE
+.define ANTIC_MODE $0E
+.endif
+.ifndef DISPLAY_ROWS
+.define DISPLAY_ROWS 192
+.endif
+.ifndef GTIA_MODE
+.define GTIA_MODE $00
+.endif
 .ORG $2000
 DMACTL=$D400
 DLISTL=$D402
@@ -29,6 +38,9 @@ START:
  STA COLPF0
  STA COLPF1
  STA COLPF2
+.ifdef GTIA_ENABLED
+ LDA #GTIA_MODE
+.endif
  STA PRIOR
  LDA #$C0
  STA MEMACB
@@ -73,25 +85,25 @@ FILL11:
 NOCARRY:
  DEX
  BNE FILLROW
- ; LMS mode E, 191 more lines, then JVB.
- LDA #$4E
+ ; LMS lores graphics mode, its remaining rows, then JVB.
+ LDA #($40+ANTIC_MODE)
  STA $3000
  LDA #0
  STA $3001
  LDA #$40
  STA $3002
- LDX #191
- LDA #$0E
+ LDX #(DISPLAY_ROWS-1)
+ LDA #ANTIC_MODE
 FILLDL:
  DEX
  STA $3003,X
  BNE FILLDL
  LDA #$41
- STA $30C2
+ STA $3003+DISPLAY_ROWS-1
  LDA #0
- STA $30C3
+ STA $3004+DISPLAY_ROWS-1
  LDA #$30
- STA $30C4
+ STA $3005+DISPLAY_ROWS-1
  LDA #0
  STA DLISTL
  LDA #$30

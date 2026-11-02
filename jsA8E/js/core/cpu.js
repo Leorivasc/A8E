@@ -429,7 +429,13 @@
       ((io.piaStatusA & 0x40) && modeA < 4 && (modeA & 0x01)) ||
       ((io.piaStatusB & 0x80) && (pbctl & 0x01)) ||
       ((io.piaStatusB & 0x40) && modeB < 4 && (modeB & 0x01));
-    ctx.irqPending = ((~irqst) & irqen & 0x7f) !== 0 || piaIrq ? 1 : 0;
+    // AHRM 5.7: POKEY shares the CPU IRQ line with PIA and PBI devices.
+    // VBXE's enabled, uncleared blit-complete status is one such external
+    // level source; IRQ_CONTROL acknowledges it.
+    const vbxe = io.vbxe;
+    const vbxeIrq = !!(vbxe && vbxe.enabled && (vbxe.irqControl & 0x01) &&
+      (vbxe.irqStatus & 0x01));
+    ctx.irqPending = ((~irqst) & irqen & 0x7f) !== 0 || piaIrq || vbxeIrq ? 1 : 0;
   }
   function writeAccess(ctx, value) {
     const addr = ctx.accessAddress & 0xffff;

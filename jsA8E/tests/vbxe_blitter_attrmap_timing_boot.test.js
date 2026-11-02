@@ -1,0 +1,52 @@
+/* global __dirname, console, process, require */
+
+"use strict";
+
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const { createHeadlessAutomation } = require("../headless");
+
+async function main() {
+  const root = path.resolve(__dirname, "../..");
+  const runtime = await createHeadlessAutomation({
+    turbo: true,
+    skipRendering: true,
+    roms: {
+      os: path.join(root, "A8E", "build", "ATARIXL.ROM"),
+      basic: path.join(root, "A8E", "build", "ATARIBAS.ROM"),
+    },
+  });
+  try {
+    runtime.app.reset({ vbxe: "fx1.26" });
+    let ctx = null;
+    runtime.app.setMemoryAccessHook(function () { ctx = arguments[arguments.length - 1]; });
+    const source = fs.readFileSync(path.join(root, "implementation", "AHRM Validation",
+      "VBXE_BLITTER_ATTRMAP_TIMING_TEST.asm"), "utf8");
+    const build = await runtime.api.dev.assembleSource({ name: "BLITMAP.ASM", text: source });
+    assert.ok(build.ok, build.error);
+    await runtime.api.dev.writeHostFile("BLITMAP.XEX", { bytes: build.bytes });
+    await runtime.api.debug.setBreakpoints(build.symbols.READY);
+    const launch = await runtime.api.dev.runXex({ hostFile: "BLITMAP.XEX", awaitEntry: false });
+    assert.ok(launch.ok, launch.phase);
+    await runtime.api.debug.waitForBreakpoint({ timeoutMs: 30000 });
+    assert.ok(ctx, "XEX execution should expose its machine context");
+    const state = ctx.ioData.vbxe;
+    const rows = Math.min(192, ctx.ram[0x82]);
+    assert.equal(state.blitterBusy, 0);
+    assert.equal(state.irqStatus, 0);
+    assert.ok(rows > 0);
+    for (let y = 0; y < 192; y++) {
+      const expected = y < rows ? 0 : 0xff;
+      for (let x = 0; x < 40; x++) assert.equal(state.vram[y * 40 + x], expected);
+    }
+    console.log("vbxe_blitter_attrmap_timing_boot: attribute-map timing marker verified.");
+  } finally {
+    await runtime.dispose();
+  }
+}
+
+main().catch(function (error) {
+  console.error(error && error.stack ? error.stack : error);
+  process.exitCode = 1;
+});

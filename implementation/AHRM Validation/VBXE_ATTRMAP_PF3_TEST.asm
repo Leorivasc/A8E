@@ -1,6 +1,12 @@
 ; FX 1.26 Attribute Map PF3-mask diagnostic, without an overlay.
 ; Expected: a normal-width mode-F field. PF2 is blue; bit 7-0 of every
 ; 8-pixel cell's byte 0 ($AA) alternates PF3 green with PF2 blue.
+.ifndef GTIA_MODE
+.define GTIA_MODE $00
+.endif
+.ifndef SOURCE_BYTE
+.define SOURCE_BYTE $00
+.endif
 .ORG $2000
 DMACTL=$D400
 DLISTL=$D402
@@ -27,6 +33,7 @@ START:
  STA COLBK
  STA COLPF1
  STA COLPF2
+ LDA #GTIA_MODE
  STA PRIOR
  ; PF3 supplies the color selected by a set attribute-map mask bit.
  LDA #$26
@@ -34,8 +41,9 @@ START:
  ; Map local VRAM bank 0 at $4000-$7FFF for CPU and ANTIC.
  LDA #$C0
  STA MEMACB
- ; Clear the 192x40-byte Graphics 8 source. Its zero bits are PF2.
- LDA #0
+; Fill the 192x40-byte Graphics 8 source. The default zero bits are PF2;
+; GTIA-special wrappers select a visible non-zero raw source instead.
+LDA #SOURCE_BYTE
  STA $80
  LDA #$40
  STA $81

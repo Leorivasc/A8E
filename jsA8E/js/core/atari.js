@@ -32,6 +32,7 @@
     access: function () { return null; },
     softReset: function () {},
     verticalSync: function () {},
+    advanceBlitter: function () {},
   };
 
   const PIXELS_PER_LINE = hwApi.PIXELS_PER_LINE;
@@ -471,6 +472,7 @@
           vbxeAccess: vbxeApi.access,
           vbxeSoftReset: vbxeApi.softReset,
           vbxeMemacAddress: vbxeApi.memacAddress,
+          vbxeNoteMemacAccess: vbxeApi.noteMemacAccess,
           pokeyPotUpdate: pokeyPotUpdate,
           pokeyPotReadValue: pokeyPotReadValue,
           recordPmgRegisterWrite: function (ctx, address, value) {
@@ -592,6 +594,10 @@
           pokeyTraceEvent: pokeyTraceEvent,
           cycleTimedEventUpdate: cycleTimedEventUpdate,
           vbxeVerticalSync: vbxeApi.verticalSync,
+          vbxeAdvanceBlitter: vbxeApi.advanceBlitter,
+          vbxeScheduleBlitterIrq: vbxeApi.scheduleBlitterIrq,
+          vbxeRaiseScheduledBlitterIrq: vbxeApi.raiseScheduledBlitterIrq,
+          vbxeLocalBusBudget: vbxeApi.localBusBudget,
           vbxeNextXdlLine: vbxeApi.nextXdlLine,
           vbxeRenderXdlLine: vbxeApi.renderXdlLine,
           vbxeApplyPlayfieldAttributes: vbxeApi.applyPlayfieldAttributes,

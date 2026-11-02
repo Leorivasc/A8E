@@ -20,6 +20,7 @@
         inDrawLine: false,
         dliCycle: CYCLE_NEVER,
         vbiCycle: CYCLE_NEVER,
+        vbxeBlitterIrqCycle: CYCLE_NEVER,
         serialOutputNeedDataCycle: CYCLE_NEVER,
         serialOutputTransmissionDoneCycle: CYCLE_NEVER,
         serialInputDataReadyCycle: CYCLE_NEVER,
@@ -216,6 +217,9 @@
       }
       if (io.dliCycle < beamNext) beamNext = io.dliCycle;
       if (io.vbiCycle < beamNext) beamNext = io.vbiCycle;
+      if (io.vbxeBlitterIrqCycle < masterNext) {
+        masterNext = io.vbxeBlitterIrqCycle;
+      }
 
       if (io.serialOutputTransmissionDoneCycle < masterNext) {
         masterNext = io.serialOutputTransmissionDoneCycle;

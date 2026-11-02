@@ -56,19 +56,23 @@
   function normalizeVbxePreference(value) {
     if (value && typeof value === "object") {
       if (value.enabled === false) return "off";
-      if (value.enabled !== true && value.profile !== "fx1.26") return "off";
-      return (value.page | 0) === 0xd740 ? "fx1.26-d700" : "fx1.26-d600";
+      const profile = String(value.profile || "").trim().toLowerCase();
+      const normalized = profile === "fx1.20" || profile === "fx120" ? "fx1.20" :
+        profile === "fx1.24" || profile === "fx124" ? "fx1.24" :
+          profile === "fx1.26" || profile === "fx126" ? "fx1.26" :
+            value.enabled === true ? "fx1.26" : "off";
+      if (normalized === "off") return "off";
+      return normalized + ((value.page | 0) === 0xd740 ? "-d700" : "-d600");
     }
     const text = String(value === undefined || value === null ? "" : value)
       .trim()
       .toLowerCase();
-    if (text === "fx1.26-d700" || text === "fx126-d700" || text === "d700") {
-      return "fx1.26-d700";
-    }
-    if (text === "fx1.26" || text === "fx126" || text === "fx1.26-d600" ||
-        text === "fx126-d600" || text === "d600") {
-      return "fx1.26-d600";
-    }
+    const page = text.endsWith("-d700") || text === "d700" ? "-d700" : "-d600";
+    const profile = text.replace(/-d[67]00$/, "");
+    if (profile === "fx1.20" || profile === "fx120") return "fx1.20" + page;
+    if (profile === "fx1.24" || profile === "fx124") return "fx1.24" + page;
+    if (profile === "fx1.26" || profile === "fx126" || text === "d600" || text === "d700")
+      return "fx1.26" + page;
     return "off";
   }
 
@@ -77,8 +81,8 @@
     if (preference === "off") return { enabled: false, profile: "off", page: 0xd640 };
     return {
       enabled: true,
-      profile: "fx1.26",
-      page: preference === "fx1.26-d700" ? 0xd740 : 0xd640,
+      profile: preference.slice(0, 6),
+      page: preference.endsWith("-d700") ? 0xd740 : 0xd640,
     };
   }
 

@@ -30,7 +30,7 @@ START:
         JSR DETECT_VBXE
         BCC CORE_MISSING
 
-; Bank 0, with both CPU (bit 6) and ANTIC (bit 7) access enabled.
+; Bank 0, with both CPU (bit 7) and ANTIC (bit 6) access enabled.
         LDA #$C0
         LDY #$1D
         STA (VBXE_LO),Y
