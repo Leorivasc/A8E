@@ -132,6 +132,16 @@ assert.equal(vbxe.access(state, 0xd654), 1,
   "scheduled completion must assert IRQ status at its due phase");
 vbxe.access(state, 0xd654, 0);
 
+// BLITTER_START=0 must also cancel a completion already queued for its
+// in-line IRQ phase. Altirra unsets that scheduler event on STOP.
+start(0x3a0, true);
+vbxe.advanceBlitter(state, 23, true);
+assert.equal(vbxe.scheduleBlitterIrq(state), 0);
+vbxe.access(state, 0xd653, 0);
+assert.equal(vbxe.raiseScheduledBlitterIrq(state), false,
+  "stopping before the scheduled phase cancels the completion IRQ");
+assert.equal(vbxe.access(state, 0xd654), 0);
+
 // The AHRM local-cycle table gates progress: a normal copy needs two cycles,
 // while a constant mode-0 fill elides its source fetch and takes one.
 state.vram[0x180] = 0x7f;
@@ -159,17 +169,16 @@ assert.equal(state.vram[0x281], 0x5a, "constant mode-0 fill takes one output cyc
 
 // The local-bus budget starts at 912 cycles and reserves AHRM DMA consumers
 // before the low-priority blitter. The FX scheduler charges each overlay
-// mode by its actual narrow/normal/wide aggregate reservation; a decoded
-// 8-byte normal-width standard entry, attribute row, and 26 MEMAC accesses
-// leave 386 cycles.
+// mode by its actual narrow/normal/wide aggregate reservation; a fixed
+// 22-cycle XDL update, attribute row, and 26 MEMAC accesses leave 372 cycles.
 assert.equal(vbxe.localBusBudget(state, null), 912, "idle scanline has all local cycles");
 state.videoControlActive = 1;
-state.xdlSlots = 8;
+state.xdlSlots = 22;
 for (let i = 0; i < 26; i++) vbxe.noteMemacAccess(state);
 assert.equal(vbxe.localBusBudget(state, {
   mode: "standard", overlayEnabled: true, attributeMapEnabled: true, attributeRow: 0,
   attributeScrollY: 0, attributeCellHeight: 8,
-}), 386, "busy standard line reserves FX aggregate overlay bandwidth");
+}), 372, "busy standard line reserves FX aggregate overlay bandwidth");
 assert.equal(state.memacSlots, 0, "scanline budget consumes recorded MEMAC slots");
 
 assert.equal(vbxe.localBusBudget(state, {

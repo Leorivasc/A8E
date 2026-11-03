@@ -7,6 +7,7 @@
     const CYCLE_NEVER =
       cfg.CYCLE_NEVER !== undefined ? cfg.CYCLE_NEVER : Infinity;
     const recordPmgRegisterWrite = cfg.recordPmgRegisterWrite;
+    const recordGtiaRegisterWrite = cfg.recordGtiaRegisterWrite;
     const NMI_DLI = cfg.NMI_DLI;
     const NMI_VBI = cfg.NMI_VBI;
     const NMI_RESET = cfg.NMI_RESET;
@@ -98,6 +99,7 @@
     const vbxeAccess = cfg.vbxeAccess;
     const vbxeSoftReset = cfg.vbxeSoftReset;
     const vbxeMemacAddress = cfg.vbxeMemacAddress;
+    const vbxeRamboAddress = cfg.vbxeRamboAddress;
     const vbxeNoteMemacAccess = cfg.vbxeNoteMemacAccess;
     const TRIG_REGS = [
       IO_GRAFP3_TRIG0,
@@ -463,6 +465,13 @@
         }
       }
       if (io && io.vbxe && io.vbxe.enabled && vbxeMemacAddress) {
+        const ramboLocalAddress = vbxeRamboAddress
+          ? vbxeRamboAddress(io.vbxe, addr, sram[IO_PORTB]) : -1;
+        if (ramboLocalAddress >= 0) {
+          if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe);
+          if (value != null) io.vbxe.vram[ramboLocalAddress] = value & 0xff;
+          return io.vbxe.vram[ramboLocalAddress] & 0xff;
+        }
         const localAddress = vbxeMemacAddress(io.vbxe, addr, false);
         if (localAddress >= 0) {
           if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe);
@@ -503,6 +512,7 @@
           case IO_VDELAY:
             sram[addr] = v;
             if (recordPmgRegisterWrite) recordPmgRegisterWrite(ctx, addr, v);
+            if (recordGtiaRegisterWrite) recordGtiaRegisterWrite(ctx, addr, v);
             break;
 
           case IO_GRACTL: {
@@ -526,6 +536,7 @@
           case IO_COLPF3:
           case IO_COLBK:
             sram[addr] = v & 0xfe;
+            if (recordGtiaRegisterWrite) recordGtiaRegisterWrite(ctx, addr, sram[addr]);
             break;
 
           case IO_HITCLR:

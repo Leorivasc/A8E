@@ -1,5 +1,207 @@
 # NOTES.md
 
+- 2026-11-03: completado el primer gate visual del corpus real FX1.26 en
+  `vbxe_real_software_scene.test.js`, integrado en `test:vbxe:full`. Con
+  `turbo=true`, `sioTurbo=true`, 130XE-128K, NTSC y render activo, el gate
+  comprueba el corpus en checkpoints hasta 480 frames. Popeye, DACTest,
+  Textmode Test modo 4, Crysis y Falcon producen un frame no negro distinto
+  de cualquier reset; Galaga, Celeste, D600 y Phoenix conservan por ahora sólo
+  sus puertas de arranque porque la captura headless queda negra o coincide
+  con el conjunto de reset. Los 120 frames iniciales eran insuficientes para
+  Popeye. El gate visual complementa el marcador RAM del XEX mínimo, pero no
+  es todavía una marca específica de cada programa ni una comparación golden
+  contra Altirra.
+
+- 2026-11-03: endurecido el gate visual del corpus. La prueba ya no acepta
+  cualquier digest distinto: compara checkpoints de 120, 240, 360 y 480
+  frames contra todos los digests de reset y exige al menos un frame no negro.
+  Esto evita que una variante temporal de la pantalla de arranque o un estado
+  negro transitorio (observado en Galaga) se interprete como escena válida;
+  cinco casos pasan y cuatro quedan explícitamente como boot-only.
+
+- 2026-11-03: la configuración del corpus visual quedó separada del test
+  sintético RAMBO. Los programas reales usan 130XE-128K/NTSC, coherente con
+  la validación Altirra documentada; el marcador mínimo mantiene RAMBO
+  explícito. Galaga no se fuerza a pasar una captura negra: queda señalado
+  como pendiente de un marcador o escena observable en headless.
+
+- 2026-11-03: `npm run test:vbxe:full` quedó verde después de integrar el
+  gate visual endurecido. La salida registra cinco escenas visualmente
+  observables y cuatro casos boot-only explícitos; no se declara equivalencia
+  pixel a pixel con Altirra.
+
+- 2026-11-03: el gate real añade ahora una huella SHA-256 de los 64 KiB de
+  memoria en cada checkpoint. Los casos sin escena visual no se relajan a
+  `cycleCounter`: deben cambiar la RAM respecto del conjunto de reset y
+  registran ese marcador como evidencia de ejecución del XEX. Esto sigue sin
+  sustituir un marcador específico de escena ni una comparación Altirra.
+
+- 2026-11-03: habilitada la ruta worker también para perfiles VBXE. La UI ya
+  no fuerza el runtime principal cuando VBXE está activo: el worker recibe la
+  configuración FX y compone `vbxeRgb`/hires dentro de su `OffscreenCanvas`.
+  Queda pendiente una regresión browser dedicada que compare worker, fallback
+  main-thread y Canvas 2D; la validación funcional headless no cubre
+  `OffscreenCanvas`.
+
+- 2026-11-03: smoke test manual por CDP confirmó ambos backends con VBXE
+  FX1.26 activo: worker `true`/WebGL2 y fallback main-thread `false`/WebGL2
+  arrancaron con captura PNG 336x240 no negra (`40795` píxeles no negros en
+  ambos casos). La equivalencia automatizada de contenido y Canvas 2D sigue
+  pendiente; este resultado sólo valida que la ruta worker no queda negra ni
+  bloquea la automatización.
+
+- 2026-11-03: se repitió la comprobación de etapa 7 en la instancia real de
+  Chromium (`localhost:8090/jsA8E`, CDP `9222`) porque el harness headless
+  capturaba una pantalla inicial común. `A8EAutomation.runXexFromUrl()` cargó
+  el corpus FX1.26 y avanzó 120 frames con `rendererBackend=webgl2` y
+  `worker=false`; los PCs observados dejaron de ser el bucle inicial del OS.
+  La captura Chromium produjo un frame no negro. En Textmode Test, el digest
+  del menú fue `8288d135...` y el del modo 4 seleccionado `8c5f3da9...`, por
+  lo que el cambio visual es observable en el navegador. Esto valida el
+  protocolo de captura browser, no todavía la equivalencia con Altirra ni una
+  línea base headless; la comparación externa sigue pendiente.
+
+- 2026-11-03: se cerró la primera parte del refuerzo del harness XEX. El
+  headless hereda ahora una configuración comparable a Chromium (`sioTurbo`
+  explícito y RAMBO en el diagnóstico), y
+  `vbxe_xex_scene_marker.test.js` ensambla un XEX mínimo, lo arranca y espera
+  los marcadores RAM `$0600=$A5`/`$0601=$5A`; la prueba pasa y está en
+  `test:vbxe:full`. El breakpoint durante el boot no resultó fiable en
+  headless, por lo que la puerta usa memoria observable. Las puertas del
+  corpus real aún necesitan sus propios marcadores de escena antes de aceptar
+  líneas base visuales.
+
+- 2026-11-03: se intentó avanzar la etapa 7 con una línea base visual de
+  Popeye, Galaga, DACTest, Textmode Test, Crysis, Celeste, D600, Falcon y
+  Phoenix. El experimento no es evidencia válida: las capturas headless
+  devolvieron el mismo frame y la VRAM VBXE permaneció en cero; las puertas
+  existentes usan `runXex({ awaitEntry: false })` y sólo comprueban que avance
+  `cycleCounter`. Una variante que esperaba la entrada XEX no llegó al punto
+  de entrada dentro del límite del harness. Se retiró la línea base inválida.
+  Antes de comparar imágenes con Altirra hay que hacer que el harness pruebe
+  ejecución real (entrada XEX o marcador de escena) y capture una VRAM/frame no
+  vacío; la etapa 7 queda en progreso y esta conclusión evita declarar
+  equivalencia visual por una pantalla inicial común.
+
+- 2026-11-03: avanzado el paso 6 de temporización del blitter. Las nuevas
+  entradas XDL reservan ahora los 22 ciclos locales fijos de actualización que
+  define AHRM 12.4, mientras las líneas repetidas no pagan una actualización
+  adicional. Se ajustaron las regresiones de presupuesto y el par
+  continuous/restart sigue verde; el scheduler continúa agregado por
+  scanline porque no existe todavía un marcador horizontal que justifique un
+  arbitraje por fase.
+
+- 2026-11-03: completado el paso 5 de registros, MEMAC, reset y snapshots.
+  `vbxe_register_snapshot` comprueba ambos bancos `$D640`/`$D740`, readback
+  read-only/write-only, máscaras de bits, VSync, MEMAC A y el latch de
+  configuración. También restaura un XDL activo y un blitter durante la carga
+  de su BCB; `restoreState()` ahora sanea los bits imposibles de ese latch en
+  snapshots antiguos o editados. La cobertura de reset caliente/frío ya
+  estaba en `vbxe_device_state`; la suite VBXE completa permanece verde.
+
+- 2026-11-02: cerrada la primera matriz determinista de prioridad y colisión
+  VBXE. La regresión `vbxe_priority_collision_matrix` fija los grupos
+  PF0--PF3/P5 y P0--P3 en GTIA normal/9/11, la máscara `$7F` medida para
+  entradas visibles en GTIA 10, y las tablas de prioridad legacy/full de FX
+  1.20, 1.24, 1.26 y 1.26r. Se mantiene además la cobertura XEX de
+  `COLMASK`/`COLDETECT`, P0+P1 y P5. Queda pendiente ampliar los diferenciales
+  de escenas reales y combinaciones de transparencia/mapa todavía no medidas.
+
+- 2026-11-02: implementado el primer replay visible de mapas de atributos por
+  spans. Al cerrar una línea, la cola de escrituras GTIA reconstruye el mapa
+  por intervalos usando los registros iniciales y los valores de `COLPF3` y
+  `PRIOR`/modo GTIA vigentes en cada evento; el PF3 de ANTIC hires se verifica
+  en las salidas legacy y hires. La ruta conserva los píxeles de overlay y
+  refresca sólo las regiones de mapa necesarias. La cobertura sigue siendo
+  parcial: cambios de registros VBXE del mapa y el cruce completo con
+  overlay hires/texto y timing por fase siguen pendientes. `vbxe_device_state`
+  y `npm run test:vbxe:full` pasan.
+
+- 2026-11-02: completed the VBXE attribute-map geometry slice. The map now
+  shares `OvMisc`'s narrow/normal/wide start and width in both the legacy
+  `vbxeRgb` plane and the hires presentation plane, even when the overlay is
+  disabled. Added unit coverage for all three widths and updated the normal
+  and narrow AHRM boot oracles. Full temporal cross-product replay and
+  phase-exact timing remain separate pending work.
+
+- 2026-11-02: fixed VBXE XDL restart state. `verticalSync()` now resets the
+  per-frame visual latches while preserving the running overlay and
+  attribute-map address/stride latches, as required by AHRM 12.4. Added a
+  multi-frame regression proving that the counters continue from the previous
+  line, that `AtMapOn` can reuse the carried map state, and that visual
+  defaults still reset. The XDL start address remains restarted from
+  `XDL_ADR0-2` each frame.
+
+- 2026-11-02: auditó la rama `VBXE` contra AHRM 12.4, incluyendo los cambios
+  locales sin commit. `npm run test:vbxe:full` y `npm run test:automation`
+  pasan; dos pruebas generales se omiten por falta de ROMs y `npm run lint`
+  no puede ejecutarse porque el entorno expone ESLint 6.4 sin configuración
+  compatible. La conclusión es compatibilidad práctica, pero no AHRM-compliance
+  completa: en el estado que se auditó, `verticalSync()` reiniciaba direcciones
+  XDL/mapa que AHRM indica conservar; ese primer punto ya fue corregido y
+  regresado en la misma rama. La geometría normal fija del compositor de
+  attribute map también fue corregida después de esa auditoría. Siguen
+  abiertas el presupuesto XDL que reserva bytes decodificados en vez de los
+  22 ciclos AHRM y la arbitraje local agregada por scanline. La
+  polaridad MEMAC-B usa D7=CPU/D6=ANTIC por compatibilidad con Altirra y el
+  software, aunque la tabla AHRM los rotula al revés; el scroll MAPPAR sigue
+  siendo una discrepancia AHRM/Altirra sin diferencial físico concluyente.
+  Estas conclusiones y prioridades quedan detalladas en `VBXE.md` y
+  `VBXE_ROADMAP.md`; no se modificó código durante la auditoría.
+
+- 2026-11-02: documented the VBXE completion plan in `VBXE_ROADMAP.md` with
+  separate definitions for practical compatibility, raster fidelity, and
+  product integration. Added architecture, scanline, and dependency diagrams;
+  stage exit criteria; regression/differential gates; and links from the root,
+  native, browser, core, renderer, and worker README/documentation. Corrected
+  the documentation boundary so JavaScript FX 1.26r RAMBO is recorded as
+  implemented, while worker RGB transport and native VBXE remain optional
+  integration work.
+
+- 2026-11-02: began the missing scanline-span path from Altirra's
+  `AddRegisterChange`/`RenderScanline` model. In addition to the established
+  P/M geometry queue, each line now snapshots and timestamps all four player,
+  four playfield/background colour registers and `PRIOR`; I/O records their
+  latched values (including the GTIA forced-zero LSB). This is the required
+  temporal source for VBXE's later span compositor; rendering those spans is
+  still pending, so this entry does not claim visible mid-line fidelity.
+
+- 2026-11-02: wired the first visible consumer of that timeline. For XDL
+  lines using the default playfield palette (no attribute map), jsA8E retains
+  the decoded XDL line until the scanline closes and reapplies the palette in
+  GTIA event spans, selecting PF0--PF3/background from the recorded register
+  state. At that point overlay and attribute-map span replay remained open;
+  the later map/PF3 slice is documented above. `test:gtia-spans` runs the
+  queue's timestamp/order regression independently of the longer VBXE suite.
+
+- 2026-11-02: added the FX 1.26 RAMBO-capable profile (`fx1.26r`). It returns
+  `MINOR_REVISION=$A6` and maps the PORTB-D4-enabled `$4000-$7FFF` CPU/ANTIC
+  window directly to local `$40000-$7FFFF`, using inverted D6/D5/D3/D2 bank
+  bits as documented by AHRM. It is selectable at either VBXE page in the UI
+  and proxy configuration; the state regression pins the revision and both
+  end-bank addresses, while `vbxe_rambo_bus` verifies actual CPU writes,
+  ANTIC reads, D4 disable, and bank isolation through the installed handlers.
+
+- 2026-11-02: aligned `BLITTER_START=0` with Altirra's event handling. A
+  stop now cancels a completion IRQ still queued for its in-line phase without
+  acknowledging one that already fired; `IRQ_CONTROL` remains the explicit
+  acknowledge path. The blitter-state test covers this stop-before-event
+  boundary.
+
+- 2026-11-02: updated the PF3 attribute-map boot oracle for the already
+  Altirra-aligned CR/CG/CB expansion: a stored `$FE` has D7 set and therefore
+  reads as `$FF` after the hardware's D7→D0 expansion. Both PF3-green and
+  PF2-red expected components now express that observable value. The same
+  stale `$FE` expectations in normal/lores reverse and FX1.24 priority gates
+  were updated to `$FF`.
+
+- 2026-11-02: implemented Altirra's VBXE configuration-pin latch at every
+  selected `$DxC0-$DxFF` address. It stores only DATA0/DCLK/`/CONFIG` (D0-D2),
+  is snapshot-safe, survives warm reset, and clears on a power cycle. The
+  device-state regression covers both register pages and reset boundaries.
+  The CPU I/O installer now maps that complete latch range as well as the
+  normal `$Dx40-$Dx5F` register bank.
+
 - 2026-11-02: matched two remaining XDL timing latches to Altirra 4.40:
   `OVSCRL` now retains only its documented three text-scroll bits, and the
   scanline blitter budget now reserves the FX's distinct narrow/normal/wide

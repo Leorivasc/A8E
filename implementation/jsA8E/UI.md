@@ -6,6 +6,10 @@
 - Purpose: provide browser controls and status for emulator operation.
 - Status: updated on 2026-10-29 (`implemented`, including optional VBXE FX
   1.26 configuration).
+- 2026-11-03: VBXE-enabled UI startup now prefers the worker OffscreenCanvas
+  when available; the main-thread WebGL/Canvas 2D path remains the fallback.
+- This supersedes the older worker/VBXE note in the long runtime description
+  below; that historical description is retained for change history.
 - 2026-09-18: added selectable `Emulation`, `Work`, and `Development` layout
   presets beside Start/Pause, Reset, and Audio. The active presentation mode
   persists in `localStorage`; layout changes do not reset the emulator. The

@@ -7,6 +7,7 @@
   const PALETTE_COMPONENTS = 3;
   const REGISTER_COUNT = 0x20;
   const DEFAULT_PAGE = 0xd640;
+  const XDL_UPDATE_CYCLES = 22;
   const VBXE_CONTRIBUTOR_VALID = 0x8000;
   // These match the shared GTIA layer bits in hw.js. VBXE deliberately reads
   // per-pixel layer metadata rather than the final RGB value: different GTIA
@@ -31,6 +32,7 @@
     if (profile === "fx1.20" || profile === "fx120") return "fx1.20";
     if (profile === "fx1.24" || profile === "fx124") return "fx1.24";
     if (profile === "fx1.26" || profile === "fx126") return "fx1.26";
+    if (profile === "fx1.26r" || profile === "fx126r" || profile === "r") return "fx1.26r";
     return "off";
   }
 
@@ -93,10 +95,12 @@
       blitterIrqScheduled: false,
       blitterIrqResidual: 0,
       memacSlots: 0,
+      xdlSlots: 0,
       priority: new Uint8Array(4),
       memacBControl: 0,
       memacControl: 0,
       memacBankSelect: 0,
+      configLatch: 0,
       xdl: createXdlState(),
     };
     // AHRM 12.4: power-up loads palette 0 from the GTIA palette; the other
@@ -121,6 +125,7 @@
     state.blitterIrqScheduled = false;
     state.blitterIrqResidual = 0;
     state.memacSlots = 0;
+    state.xdlSlots = 0;
     state.memacBControl &= 0x3f;
     state.memacControl &= 0xf3;
     state.memacBankSelect &= 0x7f;
@@ -142,16 +147,28 @@
     state.memacBControl = 0;
     state.memacControl = 0;
     state.memacBankSelect = 0;
+    state.configLatch = 0;
     state.xdlAddressPending = 0;
     state.xdlAddressActive = 0;
   }
 
   function verticalSync(state) {
     if (!state || !state.enabled) return;
+    // AHRM 12.4: VSync restarts the XDL descriptor and resets its visual
+    // parameters, but the overlay and attribute-map address/stride latches
+    // are not reset automatically. An XDL entry may still overwrite either
+    // address and stride when its corresponding control bit is present.
+    const previousXdl = state.xdl;
     state.videoControlActive = state.videoControlPending & 0x0f;
     state.xdlAddressActive = state.xdlAddressPending & 0x7ffff;
     state.xdl = createXdlState();
     state.xdl.address = state.xdlAddressActive;
+    if (previousXdl) {
+      state.xdl.overlayAddress = previousXdl.overlayAddress & 0x7ffff;
+      state.xdl.overlayStride = previousXdl.overlayStride & 0xfff;
+      state.xdl.attributeAddress = previousXdl.attributeAddress & 0x7ffff;
+      state.xdl.attributeStride = previousXdl.attributeStride & 0xffc;
+    }
   }
 
   function signed(value, bits) {
@@ -364,6 +381,12 @@
     if (!state) return;
     state.blitter = null;
     state.blitterBusy = 0;
+    // BLITTER_START=0 cancels Altirra's pending completion scheduler event.
+    // It does not acknowledge an IRQ that already fired; IRQ_CONTROL remains
+    // responsible for that level-sensitive latch.
+    state.blitterIrqPending = false;
+    state.blitterIrqScheduled = false;
+    state.blitterIrqResidual = 0;
   }
 
   function nextXdlLine(state, scanline) {
@@ -374,9 +397,7 @@
     // Altirra's XDL engine applies END after the entry's complete repeat run,
     // not when the terminating entry is first decoded.
     if (x.ended && x.repeat === 0) return null;
-    let xdlBytes = 0;
     const read = function () {
-      xdlBytes++;
       return state.vram[(x.address++) & 0x7ffff];
     };
     let attributeMapReload = false;
@@ -432,7 +453,10 @@
       }
       if (c1 & 0x80) x.ended = true;
       if (attributeMapReload) x.attributeRow = x.attributeScrollY;
-      state.xdlSlots = xdlBytes;
+      // AHRM 12.4: the XDL update occupies 22 local cycles after the active
+      // overlay region, independent of the descriptor byte count. Repeated
+      // lines skip the update entirely and therefore leave xdlSlots at zero.
+      state.xdlSlots = XDL_UPDATE_CYCLES;
     } else {
       // The repeat byte is the number of *additional* mode lines.  Keep its
       // full value for the line that loaded the entry, then consume one on
@@ -838,7 +862,7 @@
     }
   }
 
-  function applyDefaultPlayfieldPalette(state, video, scanline, line) {
+  function applyDefaultPlayfieldPalette(state, video, scanline, line, gtia, x1, x2) {
     if (!line || !line.playfieldPalette || !video || !video.vbxeRgb || !video.pixels) return;
     const scanBase = (scanline | 0) * 456;
     const start = overlayLegacyStart(line);
@@ -847,9 +871,12 @@
     const pmMask = PRIO_PM0 | PRIO_PM1 | PRIO_PM2 | PRIO_PM3 |
       PRIO_M10_PM0 | PRIO_M10_PM1 | PRIO_M10_PM2 | PRIO_M10_PM3;
     const palette = line.playfieldPalette & 0x03;
-    for (let x = 0; x < width; x++) {
+    const first = Math.max(0, x1 === undefined ? 0 : x1 | 0);
+    const last = Math.min(width, x2 === undefined ? width : x2 | 0);
+    for (let x = first; x < last; x++) {
       const pixel = scanBase + start + x;
-      if (pixel < 0 || pixel >= video.vbxeRgb.length || video.vbxeRgb[pixel] !== 0) continue;
+      if (pixel < 0 || pixel >= video.vbxeRgb.length ||
+          (line.overlayEnabled !== false && video.vbxeRgb[pixel] !== 0)) continue;
       const stored = video.vbxeCollisionPriority ? video.vbxeCollisionPriority[pixel] & 0xffff : 0;
       const visible = (stored & VBXE_CONTRIBUTOR_VALID) !== 0
         ? stored & ~VBXE_CONTRIBUTOR_VALID
@@ -857,82 +884,134 @@
       // VBXE shadows GTIA's playfield/background path, but never recolors a
       // player/missile color that won GTIA priority.
       if ((visible & pmMask) !== 0) continue;
-      const color = extendedColor ? video.pixels[pixel] & 0xff : video.pixels[pixel] & 0xfe;
+      let color = video.pixels[pixel] & 0xff;
+      if (gtia) {
+        color = gtia[8];
+        if (visible & PRIO_PF0) color |= gtia[4];
+        if (visible & PRIO_PF1) color |= gtia[5];
+        if (visible & PRIO_PF2) color |= gtia[6];
+        if (visible & PRIO_PF3) color |= gtia[7];
+      }
+      color = extendedColor ? color : color & 0xfe;
       const p = (palette * 256 + color) * 3;
       video.vbxeRgb[pixel] = ((255 << 24) | (state.palette[p + 2] << 16) |
         (state.palette[p + 1] << 8) | state.palette[p]) >>> 0;
     }
   }
 
-  function applyPlayfieldAttributes(state, video, scanline, line) {
+  function applyGtiaSpans(state, video, scanline, line, drawLine) {
+    if (!line || !video || !video.vbxeRgb || !drawLine || drawLine.gtiaEventOverflow ||
+        !drawLine.gtiaEventCount || !drawLine.gtiaInitialRegisters) return;
+    const registers = new Uint8Array(drawLine.gtiaInitialRegisters);
+    const width = overlayNativeWidth(line) >> 1;
+    const start = overlayLegacyStart(line);
+    // The line was composed once at its close, before the later GTIA writes
+    // are replayed. Remove only map output before rebuilding the spans. A
+    // standard/lores overlay lives in the legacy plane, so its native map
+    // plane can be refreshed independently; hires/text share the native plane
+    // and retain the existing overlay-pixel guard below.
+    if (line.attributeMapEnabled) {
+      if (!line.overlayEnabled) {
+        const legacyBase = (scanline | 0) * 456 + start;
+        if (legacyBase >= 0 && legacyBase + width <= video.vbxeRgb.length)
+          video.vbxeRgb.fill(0, legacyBase, legacyBase + width);
+      }
+      if (!line.overlayEnabled || line.mode === "standard" || line.mode === "lores") {
+        const target = hiresTarget(video, scanline, overlayNativeWidth(line));
+        if (target) target.pixels.fill(0, target.rowBase, target.rowBase + target.width);
+      }
+    }
+    let pixel = 0;
+    for (let i = 0; i < drawLine.gtiaEventCount; i++) {
+      const next = Math.max(0, Math.min(overlayNativeWidth(line) >> 1,
+        24 + (drawLine.gtiaEventCycles[i] | 0) * 4 - start));
+      applyPlayfieldAttributes(state, video, scanline, line, registers, pixel, next);
+      registers[drawLine.gtiaEventRegisters[i]] = drawLine.gtiaEventValues[i];
+      pixel = next;
+    }
+    applyPlayfieldAttributes(state, video, scanline, line, registers, pixel, width);
+  }
+
+  function applyPlayfieldAttributes(state, video, scanline, line,
+    gtiaRegisters, x1, x2) {
     if (!line || !video || !video.vbxeRgb) return;
     if (!line.attributeMapEnabled) {
-      applyDefaultPlayfieldPalette(state, video, scanline, line);
+      applyDefaultPlayfieldPalette(state, video, scanline, line, gtiaRegisters, x1, x2);
       return;
     }
-    const atariBase = (scanline | 0) * 456 + 128;
-    if (atariBase < 0 || atariBase + 256 > video.vbxeRgb.length) return;
+    // AHRM 12.4: the attribute map uses the same horizontal position and
+    // width as the overlay, even when no overlay is enabled.
+    const signalWidth = overlayNativeWidth(line);
+    const standardWidth = signalWidth >> 1;
+    const signalStart = overlayLegacyStart(line);
+    const atariBase = (scanline | 0) * 456 + signalStart;
+    if (atariBase < 0 || atariBase + standardWidth > video.vbxeRgb.length) return;
     const extendedColor = (state.videoControlActive & 0x02) !== 0;
+    const renderLine = gtiaRegisters ? Object.assign({}, line, {
+      anticPf3: gtiaRegisters[7] & 0xff,
+      anticGtiaMode: (gtiaRegisters[9] >>> 6) & 0x03,
+    }) : line;
+    const first = Math.max(0, x1 === undefined ? 0 : x1 | 0);
+    const last = Math.min(standardWidth, x2 === undefined ? standardWidth : x2 | 0);
 
-    // ANTIC normal-width playfields occupy 320 physical hires samples from
-    // x=96 through x=415 (AHRM 6.2). Attribute maps are specified in VBXE
-    // standard pixels, so drawing only through the old 256-sample viewport
-    // silently shrinks their signal. Mirror the final map color into the
-    // 640-sample presentation plane, two samples per ANTIC source pixel.
-    const nativeTarget = hiresTarget(video, scanline);
-    const nativeAtariBase = (scanline | 0) * 456 + 96;
+    // Mirror the final map color into the hires presentation plane, two
+    // samples per standard-resolution pixel. The target width and source
+    // position must follow the same narrow/normal/wide signal as the overlay.
+    const nativeTarget = hiresTarget(video, scanline, signalWidth);
+    const nativeAtariBase = (scanline | 0) * 456 + signalStart;
     if (nativeTarget && nativeAtariBase >= 0 &&
-        nativeAtariBase + 320 <= video.priority.length) {
+        nativeAtariBase + standardWidth <= video.priority.length) {
       // Direct state callers do not have renderXdlLine's off-overlay clear.
-      if (!line.mode || line.mode === "off") {
+      if (x1 === undefined && (!line.mode || line.mode === "off")) {
         nativeTarget.pixels.fill(0, nativeTarget.rowBase,
           nativeTarget.rowBase + nativeTarget.width);
       }
-      for (let standardX = 0; standardX < 320; standardX++) {
+      for (let standardX = first; standardX < last; standardX++) {
         const sourcePixel = nativeAtariBase + standardX;
         const targetPixel = nativeTarget.base + standardX * 2;
         // A legacy standard/lores overlay is still stored in vbxeRgb. Do not
         // let a playfield override appear above it while that renderer path is
         // migrated to the native plane.
         const legacyOverlay = video.vbxeRgb[
-          atariBase + Math.floor(standardX * 256 / 320)
+          atariBase + standardX
         ];
-        if (nativeTarget.pixels[targetPixel] !== 0 || legacyOverlay !== 0) continue;
+        if ((line.overlayEnabled !== false && nativeTarget.pixels[targetPixel] !== 0) ||
+            (line.overlayEnabled !== false && legacyOverlay !== 0)) continue;
         const visible = video.vbxeCollisionPriority &&
             (video.vbxeCollisionPriority[sourcePixel] & VBXE_CONTRIBUTOR_VALID) !== 0
           ? video.vbxeCollisionPriority[sourcePixel] & ~VBXE_CONTRIBUTOR_VALID
           : (video.priority ? video.priority[sourcePixel] : 0);
-        const map = attributeMapCell(state, line, standardX);
+        const map = attributeMapCell(state, renderLine, standardX);
         if (!map) continue;
         let color = -1;
-        if (map.reverse && isGtiaReverseBlackMode(line) && isAnticHiresSource(line) &&
-            reverseHiresColor(line, map, video.anticSourceBits, sourcePixel) >= 0) {
+        if (map.reverse && isGtiaReverseBlackMode(renderLine) && isAnticHiresSource(renderLine) &&
+            reverseHiresColor(renderLine, map, video.anticSourceBits, sourcePixel) >= 0) {
           // The raw GTIA mode-9/11 fields are visible without VBXE, but FX
           // 1.26 composes these validated reversed cells as opaque palette 0.
           color = 0;
-        } else if (map.reverse && isGtiaMode10(line) && isAnticLoresCharacterMode(line)) {
+        } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresCharacterMode(renderLine)) {
           color = reverseLoresMode10Color(map, video.anticSourceLores, sourcePixel);
-        } else if (map.reverse && isGtiaMode10(line) && isAnticLoresSelectorCharacterMode(line) &&
+        } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresSelectorCharacterMode(renderLine) &&
             hasReverseLoresSource(video.anticSourceLores, sourcePixel)) {
           color = 0;
-        } else if (map.reverse && isGtiaMode10(line) && isAnticLoresGraphicsMode(line)) {
+        } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresGraphicsMode(renderLine)) {
           color = 0;
-        } else if (map.reverse && isGtiaMode9Or11(line) && isAnticLoresCharacterMode(line) &&
+        } else if (map.reverse && isGtiaMode9Or11(renderLine) && isAnticLoresCharacterMode(renderLine) &&
             hasReverseLoresSource(video.anticSourceLores, sourcePixel)) {
           color = 0;
-        } else if (map.reverse && isGtiaMode9Or11(line) && isAnticLoresSelectorCharacterMode(line) &&
+        } else if (map.reverse && isGtiaMode9Or11(renderLine) && isAnticLoresSelectorCharacterMode(renderLine) &&
             hasReverseLoresSource(video.anticSourceLores, sourcePixel)) {
           color = 0;
-        } else if (map.reverse && isGtiaMode9Or11(line) && isValidatedGtia9Or11GraphicsMode(line)) {
+        } else if (map.reverse && isGtiaMode9Or11(renderLine) && isValidatedGtia9Or11GraphicsMode(renderLine)) {
           color = 0;
-        } else if (map.reverse && !hasGtiaSpecialMode(line) && isAnticHiresSource(line)) {
-          color = reverseHiresColor(line, map, video.anticSourceBits, sourcePixel);
-        } else if (map.reverse && !hasGtiaSpecialMode(line) && isAnticLoresMode(line)) {
+        } else if (map.reverse && !hasGtiaSpecialMode(renderLine) && isAnticHiresSource(renderLine)) {
+          color = reverseHiresColor(renderLine, map, video.anticSourceBits, sourcePixel);
+        } else if (map.reverse && !hasGtiaSpecialMode(renderLine) && isAnticLoresMode(renderLine)) {
           color = reverseLoresColor(map, video.anticSourceLores, sourcePixel);
-        } else if (!map.reverse && isAnticHiresSource(line) &&
+        } else if (!map.reverse && isAnticHiresSource(renderLine) &&
             (visible & PRIO_PF2) &&
-            attributeMapPf3MaskBit(line, standardX, map.playfield0)) {
-          color = line.anticPf3 & 0xff;
+            attributeMapPf3MaskBit(renderLine, standardX, map.playfield0)) {
+          color = renderLine.anticPf3 & 0xff;
         } else if (visible & PRIO_PF0) color = map.playfield0;
         else if (visible & PRIO_PF1) color = map.playfield1;
         else if (visible & PRIO_PF2) color = map.playfield2;
@@ -946,45 +1025,45 @@
       }
     }
 
-    for (let x = 0; x < 256; x++) {
+    for (let x = first; x < last; x++) {
       const pixel = atariBase + x;
       // A visible overlay already has its final RGB value in this plane and
       // must remain above the playfield override.
-      if (video.vbxeRgb[pixel] !== 0) continue;
+      if (line.overlayEnabled !== false && video.vbxeRgb[pixel] !== 0) continue;
       const visible = video.vbxeCollisionPriority &&
           (video.vbxeCollisionPriority[pixel] & VBXE_CONTRIBUTOR_VALID) !== 0
         ? video.vbxeCollisionPriority[pixel] & ~VBXE_CONTRIBUTOR_VALID
         : (video.priority ? video.priority[pixel] : 0);
-      const standardX = Math.floor(x * 320 / 256);
-      const map = attributeMapCell(state, line, standardX);
+      const standardX = x;
+      const map = attributeMapCell(state, renderLine, standardX);
       if (!map) continue;
       let color = -1;
-      if (map.reverse && isGtiaReverseBlackMode(line) && isAnticHiresSource(line) &&
-          reverseHiresColor(line, map, video.anticSourceBits, pixel) >= 0) {
+      if (map.reverse && isGtiaReverseBlackMode(renderLine) && isAnticHiresSource(renderLine) &&
+          reverseHiresColor(renderLine, map, video.anticSourceBits, pixel) >= 0) {
         color = 0;
-      } else if (map.reverse && isGtiaMode10(line) && isAnticLoresCharacterMode(line)) {
+      } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresCharacterMode(renderLine)) {
         color = reverseLoresMode10Color(map, video.anticSourceLores, pixel);
-      } else if (map.reverse && isGtiaMode10(line) && isAnticLoresSelectorCharacterMode(line) &&
+      } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresSelectorCharacterMode(renderLine) &&
           hasReverseLoresSource(video.anticSourceLores, pixel)) {
         color = 0;
-      } else if (map.reverse && isGtiaMode10(line) && isAnticLoresGraphicsMode(line)) {
+      } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresGraphicsMode(renderLine)) {
         color = 0;
-      } else if (map.reverse && isGtiaMode9Or11(line) && isAnticLoresCharacterMode(line) &&
+      } else if (map.reverse && isGtiaMode9Or11(renderLine) && isAnticLoresCharacterMode(renderLine) &&
           hasReverseLoresSource(video.anticSourceLores, pixel)) {
         color = 0;
-      } else if (map.reverse && isGtiaMode9Or11(line) && isAnticLoresSelectorCharacterMode(line) &&
+      } else if (map.reverse && isGtiaMode9Or11(renderLine) && isAnticLoresSelectorCharacterMode(renderLine) &&
           hasReverseLoresSource(video.anticSourceLores, pixel)) {
         color = 0;
-      } else if (map.reverse && isGtiaMode9Or11(line) && isValidatedGtia9Or11GraphicsMode(line)) {
+      } else if (map.reverse && isGtiaMode9Or11(renderLine) && isValidatedGtia9Or11GraphicsMode(renderLine)) {
         color = 0;
-      } else if (map.reverse && !hasGtiaSpecialMode(line) && isAnticHiresSource(line)) {
-        color = reverseHiresColor(line, map, video.anticSourceBits, pixel);
-      } else if (map.reverse && !hasGtiaSpecialMode(line) && isAnticLoresMode(line)) {
+      } else if (map.reverse && !hasGtiaSpecialMode(renderLine) && isAnticHiresSource(renderLine)) {
+        color = reverseHiresColor(renderLine, map, video.anticSourceBits, pixel);
+      } else if (map.reverse && !hasGtiaSpecialMode(renderLine) && isAnticLoresMode(renderLine)) {
         color = reverseLoresColor(map, video.anticSourceLores, pixel);
-      } else if (!map.reverse && isAnticHiresSource(line) &&
+      } else if (!map.reverse && isAnticHiresSource(renderLine) &&
           (visible & PRIO_PF2) &&
-          attributeMapPf3MaskBit(line, standardX, map.playfield0)) {
-        color = line.anticPf3 & 0xff;
+          attributeMapPf3MaskBit(renderLine, standardX, map.playfield0)) {
+        color = renderLine.anticPf3 & 0xff;
       } else if (visible & PRIO_PF0) color = map.playfield0;
       else if (visible & PRIO_PF1) color = map.playfield1;
       else if (visible & PRIO_PF2) color = map.playfield2;
@@ -1027,6 +1106,21 @@
       return (((state.memacBControl & 0x1f) << 14) + addr - 0x4000) & 0x7ffff;
     }
     return -1;
+  }
+
+  // AHRM 12.4: the RAMBO-capable core exposes the upper 256K of VBXE local
+  // RAM through the normal 16K extended-memory window when PORTB D4 enables
+  // it. PORTB D6,D5,D3,D2 are inverted and feed local address D17,D16,D15,D14.
+  function ramboAddress(state, address, portB) {
+    if (!state || !state.enabled || state.profile !== "fx1.26r") return -1;
+    const addr = address & 0xffff;
+    const port = portB & 0xff;
+    if (addr < 0x4000 || addr >= 0x8000 || (port & 0x10) !== 0) return -1;
+    const bank = ((port & 0x40) ? 0 : 0x20000) |
+      ((port & 0x20) ? 0 : 0x10000) |
+      ((port & 0x08) ? 0 : 0x08000) |
+      ((port & 0x04) ? 0 : 0x04000);
+    return (0x40000 + bank + addr - 0x4000) & 0x7ffff;
   }
 
   // The exact odd local-bus phase is resolved by the CPU/ANTIC caller. Keep
@@ -1072,8 +1166,20 @@
   }
 
   function access(state, address, value) {
-    if (!isAddress(state, address)) return null;
-    const reg = (address - state.page) & 0x1f;
+    if (!state || !state.enabled) return null;
+    const addr = address & 0xffff;
+    // Altirra exposes the configuration serial pins across the final 64-byte
+    // block of the device's $Dx00 page, independently of the $Dx40 register
+    // bank. D0-D2 are latchable inputs; the emulated device leaves CONF_DONE
+    // low, just like Altirra's mConfigLatch.
+    const configBase = (state.page & 0xff00) | 0x00c0;
+    if (addr >= configBase && addr < configBase + 0x40) {
+      if (value === undefined || value === null) return state.configLatch & 0x07;
+      state.configLatch = value & 0x07;
+      return 0xff;
+    }
+    if (!isAddress(state, addr)) return null;
+    const reg = (addr - state.page) & 0x1f;
     if (value === undefined || value === null) {
       switch (reg) {
         // Altirra 4.40 reports the full FX core as $10 for all selectable
@@ -1082,7 +1188,8 @@
         case 0x00: return 0x10;
         case 0x01:
           return state.profile === "fx1.20" ? 0x20 :
-            state.profile === "fx1.24" ? 0x24 : 0x26;
+            state.profile === "fx1.24" ? 0x24 :
+              (state.profile === "fx1.26r" ? 0xa6 : 0x26);
         case 0x0a: return state.collisionDetect & 0xff;
         case 0x10: return state.blitCollisionCode & 0xff;
         // AHRM 12.4: bit 0 denotes a control-block load and bit 1 denotes
@@ -1197,10 +1304,12 @@
       blitterIrqScheduled: !!state.blitterIrqScheduled,
       blitterIrqResidual: state.blitterIrqResidual | 0,
       memacSlots: state.memacSlots | 0,
+      xdlSlots: state.xdlSlots | 0,
       priority: new Uint8Array(state.priority || 0),
       memacBControl: state.memacBControl & 0xff,
       memacControl: state.memacControl & 0xff,
       memacBankSelect: state.memacBankSelect & 0xff,
+      configLatch: state.configLatch & 0x07,
       xdl: Object.assign({}, state.xdl),
     };
   }
@@ -1220,10 +1329,13 @@
     copy(state.priority, source.priority);
     ["videoControlPending", "videoControlActive", "colorSelect", "collisionMask",
       "collisionDetect", "blitCollisionCode", "blitterBusy", "irqStatus", "irqControl",
-      "memacSlots",
-      "memacBControl", "memacControl", "memacBankSelect"].forEach(function (key) {
+      "memacSlots", "xdlSlots",
+      "memacBControl", "memacControl", "memacBankSelect", "configLatch"].forEach(function (key) {
       if (source[key] !== undefined) state[key] = source[key] & 0xff;
     });
+    // The configuration pins expose only DATA0/DCLK/CONFIG; discard any
+    // impossible upper bits from legacy or hand-authored snapshots.
+    state.configLatch &= 0x07;
     state.blitterIrqPending = !!source.blitterIrqPending;
     state.blitterIrqScheduled = !!source.blitterIrqScheduled;
     state.blitterIrqResidual = source.blitterIrqResidual | 0;
@@ -1251,11 +1363,13 @@
     nextXdlLine: nextXdlLine,
     renderXdlLine: renderXdlLine,
     applyPlayfieldAttributes: applyPlayfieldAttributes,
+    applyGtiaSpans: applyGtiaSpans,
     attributeMapCell: attributeMapCell,
     collisionBitsForPriority: collisionBitsForPriority,
     overlayWinsPriority: overlayWinsPriority,
     isAddress: isAddress,
     memacAddress: memacAddress,
+    ramboAddress: ramboAddress,
     noteMemacAccess: noteMemacAccess,
     access: access,
     cloneState: cloneState,

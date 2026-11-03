@@ -30,11 +30,11 @@ async function main() {
     await runtime.api.system.pause();
     const video = ctx.ioData.videoOut;
     const x = 128;
-    assert.equal(video.vbxeRgb[16 * 456 + x], 0xff00fe00,
+    assert.equal(video.vbxeRgb[16 * 456 + x], 0xff00ff00,
       "legacy $00 priority must win over the blank/background band");
     assert.equal(video.vbxeRgb[80 * 456 + x], 0,
       "legacy $00 priority must remain below PF2");
-    assert.equal(video.vbxeRgb[144 * 456 + x], 0xff00fe00,
+    assert.equal(video.vbxeRgb[144 * 456 + x], 0xff00ff00,
       "legacy bit 6 must win over PF2");
     console.log("vbxe_fx124_priority_probe_boot: revision $10/$24 verified.");
   } finally { await runtime.dispose(); }

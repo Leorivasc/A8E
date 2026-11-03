@@ -7,6 +7,7 @@
     const CYCLES_PER_LINE = cfg.CYCLES_PER_LINE;
     const IO_INIT_VALUES = cfg.IO_INIT_VALUES;
     const vbxeMemacAddress = cfg.vbxeMemacAddress;
+    const vbxeRamboAddress = cfg.vbxeRamboAddress;
 
     function makeIoData(video) {
       const potValues = new Uint8Array(8);
@@ -153,6 +154,17 @@
           pmgEventRegisters: new Uint8Array(64),
           pmgEventValues: new Uint8Array(64),
           pmgEventCycles: new Uint8Array(64),
+          // GTIA colours and PRIOR are shadowed by VBXE as well as P/M
+          // geometry. Keep their writes in scanline order so the VBXE
+          // compositor can consume the same horizontal spans as Altirra.
+          gtiaEventCount: 0,
+          gtiaEventOverflow: false,
+          gtiaInitialRegisters: new Uint8Array(10),
+          gtiaEventRegisters: new Uint8Array(64),
+          gtiaEventValues: new Uint8Array(64),
+          gtiaEventCycles: new Uint8Array(64),
+          vbxeLine: null,
+          vbxeScanline: -1,
           playerPmgShift: new Uint8Array(4),
           playerPmgState: new Uint8Array(4),
           missilePmgShift: new Uint8Array(4),
@@ -257,11 +269,15 @@
       }
       const vbxe = ctx.ioData && ctx.ioData.vbxe;
       if (vbxe && vbxe.enabled) {
+        const ramAccess = ctx.accessFunctionList[0];
         for (let address = vbxe.page; address < vbxe.page + 0x20; address++) {
           CPU.setIo(ctx, address, ioAccess);
         }
+        const configBase = (vbxe.page & 0xff00) | 0x00c0;
+        for (let address = configBase; address < configBase + 0x40; address++) {
+          CPU.setIo(ctx, address, ioAccess);
+        }
         if (vbxeMemacAddress) {
-          const ramAccess = ctx.accessFunctionList[0];
           for (let address = 0; address < 0xd000; address++) {
             if (vbxeMemacAddress(vbxe, address, false) >= 0 &&
                 ctx.accessFunctionList[address] === ramAccess) {
@@ -271,6 +287,11 @@
                 CPU.setIo(ctx, address, ioAccess);
               }
             }
+          }
+        }
+        if (vbxeRamboAddress && vbxe.profile === "fx1.26r") {
+          for (let address = 0x4000; address < 0x8000; address++) {
+            if (ctx.accessFunctionList[address] === ramAccess) CPU.setIo(ctx, address, ioAccess);
           }
         }
       }

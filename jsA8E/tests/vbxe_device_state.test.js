@@ -28,6 +28,10 @@ assert.deepEqual(
   vbxe.normalizeConfig("fx120"),
   { enabled: true, profile: "fx1.20", page: 0xd640 },
 );
+assert.deepEqual(
+  vbxe.normalizeConfig("fx126r"),
+  { enabled: true, profile: "fx1.26r", page: 0xd640 },
+);
 
 const state = vbxe.createState("fx1.26");
 assert.equal(state.enabled, true);
@@ -40,13 +44,29 @@ assert.equal(vbxe.access(legacyState, 0xd640), 0x10);
 assert.equal(vbxe.access(legacyState, 0xd641), 0x24);
 const earlyState = vbxe.createState("fx1.20");
 assert.equal(vbxe.access(earlyState, 0xd641), 0x20);
+const ramboState = vbxe.createState("fx1.26r");
+assert.equal(vbxe.access(ramboState, 0xd641), 0xa6,
+  "RAMBO capability appears in MINOR_REVISION D7");
+assert.equal(vbxe.ramboAddress(ramboState, 0x4000, 0xff), -1,
+  "PORTB D4 disables the shared window");
+assert.equal(vbxe.ramboAddress(ramboState, 0x4000, 0xef), 0x40000,
+  "all RAMBO bank bits high select local $40000");
+assert.equal(vbxe.ramboAddress(ramboState, 0x7fff, 0x00), 0x7ffff,
+  "all RAMBO bank bits low select local $7C000");
 const alternateLegacyState = vbxe.createState({ profile: "fx1.24", page: 0xd740 });
 assert.equal(vbxe.access(alternateLegacyState, 0xd640), null);
 assert.equal(vbxe.access(alternateLegacyState, 0xd740), 0x10);
 assert.equal(vbxe.access(alternateLegacyState, 0xd741), 0x24);
+// The serial configuration pins occupy $DxC0-$DxFF for the selected VBXE
+// page. Only DATA0/DCLK//CONFIG (D0-D2) are latched; CONF_DONE stays low.
+assert.equal(vbxe.access(alternateLegacyState, 0xd7c0), 0);
+vbxe.access(alternateLegacyState, 0xd7ff, 0xfd);
+assert.equal(vbxe.access(alternateLegacyState, 0xd7c2), 0x05);
+assert.equal(vbxe.access(alternateLegacyState, 0xd6c0), null);
 const restoredLegacyState = vbxe.restoreState(vbxe.cloneState(alternateLegacyState));
 assert.equal(restoredLegacyState.profile, "fx1.24");
 assert.equal(restoredLegacyState.page, 0xd740);
+assert.equal(vbxe.access(restoredLegacyState, 0xd7c0), 0x05);
 
 const powerUpPalette = new Uint8Array(256 * 3);
 powerUpPalette.set([0x12, 0x34, 0x56], 0x24 * 3);
@@ -105,8 +125,8 @@ state.vram.set([0x62, 0x08, 0x00, 0x00, 0x10, 0x00, 0x40, 0x01, 0x61, 0xff], 0x2
 vbxe.verticalSync(state);
 const xdlLine = vbxe.nextXdlLine(state, 8);
 assert.equal(xdlLine.mode, "standard");
-assert.equal(state.xdlSlots, 10,
-  "XDL DMA reservation must equal the bytes actually decoded");
+assert.equal(state.xdlSlots, 22,
+  "a new XDL entry reserves the fixed AHRM update cost");
 assert.equal(xdlLine.address, 0x1000);
 assert.equal(xdlLine.stride, 0x140);
 assert.equal(xdlLine.overlayWidth, 1, "width code 1 is normal");
@@ -181,8 +201,8 @@ vbxe.verticalSync(state);
 for (let line = 0; line < 192; line++) {
   const repeated = vbxe.nextXdlLine(state, 8 + line);
   assert.equal(repeated.attributeMapEnabled, true, "repeat line " + line);
-  assert.equal(state.xdlSlots, line === 0 ? 8 : 0,
-    "only the first line of a repeated XDL entry fetches its eight bytes");
+  assert.equal(state.xdlSlots, line === 0 ? 22 : 0,
+    "only the first line of a repeated XDL entry pays the fixed XDL update");
 }
 assert.equal(state.xdl.address, 0x88, "repeat must not consume the next XDL entry early");
 assert.equal(vbxe.nextXdlLine(state, 200), null,
@@ -190,6 +210,40 @@ assert.equal(vbxe.nextXdlLine(state, 200), null,
 assert.equal(state.xdl.ended, true, "End terminates the XDL");
 assert.equal(state.xdl.attributeMapEnabled, false, "AtMapOff clears the map before End");
 assert.equal(state.xdl.address, 0x8a, "termination entry is fetched after the repeated field");
+// AHRM keeps the overlay and attribute-map address/stride latches across the
+// next VSync restart. The visual XDL latches still return to their defaults,
+// and a later entry can explicitly replace either address block.
+state.xdlAddressPending = 0xa0;
+state.vram.set([
+  0x4a, 0x0e,
+  0x00, 0x30, 0x00, 0x40, 0x00,
+  0x00, 0x40, 0x00, 0xa0, 0x00,
+  0x00, 0x00, 0x07, 0x07,
+  0x04, 0xff,
+], 0xa0);
+vbxe.verticalSync(state);
+const addressedLine = vbxe.nextXdlLine(state, 8);
+assert.equal(addressedLine.address, 0x3000);
+assert.equal(addressedLine.attributeAddress, 0x4000);
+assert.equal(state.xdl.overlayAddress, 0x3040,
+  "the overlay address advances after the first active line");
+
+state.xdlAddressPending = 0xb0;
+state.vram.set([0x0a, 0x00], 0xb0);
+vbxe.verticalSync(state);
+const carriedAddressLine = vbxe.nextXdlLine(state, 8);
+assert.equal(carriedAddressLine.address, 0x3040,
+  "VSync must preserve the overlay address counter");
+assert.equal(carriedAddressLine.stride, 0x40,
+  "VSync must preserve the overlay stride");
+assert.equal(carriedAddressLine.attributeMapEnabled, true,
+  "AtMapOn can reuse the carried map address at the new frame");
+assert.equal(carriedAddressLine.attributeAddress, 0x4000,
+  "VSync must preserve the attribute-map address counter");
+assert.equal(carriedAddressLine.attributeStride, 0xa0,
+  "VSync must preserve the attribute-map stride");
+assert.equal(carriedAddressLine.overlayWidth, 1,
+  "VSync still resets visual XDL parameters to defaults");
 // XDLC_END takes effect after, rather than instead of, the terminating
 // entry's repeat count. Altirra keeps the decoded mode active for both lines.
 state.xdlAddressPending = 0x90;
@@ -333,45 +387,133 @@ assert.deepEqual(
 state.palette.set([0xa1, 0xb2, 0xc3], (3 * 256 + 0x12) * 3);
 video.vbxeRgb.fill(0);
 video.priority = new Uint16Array(456 * 16);
-video.priority[9 * 456 + 128] = 0x01;
+video.priority[9 * 456 + 96] = 0x01;
 vbxe.applyPlayfieldAttributes(state, video, 9, {
   attributeMapEnabled: true, attributeAddress: 0x2020, attributeStride: 0,
   attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 8,
   attributeCellHeight: 8, attributeRow: 0,
 });
-assert.equal(video.vbxeRgb[9 * 456 + 128], 0xffc3b2a1);
+assert.equal(video.vbxeRgb[9 * 456 + 96], 0xffc3b2a1);
 state.palette.set([0xd4, 0xe5, 0xf6], (3 * 256 + 0x34) * 3);
 state.palette.set([0x07, 0x18, 0x29], (3 * 256 + 0x56) * 3);
 video.vbxeRgb.fill(0);
 video.priority.fill(0);
-video.priority[9 * 456 + 128] = 0x02;
-video.priority[9 * 456 + 129] = 0x04;
+video.priority[9 * 456 + 96] = 0x02;
+video.priority[9 * 456 + 97] = 0x04;
 vbxe.applyPlayfieldAttributes(state, video, 9, {
   attributeMapEnabled: true, attributeAddress: 0x2020, attributeStride: 0,
   attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 8,
   attributeCellHeight: 8, attributeRow: 0,
 });
-assert.equal(video.vbxeRgb[9 * 456 + 128], 0xfff6e5d4);
-assert.equal(video.vbxeRgb[9 * 456 + 129], 0xff291807);
+assert.equal(video.vbxeRgb[9 * 456 + 96], 0xfff6e5d4);
+assert.equal(video.vbxeRgb[9 * 456 + 97], 0xff291807);
 state.vram.set([0x13, 0x35, 0x57, 0xc0], 0x2030);
 state.palette.set([0x7a, 0x8b, 0x9c], (3 * 256 + 0x13) * 3);
 video.vbxeRgb.fill(0);
 video.priority.fill(0);
-video.priority[9 * 456 + 128] = 0x01;
+video.priority[9 * 456 + 96] = 0x01;
 state.videoControlActive = 0x03;
 vbxe.applyPlayfieldAttributes(state, video, 9, {
   attributeMapEnabled: true, attributeAddress: 0x2030, attributeStride: 0,
   attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 8,
   attributeCellHeight: 8, attributeRow: 0,
 });
-assert.equal(video.vbxeRgb[9 * 456 + 128], 0xff9c8b7a);
-video.vbxeRgb[9 * 456 + 128] = 0xff010203;
+assert.equal(video.vbxeRgb[9 * 456 + 96], 0xff9c8b7a);
+video.vbxeRgb[9 * 456 + 96] = 0xff010203;
 vbxe.applyPlayfieldAttributes(state, video, 9, {
   attributeMapEnabled: true, attributeAddress: 0x2020, attributeStride: 0,
   attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 8,
   attributeCellHeight: 8, attributeRow: 0,
 });
-assert.equal(video.vbxeRgb[9 * 456 + 128], 0xff010203);
+assert.equal(video.vbxeRgb[9 * 456 + 96], 0xff010203);
+// The attribute map follows the overlay's horizontal geometry even when the
+// overlay is disabled. Exercise all three widths in both presentation planes.
+const geometryState = vbxe.createState("fx1.26");
+geometryState.videoControlActive = 0x03;
+geometryState.priority[0] = 0x01;
+geometryState.palette.set([0x11, 0x22, 0x33], 0x12 * 3);
+for (let cell = 0; cell < 43; cell++) {
+  geometryState.vram.set([0x12, 0x00, 0x00, 0x00], 0x3000 + cell * 4);
+}
+const geometryVideo = {
+  vbxeRgb: new Uint32Array(456 * 16),
+  vbxeHiresRgb: new Uint32Array(672 * 16),
+  vbxeHiresWidth: 672,
+  pixels: new Uint8Array(456 * 16),
+  priority: new Uint16Array(456 * 16),
+};
+for (const geometry of [
+  { overlayWidth: 0, start: 128, width: 256, nativeStart: 80 },
+  { overlayWidth: 1, start: 96, width: 320, nativeStart: 16 },
+  { overlayWidth: 2, start: 88, width: 336, nativeStart: 0 },
+]) {
+  geometryVideo.vbxeRgb.fill(0);
+  geometryVideo.vbxeHiresRgb.fill(0);
+  geometryVideo.priority.fill(0);
+  const scanline = 9;
+  const sourceStart = scanline * 456 + geometry.start;
+  geometryVideo.priority.fill(0x01, sourceStart, sourceStart + geometry.width);
+  vbxe.applyPlayfieldAttributes(geometryState, geometryVideo, scanline, {
+    mode: "off", overlayWidth: geometry.overlayWidth,
+    attributeMapEnabled: true, attributeAddress: 0x3000,
+    attributeStride: 0, attributeScrollX: 0, attributeScrollY: 0,
+    attributeCellWidth: 32, attributeCellHeight: 8, attributeRow: 0,
+  });
+  const legacyBase = scanline * 456 + geometry.start;
+  assert.equal(geometryVideo.vbxeRgb[legacyBase], 0xff332211,
+    "attribute map must start at the overlay boundary");
+  assert.equal(geometryVideo.vbxeRgb[legacyBase + geometry.width - 1], 0xff332211,
+    "attribute map must cover the selected overlay width");
+  assert.equal(geometryVideo.vbxeRgb[legacyBase - 1], 0,
+    "attribute map must not paint before the selected overlay boundary");
+  assert.equal(geometryVideo.vbxeRgb[legacyBase + geometry.width], 0,
+    "attribute map must not paint past the selected overlay width");
+  const nativeBase = (scanline - 8) * 672 + geometry.nativeStart;
+  assert.equal(geometryVideo.vbxeHiresRgb[nativeBase], 0xff332211,
+    "native attribute map must share the overlay boundary");
+  assert.equal(geometryVideo.vbxeHiresRgb[nativeBase + geometry.width * 2 - 1], 0xff332211,
+    "native attribute map must cover two samples per standard pixel");
+}
+// GTIA register writes after the line starts are replayed as map spans. The
+// first span uses the line-start PF3, while the later span uses the updated
+// PF3 in both the legacy and native presentation planes.
+const spanState = vbxe.createState("fx1.26");
+spanState.videoControlActive = 0x03;
+spanState.palette.set([0x11, 0x22, 0x33], 0x12 * 3);
+spanState.palette.set([0x44, 0x55, 0x66], 0x34 * 3);
+for (let cell = 0; cell < 43; cell++) {
+  spanState.vram.set([0x80, 0x00, 0x00, 0x00], 0x3100 + cell * 4);
+}
+const spanVideo = {
+  vbxeRgb: new Uint32Array(456 * 16),
+  vbxeHiresRgb: new Uint32Array(672 * 16),
+  vbxeHiresWidth: 672,
+  pixels: new Uint8Array(456 * 16),
+  priority: new Uint16Array(456 * 16),
+};
+spanVideo.priority.fill(0x04, 9 * 456 + 96, 9 * 456 + 416);
+vbxe.applyGtiaSpans(spanState, spanVideo, 9, {
+  mode: "off", overlayEnabled: false, overlayWidth: 1,
+  attributeMapEnabled: true, attributeAddress: 0x3100,
+  attributeStride: 0, attributeScrollX: 0, attributeScrollY: 0,
+  attributeCellWidth: 8, attributeCellHeight: 8, attributeRow: 0,
+  anticMode: 0x0f, anticPf3: 0x12, anticGtiaMode: 0,
+}, {
+  gtiaEventOverflow: false,
+  gtiaEventCount: 1,
+  gtiaInitialRegisters: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0x12, 0, 0]),
+  gtiaEventRegisters: new Uint8Array([7]),
+  gtiaEventValues: new Uint8Array([0x34]),
+  gtiaEventCycles: new Uint8Array([30]),
+});
+assert.equal(spanVideo.vbxeRgb[9 * 456 + 96], 0xff332211,
+  "map span before PF3 write must use the line-start color");
+assert.equal(spanVideo.vbxeRgb[9 * 456 + 144], 0xff665544,
+  "map span after PF3 write must use the updated color");
+assert.equal(spanVideo.vbxeHiresRgb[1 * 672 + 16], 0xff332211,
+  "native map span before PF3 write must use the line-start color");
+assert.equal(spanVideo.vbxeHiresRgb[1 * 672 + 16 + 96], 0xff665544,
+  "native map span after PF3 write must use the updated color");
 // In ANTIC Graphics 8 (mode F), byte 0 is a PF3 bitmap rather than a PF0
 // override. A set bit replaces a visible PF2 source; its palette remains the
 // playfield palette selected by the cell.
@@ -380,8 +522,8 @@ state.palette.set([0x11, 0x22, 0x33], (3 * 256 + 0x56) * 3);
 state.palette.set([0x44, 0x55, 0x66], (3 * 256 + 0x78) * 3);
 video.vbxeRgb.fill(0);
 video.priority.fill(0);
-video.priority[9 * 456 + 128] = 0x04;
-video.priority[9 * 456 + 129] = 0x04;
+video.priority[9 * 456 + 96] = 0x04;
+video.priority[9 * 456 + 97] = 0x04;
 state.videoControlActive = 0x03;
 vbxe.applyPlayfieldAttributes(state, video, 9, {
   anticMode: 0x0f, anticPf3: 0x78,
@@ -389,23 +531,23 @@ vbxe.applyPlayfieldAttributes(state, video, 9, {
   attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 8,
   attributeCellHeight: 8, attributeRow: 0,
 });
-assert.equal(video.vbxeRgb[9 * 456 + 128], 0xff665544);
-assert.equal(video.vbxeRgb[9 * 456 + 129], 0xff332211);
+assert.equal(video.vbxeRgb[9 * 456 + 96], 0xff665544);
+assert.equal(video.vbxeRgb[9 * 456 + 97], 0xff332211);
 // AHRM 12.4 defines the same PF3-mask byte for all ANTIC hires sources,
 // including character modes 2 and 3, not only Graphics 8 / mode F.
 video.vbxeRgb.fill(0);
 video.priority.fill(0);
-video.priority[9 * 456 + 128] = 0x04;
-video.priority[9 * 456 + 129] = 0x04;
+video.priority[9 * 456 + 96] = 0x04;
+video.priority[9 * 456 + 97] = 0x04;
 vbxe.applyPlayfieldAttributes(state, video, 9, {
   anticMode: 0x02, anticPf3: 0x78,
   attributeMapEnabled: true, attributeAddress: 0x2040, attributeStride: 0,
   attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 8,
   attributeCellHeight: 8, attributeRow: 0,
 });
-assert.equal(video.vbxeRgb[9 * 456 + 128], 0xff665544,
+assert.equal(video.vbxeRgb[9 * 456 + 96], 0xff665544,
   "mode-2 PF3 mask bit must replace PF2");
-assert.equal(video.vbxeRgb[9 * 456 + 129], 0xff332211,
+assert.equal(video.vbxeRgb[9 * 456 + 97], 0xff332211,
   "mode-2 cleared PF3 mask bit must retain PF2");
 // Rev turns Graphics 8's adjacent source bits into a PF0-PF3 value. The
 // map's byte 0 returns to PF0 while PF3 comes from the shadowed GTIA color.
@@ -417,7 +559,7 @@ state.palette.set([0x31, 0x32, 0x33], 0x78 * 3);
 video.vbxeRgb.fill(0);
 video.anticSourceBits = new Uint8Array(456 * 16);
 video.anticSourceBits.fill(0xff);
-const reverseBase = 9 * 456 + 128;
+const reverseBase = 9 * 456 + 96;
 video.anticSourceBits.set([0, 0, 0, 1, 1, 0, 1, 1], reverseBase);
 vbxe.applyPlayfieldAttributes(state, video, 9, {
   anticMode: 0x0f, anticPf3: 0x78,
@@ -830,6 +972,7 @@ state.xdlAddressActive = 0x51234;
 state.memacBControl = 0xdf;
 state.memacControl = 0x9f;
 state.memacBankSelect = 0xe7;
+state.configLatch = 0x07;
 vbxe.softReset(state);
 assert.equal(state.videoControlPending, 0);
 assert.equal(state.xdlAddressPending, 0x61234);
@@ -840,11 +983,13 @@ assert.equal(state.memacControl, 0x93);
 assert.equal(state.memacBankSelect, 0x67);
 assert.equal(state.blitCollisionCode, 0, "soft reset clears the blit collision code");
 assert.equal(state.priority[0], 0x5a, "the configured priority latch survives reset");
+assert.equal(state.configLatch, 0x07, "warm reset preserves configuration pins");
 assert.equal(state.vram[0x1234], 0x5a);
 vbxe.powerCycle(state);
 assert.equal(state.xdlAddressPending, 0);
 assert.equal(state.memacControl, 0);
 assert.equal(state.collisionDetect, 0);
+assert.equal(state.configLatch, 0, "cold reset clears configuration pins");
 assert.equal(state.vram[0x1234], 0);
 
 console.log("vbxe_device_state.test.js passed");

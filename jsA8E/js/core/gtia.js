@@ -122,6 +122,39 @@
       );
     }
 
+    function gtiaSpanRegisterIndex(address) {
+      switch (address) {
+        case IO_COLPM0_TRIG2: return 0;
+        case IO_COLPM1_TRIG3: return 1;
+        case IO_COLPM2_PAL: return 2;
+        case IO_COLPM3: return 3;
+        case cfg.IO_COLPF0: return 4;
+        case cfg.IO_COLPF1: return 5;
+        case cfg.IO_COLPF2: return 6;
+        case IO_COLPF3: return 7;
+        case cfg.IO_COLBK: return 8;
+        case IO_PRIOR: return 9;
+        default: return -1;
+      }
+    }
+
+    function recordGtiaRegisterWrite(ctx, address, value) {
+      const io = ctx.ioData;
+      const drawLine = io.drawLine;
+      const registerIndex = gtiaSpanRegisterIndex(address);
+      const lineCycle = ((io.clock | 0) + Math.max((ctx.currentInstructionCycles | 0) - 1, 0)) -
+        (io.displayListFetchCycle | 0);
+      if (!drawLine || registerIndex < 0 || lineCycle < 0 || lineCycle >= CYCLES_PER_LINE) return;
+      if (drawLine.gtiaEventCount >= drawLine.gtiaEventRegisters.length) {
+        drawLine.gtiaEventOverflow = true;
+        return;
+      }
+      const eventIndex = drawLine.gtiaEventCount++;
+      drawLine.gtiaEventRegisters[eventIndex] = registerIndex;
+      drawLine.gtiaEventValues[eventIndex] = value & 0xff;
+      drawLine.gtiaEventCycles[eventIndex] = lineCycle & 0xff;
+    }
+
     const PRIO_PF0 = cfg.PRIO_PF0;
     const PRIO_PF1 = cfg.PRIO_PF1;
     const PRIO_PF2 = cfg.PRIO_PF2;
@@ -1345,6 +1378,7 @@
       drawPlayerMissiles: drawPlayerMissiles,
       recordPmgRegisterEvent: recordPmgRegisterEvent,
       recordPmgRegisterWrite: recordPmgRegisterWrite,
+      recordGtiaRegisterWrite: recordGtiaRegisterWrite,
     };
   }
 

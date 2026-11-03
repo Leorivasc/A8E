@@ -266,6 +266,7 @@
           CYCLE_NEVER: CYCLE_NEVER,
           IO_INIT_VALUES: IO_INIT_VALUES,
           vbxeMemacAddress: vbxeApi.memacAddress,
+          vbxeRamboAddress: vbxeApi.ramboAddress,
         })
       : null;
   if (!stateApi) throw new Error("A8EState is not loaded");
@@ -472,11 +473,15 @@
           vbxeAccess: vbxeApi.access,
           vbxeSoftReset: vbxeApi.softReset,
           vbxeMemacAddress: vbxeApi.memacAddress,
+          vbxeRamboAddress: vbxeApi.ramboAddress,
           vbxeNoteMemacAccess: vbxeApi.noteMemacAccess,
           pokeyPotUpdate: pokeyPotUpdate,
           pokeyPotReadValue: pokeyPotReadValue,
           recordPmgRegisterWrite: function (ctx, address, value) {
             return gtiaApi.recordPmgRegisterWrite(ctx, address, value);
+          },
+          recordGtiaRegisterWrite: function (ctx, address, value) {
+            return gtiaApi.recordGtiaRegisterWrite(ctx, address, value);
           },
         })
       : null;
@@ -487,6 +492,10 @@
       ? window.A8EGtia.createApi({
           PIXELS_PER_LINE: PIXELS_PER_LINE,
           CYCLES_PER_LINE: CYCLES_PER_LINE,
+          IO_COLPF0: IO_COLPF0,
+          IO_COLPF1: IO_COLPF1,
+          IO_COLPF2: IO_COLPF2,
+          IO_COLBK: IO_COLBK,
           IO_COLPF3: IO_COLPF3,
           IO_COLPM0_TRIG2: IO_COLPM0_TRIG2,
           IO_COLPM1_TRIG3: IO_COLPM1_TRIG3,
@@ -581,6 +590,10 @@
             IO_GRAFP0_P1PL, IO_GRAFP1_P2PL, IO_GRAFP2_P3PL, IO_GRAFP3_TRIG0,
             IO_GRAFM_TRIG1,
           ],
+          GTIA_SPAN_REGISTER_ADDRESSES: [
+            IO_COLPM0_TRIG2, IO_COLPM1_TRIG3, IO_COLPM2_PAL, IO_COLPM3,
+            IO_COLPF0, IO_COLPF1, IO_COLPF2, IO_COLPF3, IO_COLBK, IO_PRIOR,
+          ],
           ANTIC_MODE_INFO: ANTIC_MODE_INFO,
           drawPlayerMissilesClock: drawPlayerMissilesClock,
           fetchPmgDmaCycle: gtiaApi.fetchPmgDmaCycle,
@@ -601,6 +614,7 @@
           vbxeNextXdlLine: vbxeApi.nextXdlLine,
           vbxeRenderXdlLine: vbxeApi.renderXdlLine,
           vbxeApplyPlayfieldAttributes: vbxeApi.applyPlayfieldAttributes,
+          vbxeApplyGtiaSpans: vbxeApi.applyGtiaSpans,
           PRIO_BKG: PRIO_BKG,
           PRIO_PF0: PRIO_PF0,
           PRIO_PF1: PRIO_PF1,

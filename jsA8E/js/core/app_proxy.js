@@ -156,7 +156,8 @@
     ).trim().toLowerCase();
     const profile = profileText === "fx1.20" || profileText === "fx120" ? "fx1.20" :
       profileText === "fx1.24" || profileText === "fx124" ? "fx1.24" :
-        profileText === "fx1.26" || profileText === "fx126" ? "fx1.26" : "off";
+        profileText === "fx1.26" || profileText === "fx126" ? "fx1.26" :
+          profileText === "fx1.26r" || profileText === "fx126r" || profileText === "r" ? "fx1.26r" : "off";
     const enabled = source.enabled === false ? false : profile !== "off" || source.enabled === true;
     return {
       enabled: enabled,

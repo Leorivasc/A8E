@@ -31,8 +31,8 @@ async function main() {
       "utf8",
     );
     const expected = [
-      0xff0000fe, 0xff0000fe, 0xfffe0000, 0xfffe0000,
-      0xff00fe00, 0xff00fe00, 0xfffe00fe, 0xfffe00fe,
+      0xff0000ff, 0xff0000ff, 0xffff0000, 0xffff0000,
+      0xff00ff00, 0xff00ff00, 0xffff00ff, 0xffff00ff,
     ];
     for (const [name, gtiaMode, expectedLine] of [
       ["normal", "$00", expected],
@@ -62,7 +62,7 @@ async function main() {
 
       const video = ctx.ioData.videoOut;
       for (let y = 8; y < 200; y++) {
-        const base = y * 456 + 128;
+        const base = y * 456 + 96;
         assert.deepEqual(Array.from(video.vbxeRgb.slice(base, base + 8)), expectedLine,
           name + " Rev output at line " + y);
       }

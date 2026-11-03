@@ -13,6 +13,34 @@ Browser-based Atari 800 XL emulator port of the native C/SDL `A8E` implementatio
 
 ## Current Emulation Status
 
+### VBXE
+
+VBXE is optional and disabled by default. Select FX 1.20, FX 1.24, FX 1.26,
+or FX 1.26r and either the `$D600` or `$D700` page from the machine settings.
+The selected profile is persisted and rebuilding the machine applies the
+corresponding memory map. When VBXE is enabled, jsA8E uses the worker
+OffscreenCanvas when available; main-thread WebGL and Canvas 2D remain
+supported fallbacks.
+
+The practical compatibility milestone is complete: the device covers its
+registers, 512 KiB VRAM, XDL graphics/text paths, attribute maps, MEMAC,
+blitter, completion IRQ, snapshots, and the supplied real-software gates.
+The remaining work is primarily mid-scanline overlay/map spans, broader
+GTIA-special and collision differentials, exact blitter phase timing, and
+visual Altirra comparison. Worker/fallback parity has a Chromium smoke test;
+an automated browser regression remains.
+
+For the implementation contract, support matrix, diagrams, test commands, and
+stage exit criteria, see [`../implementation/VBXE.md`](../implementation/VBXE.md)
+and [`../implementation/VBXE_ROADMAP.md`](../implementation/VBXE_ROADMAP.md).
+
+VBXE regression commands:
+
+```sh
+cd jsA8E
+npm run test:vbxe:full
+```
+
 The current JS renderer includes the raster-timing pass:
 
 - visible playfield/background rendering is on the per-color-clock path

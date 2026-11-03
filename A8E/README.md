@@ -48,6 +48,14 @@ manager on Linux.
 
 ## Current Emulation Status
 
+### VBXE scope
+
+The native C/SDL core does not currently implement the VBXE device. VBXE
+support described in the repository documentation belongs to the optional
+JavaScript browser core (`jsA8E/`). Do not interpret the native raster-timing
+status below as native VBXE support. The shared target, pending work, and
+validation gates are documented in the [VBXE roadmap](../implementation/VBXE_ROADMAP.md).
+
 The native core includes the current raster-timing pass:
 
 - visible scanlines draw playfield/background state on the per-color-clock path

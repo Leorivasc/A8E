@@ -47,12 +47,12 @@ async function main() {
     await api.system.pause();
 
     const expected = [
-      0xff00fe00, 0xff00fe00, 0xff00fe00, 0xfffe0000,
-      0xfffe0000, 0xff00fe00, 0xfffe0000, 0xfffe0000,
+      0xff00ff00, 0xff00ff00, 0xff00ff00, 0xffff0000,
+      0xffff0000, 0xff00ff00, 0xffff0000, 0xffff0000,
     ];
     const video = ctx.ioData.videoOut;
     for (let y = 8; y < 200; y++) {
-      const base = y * 456 + 128;
+      const base = y * 456 + 96;
       assert.deepEqual(Array.from(video.vbxeRgb.slice(base, base + 8)), expected,
         "mode-4 lores reverse pattern at line " + y);
     }

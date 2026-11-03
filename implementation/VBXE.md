@@ -4,6 +4,11 @@
 
 ## Status
 
+The project roadmap, milestone exit criteria, diagrams, and validation gates
+are maintained in [`VBXE_ROADMAP.md`](VBXE_ROADMAP.md). This file remains the
+technical contract and support matrix; the roadmap is the canonical source for
+work ordering and completion status.
+
 The JavaScript core implements optional FX 1.20, 1.24, and 1.26 devices with revision reads,
 `$D640`/`$D740` register decoding, 512 KiB VRAM, palette/write latches,
 vertical-sync latching, soft reset, MEMAC state, and snapshot persistence.
@@ -43,8 +48,9 @@ the latch without changing GTIA collision registers. GTIA P/M composition now
 also records a per-pixel final-contributor plane, so P/M graphics hidden by
 `PRIOR` bits 0-5 are excluded from both this collision subset and XDL priority
 comparison. `VBXE_XDL_P5_MULTICOLOR_PROBE.XEX` has externally matched Altirra
-for frame-separated P0+P1-multicolor/P5 collisions; GTIA-special-mode and
-profile combinations still need coverage. The VBlank-synchronised GTIA-9/10/11
+for frame-separated P0+P1-multicolor/P5 collisions; the deterministic priority
+matrix now covers the profile tables and GTIA 9/10/11 contributor groups.
+The VBlank-synchronised GTIA-9/10/11
 collision differential establishes that non-background final inputs produce
 `$7F` in mode 10, while modes 9 and 11 retain the ordinary contributor result.
 The initial attribute-map renderer
@@ -83,15 +89,33 @@ comportamiento actual en vez del comportamiento de referencia.
 
 | Área | Resultado | Diferencia comprobada |
 | --- | --- | --- |
-| VRAM, registros básicos, páginas, MEMAC A/B, paleta, IRQ y bloques del blitter | Parcialmente replicada | Las rutas y los casos normales existen. MEMAC-B usa bit 7 para CPU y bit 6 para ANTIC, como Altirra y el software real, aun cuando AHRM los rotula al revés. CR/CG/CB no replica la expansión del bit 7 hacia el bit bajo que hace Altirra. |
-| XDL: descriptor y estado de línea | Incompleta | AHRM documenta los scrolls `MAPPAR` como valores menos uno, mientras que Altirra conserva el valor literal; hace falta un diferencial visual que cierre esta discrepancia. La progresión de línea tampoco es equivalente. |
-| XDL: `OvMisc` | Parcial | La paleta de overlay ya se decodifica de bits 5--4 junto con ancho y paleta de playfield. Aún falta que el compositor consuma ancho y paleta de playfield. |
-| Presentación de overlay y texto | Incompleta | Standard/lores se reducen a un viewport heredado de 256 píxeles y hires/texto a 640 píxeles centrales; faltan límites y fetches distintos para narrow, normal y wide, y su interacción con el mapa de atributos. |
-| Mapa de atributos | Parcial | Hay PF, Rev, paletas por celda y límite de 43 celdas, pero la progresión de filas y overscroll no reproduce el contador de 5 bits y el avance de dirección de Altirra. |
-| Blitter | Parcial | Están los modos 0--6, lista, zoom y colisiones. El inicio se difiere al siguiente scanline, no a la fase actual, y una entrada enlazada no reinicia el código de colisión como lo hace `LoadBlitter` de Altirra. El arbitraje sigue siendo agregado por scanline, no por las ocho fases locales. |
-| Reset y escrituras GTIA | Parcial | El estrobo `$D080-$D0FF` está conectado. El reset de jsA8E también borra estado que Altirra conserva durante `WarmReset` (por ejemplo, la dirección XDL latched y prioridades), y no limpia `BLT_COLLISION_CODE`; por lo tanto no es equivalente en los bordes. |
-| RAMBO y puerto de configuración | Ausente | No hay perfil de core `r`, bit 7 de `MINOR_REVISION` ni el mapeo PORTB de los 256 KiB superiores. Tampoco está el latch de configuración que Altirra expone en `$DxC0+`. |
-| Cambios dentro del scanline | Ausente | Altirra parte la composición según cambios de registros GTIA/VBXE durante la línea. jsA8E compone después de dibujar la línea completa, por lo que no conserva esa temporalidad. |
+| VRAM, registros básicos, páginas, MEMAC A/B, paleta, IRQ y bloques del blitter | Parcialmente replicada | Las rutas y los casos normales existen y los bordes de registro/readback están cubiertos por `vbxe_register_snapshot`. MEMAC-B usa bit 7 para CPU y bit 6 para ANTIC, como Altirra y el software real, aun cuando AHRM los rotula al revés. CR/CG/CB ya replican la expansión D7→D0 de Altirra; el arbitraje por fase sigue pendiente. |
+| XDL: descriptor y estado de línea | Parcial | La progresión de fila, scroll/overscroll MAPPAR, `END` y la persistencia entre frames de las direcciones/strides de overlay/mapa siguen Altirra. AHRM documenta los scrolls MAPPAR como valores menos uno mientras Altirra conserva el valor literal; hace falta un diferencial visual que cierre esa discrepancia documental. |
+| XDL: `OvMisc` | Implementada en la ruta cubierta | El compositor consume ancho, paleta de overlay y la paleta de playfield por defecto; faltan sólo cruces de mapa de atributos aún no diferenciados visualmente. |
+| Presentación de overlay y texto | Parcial | Standard/lores usan los límites reales narrow/normal/wide y hires/texto sus señales nativas 512/640/672. Faltan diferenciales completos para todas las transiciones con attribute map. |
+| Mapa de atributos | Parcial | Hay PF, Rev, paletas por celda, límite de 43 celdas, contador de scroll de cinco bits, overscroll, avance de filas y geometría narrow/normal/wide de Altirra. El replay por spans ya reconstruye PF3/GTIA en los intervalos de la línea, pero faltan cambios de registros VBXE del mapa, combinaciones GTIA especiales y diferenciales visuales completos. |
+| Blitter | Parcial | Están los modos 0--6, lista, zoom y colisiones; una entrada enlazada reinicia el código de colisión. El inicio se difiere al siguiente scanline y el arbitraje sigue agregado por scanline, no por las ocho fases locales. |
+| Reset y escrituras GTIA | Parcial | El estrobo `$D080-$D0FF` está conectado; warm reset conserva las direcciones XDL, prioridades y `COLDETECT` que conserva Altirra, y limpia `BLT_COLLISION_CODE`. Warm/cold reset y snapshots XDL/blitter están regresados; faltan bordes de temporización. |
+| RAMBO y puerto de configuración | Implementada en la ruta cubierta | El latch de configuración Altirra en `$DxC0+` persiste correctamente. El perfil FX 1.26r devuelve `MINOR_REVISION=$A6` y, con PORTB-D4 bajo, comparte `$4000-$7FFF` entre CPU/ANTIC y el banco VBXE superior documentado; `vbxe_rambo_bus` cubre ambos buses, desactivación y aislamiento de bancos. |
+| Cambios dentro del scanline | Parcial | La cola GTIA conserva colores y `PRIOR` con su ciclo horizontal; al cerrar una línea XDL, la paleta por defecto y el attribute map reproducen los spans cubiertos, incluido PF3/mode GTIA. Aún faltan la partición de overlay, cambios de registros VBXE y la temporización por fase. |
+
+### Auditoría AHRM de la rama `VBXE` — 2026-11-02
+
+La suite funcional está verde, pero la conformidad AHRM debe declararse como
+parcial. Las brechas comprobadas son:
+
+| Prioridad | Brecha | Evidencia | Próxima acción |
+| --- | --- | --- | --- |
+| Alta | `verticalSync()` reemplazaba todo el estado XDL y perdía direcciones/strides de overlay/mapa que AHRM conserva entre frames. | Corregido en `jsA8E/js/core/vbxe.js`; regresión multi-frame en `vbxe_device_state`. | Mantener cobertura al ampliar los casos de XDL y validar también snapshots durante un reinicio. |
+| Alta | El attribute map se componía siempre en geometría normal; no usaba el ancho/posición narrow/wide de `OvMisc`. | Corregido en `jsA8E/js/core/vbxe.js`; cobertura narrow/normal/wide en `vbxe_device_state` y boot oracles. | Mantener la geometría compartida al extender el replay temporal y validar cruces con overlay activo. |
+| Alta | El coste XDL debía usar el número de bytes decodificados, mientras AHRM fija 22 ciclos de actualización. | Corregido en `jsA8E/js/core/vbxe.js`; regresión en `vbxe_device_state` y `vbxe_blitter_state`. | Mantener el contrato fijo y resolver sólo la secuencia por fase si aparece un diferencial horizontal reproducible. |
+| Media | La arbitraje MEMAC/overlay/XDL/mapa/blitter es agregada por scanline y no modela la secuencia de ocho fases. | `jsA8E/js/core/vbxe.js:1092-1117`. | No cambiar el scheduler sin un marcador horizontal reproducible; usar primero el par continuous/restart. |
+| Media | MEMAC-B usa D7=CPU y D6=ANTIC, contrario a la tabla textual AHRM, aunque coincide con Altirra y el corpus probado. | `jsA8E/js/core/vbxe.js:1058-1063`; `vbxe_memac_b_xex`. | Mantener como excepción explícita hasta resolver la errata o conseguir evidencia física. |
+| Media | `MAPPAR`/attribute-map scroll conserva valores literales, frente al “minus one” descrito por AHRM. | `jsA8E/js/core/vbxe.js:421-429`. | Obtener diferencial físico o visual concluyente antes de cambiarlo. |
+
+Por tanto, el estado oficial es **compatibilidad práctica sí, AHRM-compliance
+completa no**. El native core tampoco implementa VBXE; esta auditoría de
+dispositivo corresponde al core JavaScript.
 
 Conclusión: jsA8E tiene una base funcional y diagnósticos relevantes, pero no
 replica todavía todos los elementos del dispositivo. Los tres primeros
@@ -109,12 +133,12 @@ where that comparison is meaningful.
 | Area | Implemented contract | Coverage | Remaining boundary |
 | --- | --- | --- | --- |
 | Configuration/registers | FX 1.20/1.24/1.26, both pages, revisions, reset, VSync latches, palette and snapshots | `vbxe_device_state`, `vbxe_fx124_priority_probe_*` | Register edge-bit audit, milestone 4 |
-| MEMAC | CPU/ANTIC A and B, A-over-B, Ultimate1MB precedence | `vbxe_memac_a_xex`, `vbxe_memac_b_xex`, `vbxe_memac_priority_xex` | Active-blit contention, milestone 4 |
+| MEMAC | CPU/ANTIC A and B, A-over-B, Ultimate1MB precedence | `vbxe_memac_a_xex`, `vbxe_memac_b_xex`, `vbxe_memac_priority_xex`, `vbxe_register_snapshot` | Active-blit contention, milestone 4 |
 | XDL | Standard/lores/hires/text, repeat (including terminating `END` entries), palette, transparency, scroll and priority | `vbxe_device_state`, `vbxe_xdl_hires_asm`, `vbxe_xdl_text_asm`, `vbxe_xdl_text_scroll_asm`, `vbxe_xdl_text_transparency_asm` | Full transition cross-product, milestone 3 |
 | Attribute map | Geometry, scroll/overscroll, PF1-3, reverse, text attributes and reload | `vbxe_xdl_attrmap_asm`, `vbxe_attrmap_pf12_boot`, `vbxe_attrmap_pf3_boot`, `vbxe_attrmap_reverse*_boot` | Non-reversed GTIA-special PF3 mask |
-| Collision/priority | FX priority, `COLMASK`/`COLDETECT`, text attribute source, GTIA-special P0+P1/P5 | `vbxe_fx124_priority_probe_*`, `vbxe_xdl_*collision_probe_*`, `vbxe_xdl_p5_multicolor_probe_*` | Remaining profile/mode matrix, milestone 3 |
+| Collision/priority | FX priority, `COLMASK`/`COLDETECT`, text attribute source, GTIA-special P0+P1/P5 | `vbxe_priority_collision_matrix`, `vbxe_fx124_priority_probe_*`, `vbxe_xdl_*collision_probe_*`, `vbxe_xdl_p5_multicolor_probe_*` | Scene differentials for remaining transparency/map combinations, milestone 3 |
 | Blitter/IRQ | Blocks, modes 0-6, lists, zoom, collisions, snapshots, stop, level IRQ and in-line completion placement | `vbxe_blitter_state`, `vbxe_blitter_copy_*`, `vbxe_blitter_irq_*` | Exact arbitration, milestones 2/4 |
-| Blitter timing | 912 slots, 21-slot load, actual XDL bytes, aggregate overlay/map/MEMAC reservations | `vbxe_blitter_*timing_*`, `vbxe_blitter_attrmap_restart_timing_*`, `vbxe_blitter_attrmap_phase_*` | Fresh Altirra phase-pair capture, milestone 2 |
+| Blitter timing | 912 slots, 21-slot load, fixed 22-cycle XDL updates, aggregate overlay/map/MEMAC reservations | `vbxe_blitter_*timing_*`, `vbxe_blitter_attrmap_restart_timing_*`, `vbxe_blitter_attrmap_phase_*` | Fresh Altirra phase-pair capture, milestone 2 |
 
 ## Reverse / GTIA differential status
 
@@ -351,8 +375,8 @@ XDL, attribute-map, and observed CPU/ANTIC MEMAC accesses before giving the
 residue to the blitter. Overlay claims are limited to the active horizontal
 interval (160 local cycles for lores, 320 for standard/hires, and 243 for
 text) in the current Altirra-aligned aggregate scheduler. A new XDL entry
-claims its actual decoded byte length; repeated lines claim no XDL fetch. A
-buffered attribute-map row claims 172 local cycles, including an immediate
+claims the fixed AHRM update cost of 22 local cycles; repeated lines claim no
+XDL update. A buffered attribute-map row claims 172 local cycles, including an
 reload after `AtMapOn` or a map-address change. A completed machine-driven
 blit schedules its level IRQ at line end minus the remaining local slots
 divided by eight, rather than exposing it artificially at line start.
@@ -415,7 +439,11 @@ claim.
 
 ## Implementation status and next steps
 
-### Roadmap to a functional VBXE
+### Historical roadmap summary
+
+The detailed, current roadmap is [`VBXE_ROADMAP.md`](VBXE_ROADMAP.md). The
+summary below is retained as a compatibility record for the implementation
+history.
 
 The project closes VBXE capability through the following ordered milestones.
 Each behavior change needs an AHRM-backed contract and automated coverage;
@@ -458,7 +486,23 @@ physical-device result.
    each changes the rendered output. A second sustained-execution gate covers
    the supplied Celeste, D600 demo, Falcon, and Phoenix XEXs under FX 1.26.
    Image equivalence and selected text/attribute-map/blitter software cases
-   remain required.
+   remain required. The current headless launch gates still use
+   `runXex({ awaitEntry: false })` and assert cycle advancement. The headless
+   harness also has a passing direct-XEX RAM-marker regression
+   (`vbxe_xex_scene_marker`) and a visual progress gate
+   (`vbxe_real_software_scene`) that checks 120/240/360/480-frame checkpoints,
+   requires a non-black frame, and rejects any digest seen in the reset
+   checkpoints for five corpus members. Galaga remains boot-covered because
+   its headless capture is black; Celeste, D600 and Phoenix remain boot-covered
+   because their captures match the reset-frame set. These cases are explicitly
+   pending a scene marker, but their 64 KiB RAM execution markers now pass.
+   This proves observable progress for the passing cases, but not a
+   program-specific marker or image equivalence. The same corpus was then loaded
+   through the live Chromium/CDP instance: WebGL2 produced non-black captures,
+   and Textmode Test changed its digest after selecting mode 4. This browser
+   path is valid evidence of rendering, but it is not yet an Altirra
+   comparison or a committed golden baseline. The remaining headless work is
+   to connect equivalent markers to each real-software case.
 
 Whole-line blitter/attribute-map timing now has matching, interpretable
 Altirra captures. The remaining boundary for a phase-exact claim is a
@@ -478,33 +522,43 @@ Completed in JavaScript:
 5. Functional interim blitter lists, operations, collision-code status,
    linked-list control, stop, snapshots, completion-status latching, and
    level-sensitive completion IRQ delivery to the CPU.
-6. Browser selection for FX 1.20/1.24/1.26 at `$D600` or `$D700`. VBXE intentionally
-   uses the main-thread runtime because the worker presentation path does not
-   yet transfer the extra RGB plane.
+6. Browser selection for FX 1.20/1.24/1.26 at `$D600` or `$D700`. VBXE uses
+   the worker OffscreenCanvas when the worker is selected, with the main-thread
+   and Canvas 2D paths retained as fallbacks.
 
 The functional compatibility milestone is satisfied for the current JavaScript
 device: the selectable FX profiles, XDL/attribute-map paths, MEMAC, blitter,
-and completion IRQ have deterministic regressions, while the supplied FX 1.26
-software corpus (Popeye, Galaga, DACTest, Textmode Test's four entries,
-Crysis, Celeste, D600 demo, Falcon, and Phoenix) boots and executes
-successfully. The items below are fidelity and optional-feature boundaries;
-they must not be read as preventing normal VBXE software from using the
-implemented device.
+and completion IRQ have deterministic regressions. The supplied FX 1.26
+software corpus now has launch/cycle-advance gates plus a reset-difference
+visual progress gate; the visual-equivalence milestone remains open until
+program-specific markers and an Altirra golden comparison exist. See
+`VBXE_ROADMAP.md` for the ordered stages and exit criteria.
 
 Still pending:
 
-1. Phase-exact attribute-map buffered-fetch timing. The documented PF3 mask
-   now covers ANTIC hires sources 2, 3, and F; attribute-map scrolling and
-   overscrolling have Altirra differentials; the text renderer covers 80-column
-   character/attribute pairs with 8x8 local fonts, and `COLMASK` uses the
-   externally verified attribute byte for text collisions. The decoder also
-   retains text `ChBase`, scroll offsets, and its 8-line character-row cadence.
-2. Exact collision/priority coverage for remaining profile combinations and
-   GTIA-special cases outside the measured P0+P1/P5 mode-F matrix. The
-   P0+P1/P5 GTIA-9/10/11 samples match externally in FX 1.20, 1.24, and
-   FX 1.26.
-3. Blitter local-memory arbitration and exact timing.
-4. Optional RAMBO behavior and native-core implementation.
+1. Phase-exact attribute-map buffered-fetch timing and the remaining temporal
+   cross-product. The map now follows narrow/normal/wide geometry, the
+   XDL overlay/attribute address/stride latches survive VSync restarts, and
+   the covered PF3/GTIA changes are rebuilt by spans within a line. Remaining
+   work is composing VBXE map-register changes and all overlay hires/text
+   combinations in the same line, then matching the AHRM buffered-fetch
+   phases. The documented PF3 mask now covers ANTIC hires sources 2, 3, and F;
+   attribute-map scrolling and overscrolling have Altirra differentials; the
+   text renderer covers 80-column character/attribute pairs with 8x8 local
+   fonts, and `COLMASK` uses the externally verified attribute byte for text
+   collisions. The decoder also retains text `ChBase`, scroll offsets, and its
+   8-line character-row cadence.
+2. Exact collision/priority differentials for remaining scene combinations
+   involving transparency, attribute maps, and mode transitions. The
+   deterministic profile/contributor matrix and the measured P0+P1/P5
+   GTIA-9/10/11 samples now pass in the supported FX profiles.
+4. Blitter local-memory arbitration and exact timing at individual DMA phases;
+   the AHRM 22-cycle XDL update contract is now implemented. A horizontal
+   differential is still required before introducing a phase-level scheduler.
+5. Worker RGB-plane transport and native-core implementation are optional
+   product/integration work, not blockers for the functional JavaScript VBXE
+   milestone. JavaScript FX 1.26r RAMBO behavior is already covered by
+   `vbxe_rambo_bus`.
 
 Every later step needs a shared behavioral contract and automated coverage;
 visual behavior additionally needs an Altirra differential diagnostic.

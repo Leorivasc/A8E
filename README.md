@@ -27,6 +27,22 @@ https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf
 
 ## Current Emulation Status
 
+### VBXE
+
+The browser JavaScript core provides optional FX 1.20, 1.24, 1.26, and FX
+1.26r VBXE profiles. The current functional milestone covers VRAM, registers,
+both `$D640`/`$D740` pages, XDL standard/lores/hires/text paths, attribute
+maps, MEMAC, blitter operations, completion IRQs, snapshots, and the supplied
+FX 1.26 software corpus. VBXE is disabled by default and uses the worker
+OffscreenCanvas when available, with main-thread fallback.
+
+This is functional compatibility, not a claim of complete hardware or
+pixel-perfect equivalence. Mid-scanline overlay/map composition, exact local
+bus phase timing, broader GTIA-special combinations, visual Altirra capture
+comparison, automated worker/fallback regression, and native VBXE support remain separate
+milestones. See the [VBXE technical contract](implementation/VBXE.md) and the
+[VBXE roadmap](implementation/VBXE_ROADMAP.md).
+
 Both emulator cores currently include the following raster-timing behavior:
 
 - Visible scanlines now render playfield/background state on the per-color-clock path.

@@ -1538,6 +1538,15 @@
           typeof window.A8EVbxe !== "undefined" && window.A8EVbxe.memacAddress
             ? window.A8EVbxe.memacAddress(vbxe, addr, true)
             : -1;
+        const vbxeRamboAddress =
+          vbxe && vbxe.enabled && typeof window.A8EVbxe !== "undefined" &&
+          window.A8EVbxe.ramboAddress
+            ? window.A8EVbxe.ramboAddress(vbxe, addr, ctx.sram[IO_PORTB]) : -1;
+        if (vbxeRamboAddress >= 0) {
+          if (typeof window.A8EVbxe.noteMemacAccess === "function")
+            window.A8EVbxe.noteMemacAccess(vbxe);
+          return vbxe.vram[vbxeRamboAddress] & 0xff;
+        }
         const u1mbWindowOwnsAddress =
           mem.ultimate1mb && addr >= 0x4000 && addr < 0x8000 &&
           (mem.sharedWindow ? mem.cpuWindowEnabled : mem.anticWindowEnabled);

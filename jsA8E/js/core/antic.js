@@ -12,6 +12,7 @@
     const FIRST_VISIBLE_LINE = cfg.FIRST_VISIBLE_LINE;
     const LAST_VISIBLE_LINE = cfg.LAST_VISIBLE_LINE;
     const PMG_REGISTER_ADDRESSES = cfg.PMG_REGISTER_ADDRESSES || [];
+    const GTIA_SPAN_REGISTER_ADDRESSES = cfg.GTIA_SPAN_REGISTER_ADDRESSES || [];
 
     const NMI_DLI = cfg.NMI_DLI;
     const NMI_VBI = cfg.NMI_VBI;
@@ -65,6 +66,7 @@
     const vbxeNextXdlLine = cfg.vbxeNextXdlLine;
     const vbxeRenderXdlLine = cfg.vbxeRenderXdlLine;
     const vbxeApplyPlayfieldAttributes = cfg.vbxeApplyPlayfieldAttributes;
+    const vbxeApplyGtiaSpans = cfg.vbxeApplyGtiaSpans;
     const PRIO_BKG = cfg.PRIO_BKG;
     const PRIO_PF0 = cfg.PRIO_PF0;
     const PRIO_PF1 = cfg.PRIO_PF1;
@@ -158,6 +160,11 @@
       drawLine.pmgEventOverflow = false;
       for (let i = 0; i < PMG_REGISTER_ADDRESSES.length; i++) {
         drawLine.pmgInitialRegisters[i] = sram[PMG_REGISTER_ADDRESSES[i]] & 0xff;
+      }
+      drawLine.gtiaEventCount = 0;
+      drawLine.gtiaEventOverflow = false;
+      for (let i = 0; i < GTIA_SPAN_REGISTER_ADDRESSES.length; i++) {
+        drawLine.gtiaInitialRegisters[i] = sram[GTIA_SPAN_REGISTER_ADDRESSES[i]] & 0xff;
       }
       drawLine.playerPmgShift.fill(0);
       drawLine.playerPmgState.fill(0);
@@ -441,6 +448,12 @@
       if (typeof io.piaCycleTimedEvent === "function") io.piaCycleTimedEvent(ctx);
 
       if (!io.inDrawLine && ctx.cycleCounter >= io.displayListFetchCycle) {
+        if (io.drawLine.vbxeLine && vbxeApplyGtiaSpans) {
+          vbxeApplyGtiaSpans(io.vbxe, io.videoOut, io.drawLine.vbxeScanline,
+            io.drawLine.vbxeLine, io.drawLine);
+        }
+        io.drawLine.vbxeLine = null;
+        io.drawLine.vbxeScanline = -1;
         if (io.video.currentDisplayLine === 0) {
           io.clock = io.displayListFetchCycle;
         }
@@ -469,6 +482,8 @@
               vbxeRenderXdlLine(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
             if (xdlLine && vbxeApplyPlayfieldAttributes)
               vbxeApplyPlayfieldAttributes(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
+            io.drawLine.vbxeLine = xdlLine;
+            io.drawLine.vbxeScanline = io.video.currentDisplayLine;
           }
           // AHRM 12.4 gives the 14MHz local bus 912 slots per scanline. The
           // The blitter consumes its documented per-byte local-cycle cost

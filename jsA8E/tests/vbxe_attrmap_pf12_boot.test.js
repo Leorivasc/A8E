@@ -56,10 +56,10 @@ async function main() {
     const video = ctx.ioData.videoOut;
     for (let y = 8; y < 200; y++) {
       let colored = 0;
-      for (let x = 128; x < 384; x++) {
+      for (let x = 96; x < 416; x++) {
         if (video.vbxeRgb[y * 456 + x] !== 0) colored++;
       }
-      assert.equal(colored, 256, "attribute map should cover mode-F line " + y);
+      assert.equal(colored, 320, "attribute map should cover mode-F line " + y);
     }
     console.log("vbxe_attrmap_pf12_boot: 192-line PF1/PF2 field verified.");
   } finally {

@@ -60,6 +60,7 @@
       const normalized = profile === "fx1.20" || profile === "fx120" ? "fx1.20" :
         profile === "fx1.24" || profile === "fx124" ? "fx1.24" :
           profile === "fx1.26" || profile === "fx126" ? "fx1.26" :
+            profile === "fx1.26r" || profile === "fx126r" || profile === "r" ? "fx1.26r" :
             value.enabled === true ? "fx1.26" : "off";
       if (normalized === "off") return "off";
       return normalized + ((value.page | 0) === 0xd740 ? "-d700" : "-d600");
@@ -71,6 +72,7 @@
     const profile = text.replace(/-d[67]00$/, "");
     if (profile === "fx1.20" || profile === "fx120") return "fx1.20" + page;
     if (profile === "fx1.24" || profile === "fx124") return "fx1.24" + page;
+    if (profile === "fx1.26r" || profile === "fx126r" || profile === "r") return "fx1.26r" + page;
     if (profile === "fx1.26" || profile === "fx126" || text === "d600" || text === "d700")
       return "fx1.26" + page;
     return "off";
@@ -517,8 +519,7 @@
     let romNoticeDismissed = false;
     let primaryDriveQueue = Promise.resolve();
     let standbyXexPromise = null;
-    const useWorkerApp = vbxePreference === "off" &&
-      window.A8EApp &&
+    const useWorkerApp = window.A8EApp &&
       ((typeof window.A8EApp.shouldUseWorker === "function" &&
         window.A8EApp.shouldUseWorker({
           worker: workerPreference,

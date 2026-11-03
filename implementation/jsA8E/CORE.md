@@ -20,9 +20,10 @@ precedence; `antic.js` latches and advances XDL state at its frame/scanline
 boundaries. The implemented standard/lores/hires XDL subset writes only to
 the separate RGB overlay plane, preserving the indexed Atari framebuffer and
 its priority metadata for composition. A second per-pixel contributor plane
-removes P/M graphics hidden by GTIA `PRIOR` before VBXE evaluates overlay
-priority and collisions. See [`VBXE.md`](../VBXE.md) for supported behavior
-and limits.
+  removes P/M graphics hidden by GTIA `PRIOR` before VBXE evaluates overlay
+  priority and collisions. See [`VBXE.md`](../VBXE.md) for the technical
+  contract and [`VBXE_ROADMAP.md`](../VBXE_ROADMAP.md) for the staged work,
+  diagrams, and exit criteria.
 
 ## Clock Domains
 

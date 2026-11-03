@@ -47,10 +47,10 @@ async function main() {
 
     const video = ctx.ioData.videoOut;
     for (let y = 8; y < 200; y++) {
-      const base = y * 456 + 128;
-      assert.equal(video.vbxeRgb[base], 0xff00fe00,
+      const base = y * 456 + 96;
+      assert.equal(video.vbxeRgb[base], 0xff00ff00,
         "PF3 mask bit 7 at line " + y + ": got 0x" + video.vbxeRgb[base].toString(16));
-      assert.equal(video.vbxeRgb[base + 1], 0xfffe0000,
+      assert.equal(video.vbxeRgb[base + 1], 0xffff0000,
         "PF2 bit 6 at line " + y + ": got 0x" + video.vbxeRgb[base + 1].toString(16));
     }
     console.log("vbxe_attrmap_pf3_boot: 192-line PF3/PF2 mask field verified.");

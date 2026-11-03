@@ -52,7 +52,7 @@ async function main() {
     ];
     const video = ctx.ioData.videoOut;
     for (let y = 8; y < 200; y++) {
-      const base = y * 456 + 128;
+      const base = y * 456 + 96;
       assert.deepEqual(Array.from(video.vbxeRgb.slice(base, base + 8)), expected,
         "mode-2 reverse PF0-PF3 pattern at line " + y);
     }
