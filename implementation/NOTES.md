@@ -1,5 +1,43 @@
 # NOTES.md
 
+- 2026-11-04 (Firefox interactivo y blitter por filas): sesión interactiva con
+  Firefox gráfico (instancia propia con puerto BiDi, grabador de teclas y de
+  capturas, canal de órdenes por fichero) con el usuario jugando Popeye en modo
+  worker: el worker llegó a no contestar `getCounters`/`captureScreenshot` en
+  4-15 s, con el hilo `DOM Worker` al ~92 % de un núcleo, a partir de que el
+  juego pasó de la carga a la pantalla de título (antes de cualquier tecla del
+  usuario). Sin intervención humana, la misma secuencia dio una velocidad de
+  emulación del 83-92 % en esa fase, es decir: el worker está al límite de un
+  núcleo y cualquier carga añadida (mis consultas de captura, el Chromium del
+  usuario con jsA8E abierto a ~35 %) lo deja atrás. En Chromium la misma fase
+  usaba el 72 % del hilo principal. Perfil de V8 de Popeye en juego:
+  `advanceBlitter` 12,2 % (el primero), `clockAction` 8 %, modo 4/5 5 %,
+  composición de atributos 4,5 %. Cambio: `advanceBlitter` procesa las filas
+  sin zoom en X con un bucle apretado (misma tarifa por byte y mismos slots
+  libres consumidos en el mismo orden; el último byte de la fila queda en la
+  ruta por byte, que gestiona el cambio de fila y de bloque). Equivalencia
+  comprobada: Mr. Proper y Popeye dan el mismo hash de VRAM, el mismo
+  contador de ciclos, el mismo código de colisión y el mismo estado del blitter
+  antes y después. Resultado en Chromium: `advanceBlitter` 12,2 % a 3,3 % y
+  ocupación del hilo 72 % a 63 %. El perfilador nativo de Firefox
+  (`MOZ_PROFILER_STARTUP`) solo entregó el proceso padre, así que no hay perfil
+  de SpiderMonkey. Suite completa: 120 de 122; fallan las dos conocidas
+  (`vbxe_fx124_priority_probe_boot` y la inestable `vbxe_blitter_attrmap_phase_boot`).
+
+- 2026-11-04 (Firefox: modo worker): en el Firefox de escritorio del usuario el
+  modo worker (el predeterminado) tenía varios segundos de input lag; una
+  petición mínima al worker (`getCounters`) agotó los 4 s de tiempo de espera,
+  y con la emulación en el hilo principal (`?a8e_no_worker=1`, ventana privada)
+  el juego era jugable. En el Firefox 158 sin ventana de la máquina de
+  desarrollo (WebGL por software) el worker iba a 58-60 fps con ida y vuelta
+  de 14-25 ms, de modo que no se reprodujo y la causa dentro de Firefox
+  (presentación de `OffscreenCanvas` o la planificación de rAF del worker) no
+  está identificada. Medida paliativa: `supportsWorker()` devuelve falso en
+  Firefox salvo `?a8e_worker=1`, igual que ya hacía con el WebView de Tauri.
+  Pendiente: probar en Firefox con `a8e_renderer=2d` en modo worker y sin
+  efecto CRT para ver si es el WebGL del worker, y retirar la excepción si se
+  corrige.
+
 - 2026-11-04 (revisión AHRM y generalidad): revisados los cambios de esta
   sesión contra el AHRM. Corregido: la máscara de colisión de bytes del
   blitter usaba `(valor-1)>>5`; el AHRM 12.4 dice bit 0 = `$01-1F`, bit 1 =

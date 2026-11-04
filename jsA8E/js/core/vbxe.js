@@ -434,6 +434,50 @@
         work.constantFetchPending = false;
         continue;
       }
+      // Whole-row fast path for the common unzoomed blit. Bytes are charged
+      // exactly as the per-byte path below would charge them (same cost, same
+      // free slots in the same order); only the bookkeeping is hoisted out of
+      // the loop. The row's last byte stays with the per-byte path, which owns
+      // the row/block rollover.
+      if (work.zoomX === 1 && work.repeatX === 0 && work.width - work.x > 1) {
+        const vram = state.vram;
+        const dataAnd = work.dataAnd;
+        const dataXor = work.dataXor;
+        const sourceXStep = work.sourceXStep;
+        const destinationXStep = work.destinationXStep;
+        const patterned = work.patternEnabled;
+        const patternWidth = work.patternWidth;
+        const sourceRow = work.source + work.y * work.sourceYStep;
+        const destinationRow = work.destination +
+          (work.y * work.zoomY + work.repeatY) * work.destinationYStep;
+        const fetchSkipped = dataAnd === 0;
+        const mode = work.mode;
+        const last = work.width - 1;
+        let x = work.x;
+        let rem = remaining;
+        let free = scheduled ? scheduledFree() : remaining;
+        let used = 0;
+        while (x < last && rem > 0) {
+          const sourceX = patterned ? x % patternWidth : x;
+          const source = ((vram[(sourceRow + sourceX * sourceXStep) & 0x7ffff] & dataAnd) ^ dataXor) & 0xff;
+          const cycles = blitByteCycles(work, source, fetchSkipped);
+          if (scheduled ? free < cycles : rem < cycles) break;
+          const destinationAddress = (destinationRow + x * destinationXStep) & 0x7ffff;
+          if (mode === 0) vram[destinationAddress] = source;
+          else vram[destinationAddress] = applyBlitOperation(
+            state, work, source, vram[destinationAddress] & 0xff);
+          rem -= cycles;
+          free -= cycles;
+          used += cycles;
+          x++;
+        }
+        if (x > work.x) {
+          completed += x - work.x;
+          work.x = x;
+          consume(used);
+          continue;
+        }
+      }
       const sourceX = work.patternEnabled ? work.x % work.patternWidth : work.x;
       const sourceAddress = (work.source + work.y * work.sourceYStep +
         sourceX * work.sourceXStep) & 0x7ffff;

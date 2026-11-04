@@ -84,11 +84,23 @@
     );
   }
 
+  function isFirefox() {
+    return typeof navigator !== "undefined" &&
+      typeof navigator.userAgent === "string" &&
+      /\bFirefox\//.test(navigator.userAgent);
+  }
+
   function supportsWorker() {
     // WebKitGTK can expose OffscreenCanvas but return no 2D context from the
     // worker. Keep the desktop shell on the main-thread backend until the
     // native WebView worker rendering path is reliable across platforms.
     if (isTauriWebView()) return false;
+    // Firefox's OffscreenCanvas/worker path left the worker unresponsive for
+    // seconds on a real desktop session (getCounters timed out after 4 s,
+    // several seconds of input lag), while the same page with the emulator on
+    // the main thread was playable. Default Firefox to the main thread; an
+    // explicit ?a8e_worker=1 still opts in.
+    if (isFirefox() && getQueryWorkerPreference() !== true) return false;
     if (typeof window.Worker === "undefined") return false;
     if (typeof window.OffscreenCanvas === "undefined") return false;
     if (typeof window.MessageChannel === "undefined") return false;

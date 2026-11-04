@@ -20,6 +20,9 @@ All notable changes to this project will be documented in this file.
   debugger, HostFS, assembler, snapshot, artifact, and memory-profile flows.
 
 ### Fixed
+- Firefox now runs the emulator on the main thread by default (the worker path
+  caused seconds of input lag on desktop Firefox); `?a8e_worker=1` still opts
+  in to the worker.
 - VBXE `BLITTER_START` now runs the rest of the current scanline's blitter
   budget immediately, as Altirra does, so software that polls
   `BLT_COLLISION_CODE` right after starting a blit (Mr. Proper's fruit pickup)
