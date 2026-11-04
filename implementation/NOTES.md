@@ -1,5 +1,80 @@
 # NOTES.md
 
+- 2026-11-04: Popeye ya avanza y se puede usar: tras el título y la tabla de
+  puntuaciones llega a la pantalla de juego con todos los colores. El
+  bloqueo era un DLI espurio en el vblank. `clockAction`
+  (`playfield/renderer_base.js`) arma `io.dliCycle` en el ciclo 6 de cada
+  línea cuando `modeLineExitDli` está activo y el contador de filas coincide
+  con VSCROL, pero no comprobaba que la línea fuera visible. Si la última
+  instrucción de la lista de display es una salida de región con scroll y
+  DLI (`$94` tras `$B4`), `modeLineExitDli` quedaba activo, el contador de
+  filas dejaba de avanzar en el vblank y seguía igualando a VSCROL: ANTIC
+  generaba un DLI en cada línea 249-261. Los manejadores de DLI de Popeye son
+  rutinas de varias líneas con WSYNC (núcleo de colores), así que uno de
+  ellos se ejecutaba durante todo el vblank, el manejador del VBI entraba en
+  su bucle `$21A1` (espera `VCOUNT=$7E`) en la línea 44 del frame siguiente y
+  el VBI siguiente lo interrumpía antes de la línea 252, para siempre: el
+  hilo principal (espera de 30 s en `$A7C1` con igualdad exacta de RTCLOK)
+  no volvía a ejecutarse. Ahora la decisión solo se evalúa en líneas
+  8-247. Cómo se encontró: el PC interrumpido que apila el VBI (siempre
+  `$21A3`), la pila (marco de VBI sobre marco de VBI) y un acceso con
+  Object.defineProperty sobre `io.dliCycle` para ver quién lo armaba.
+
+- 2026-11-04: Popeye ya funciona (title, "TOP FIVE CHART", escenario con los
+  colores del mapa de atributos). Causa: la CPU captura opcode y operandos
+  directamente de `ctx.ram[pc]`, así que el código que el juego ejecuta desde
+  una ventana MEMAC (configura `$D65E=$99`, `$D65F=$80`: ventana de 8 KB en
+  `$9000-$AFFF` sobre VRAM, descomprime allí sus juegos de caracteres y su
+  código, y salta a `$A516`) se leía de la RAM subyacente (datos de
+  gráficos) en lugar de VRAM. `installIoHandlers` construye ahora
+  `ctx.vbxeFetchMask` con las direcciones que MEMAC enruta a VRAM, y
+  `run`/`executeOne` preparan en `ctx.ram` los 3 bytes de la instrucción
+  (`stageWindowFetch`) y los restauran al terminar (`restoreWindowFetch`).
+  Sin ventana activa el coste es una comparación con `null` por instrucción.
+  Prueba nueva `tests/vbxe_memac_code_fetch.test.js` (en `test:vbxe`).
+  Cómo se llegó: Altirra en wine con el depurador (puntos de vigilancia y
+  `.writemem`) mostró que el código de `$A516` existía en su RAM; el XEX no
+  lo trae (623 segmentos con un descompresor LZ en `$8E6A`) y las trazas de
+  jsA8E mostraron los destinos de la descompresión dentro de la ventana MEMAC.
+
+- 2026-11-04: D600 (demo del blitter) ya se ve como en Altirra: bitmap hires
+  de ANTIC coloreado por el mapa de atributos (un color por línea) con las
+  esferas del blitter encima. La causa era la polaridad del bit 2 de
+  VIDEO_CONTROL. Altirra (`WriteControl`: `mbOvTrans = (value & 4) == 0`, y
+  `RenderOverlay` salta el color 0 solo en esa rama) hace transparente el
+  color 0 del overlay con D2 = 0 (valor de reset) y opaco con D2 = 1; D3
+  añade el color `$F` solo en el caso transparente. jsA8E lo tenía al revés,
+  siguiendo la prosa del AHRM, y con `VIDEO_CONTROL=3` (el valor que usan D600
+  y Popeye) el overlay a ceros se pintaba como negro opaco tapando el fondo.
+  Nuevo helper `overlayTransparency` en `vbxe.js`. Como la inversión es
+  exacta, las pruebas conservan su intención invirtiendo D2: valores de
+  `videoControlActive` en `vbxe_device_state.test.js` y las escrituras a
+  `$D640` de las fuentes `.asm` de `implementation/AHRM Validation` (29
+  archivos), con todos los `.XEX` regenerados con el ensamblador del proyecto
+  (incluidos los alias `_V2_`, `12`, etc. que declaran las pruebas).
+  Rendimiento (medido en el arnés headless de Node, no en el navegador):
+  D600 pasó de 8 a unos 27-45 fps. `advanceBlitter` recorría las 912
+  posiciones del bus local por cada byte copiado (ahora cuenta una vez y
+  descuenta), `attributeMapCell` cachea la celda por línea y quita un cierre
+  por llamada, y `blitByteCycles`/la división de columna evitan `Math.*` en la
+  ruta por píxel/byte (en el contexto `vm` cada global es una búsqueda lenta).
+  D600 con BASIC activo se queda esperando una línea de `E:` (necesita ENTER
+  y luego una tecla): igual que en Altirra con BASIC. Popeye sigue sin dibujar
+  el playfield (la memoria de pantalla de ANTIC queda a cero); es otro
+  problema. `vbxe_fx124_priority_probe_boot` ya fallaba en el commit
+  anterior ("legacy bit 6 must win over PF2"), no es regresión de este cambio.
+
+- 2026-11-03: las lecturas de GTIA `$D01B-$D01E` (PRIOR, VDELAY, GRACTL,
+  HITCLR) devolvían `$FF`; el AHRM 6.1 y Altirra devuelven `$0F` en todo
+  `$D015-$D01E` (sin bits flotantes). Popeye lee `$D01C` y bifurca según el
+  bit 7. Corregido en la tabla de `hw.js` y cubierto por
+  `tests/gtia_unassigned_reads.test.js` (en `test:gtia-spans`). Esto no basta
+  para que Popeye dibuje su pantalla. Comparado con Altirra (VBXE FX 1.26 vía
+  wine): el XDL es idéntico, DMACTL efectivo `$21` en ambos y los colores de
+  GTIA valen 0 en ambos; la diferencia es que en jsA8E la memoria de pantalla
+  de ANTIC (`$B029-$BFFF`) queda en ceros salvo la línea de estado, o sea que
+  el juego no llega a dibujar el playfield.
+
 - 2026-11-03: con VBXE el emulador iba 2,7 veces más lento (31 fps frente a
   83 sin VBXE, medido con Celeste en headless). El perfil mostró dos costes
   fijos por scanline/byte de DMA: (1) `readExpansionMemoryByte` (llamada por

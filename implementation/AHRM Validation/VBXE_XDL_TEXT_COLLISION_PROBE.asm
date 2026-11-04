@@ -84,7 +84,7 @@ FILL_FONT:
  STA XDL1
  LDA #0
  STA XDL2
- LDA #1
+ LDA #5
  STA VIDEO
  ; $20-$3F: character byte $21.
  LDA #2

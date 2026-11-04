@@ -155,7 +155,7 @@ FILLMAP:
  ; Enable XDL after both its descriptor and map row are initialized.
  LDA #$22
  STA DMACTL
- LDA #1
+ LDA #5
  STA VIDEO
 LOOP: JMP LOOP
 .RUN START

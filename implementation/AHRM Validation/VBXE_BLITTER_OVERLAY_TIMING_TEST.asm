@@ -77,7 +77,7 @@ START:
  STA XDL1
  LDA #0
  STA XDL2
- LDA #5
+ LDA #1
  STA VIDEO
  ; Standard OS immediate IRQ vector records completion timing.
  LDA #<IRQ_HANDLER

@@ -80,6 +80,11 @@
       memoryWriteHook: null,
       memoryAccessHook: null,
       instructionTraceHook: null,
+      // Addresses whose instruction bytes come from a VBXE MEMAC window rather
+      // than the RAM array (null when no window routes CPU accesses to VRAM).
+      vbxeFetchMask: null,
+      vbxeFetchRead: null,
+      vbxeFetchSave: new Uint8Array(3),
       illegalOpcodeHook: null,
       stealDmaReentrancyGuard: false,
       // Set by outside modules (Atari IO).
@@ -1103,6 +1108,31 @@
     return !!ctx.breakRun;
   }
 
+  // Instruction bytes are fetched straight from ctx.ram. Code executed from a
+  // VBXE MEMAC window (Popeye runs its game code from a window onto VRAM)
+  // must come from the mapped memory instead, so stage the bytes of such an
+  // instruction into ctx.ram for the duration of the instruction.
+  function stageWindowFetch(ctx, pc) {
+    const mask = ctx.vbxeFetchMask;
+    const save = ctx.vbxeFetchSave;
+    for (let i = 0; i < 3; i++) {
+      const address = (pc + i) & 0xffff;
+      if (mask[address] !== 0) {
+        save[i] = ctx.ram[address];
+        ctx.ram[address] = ctx.vbxeFetchRead(ctx, address);
+      }
+    }
+  }
+
+  function restoreWindowFetch(ctx, pc) {
+    const mask = ctx.vbxeFetchMask;
+    const save = ctx.vbxeFetchSave;
+    for (let i = 0; i < 3; i++) {
+      const address = (pc + i) & 0xffff;
+      if (mask[address] !== 0) ctx.ram[address] = save[i];
+    }
+  }
+
   function executeOne(ctx) {
     if (ctx.cycleCounter < ctx.stallCycleCounter) {
       ctx.cycleCounter++;
@@ -1125,8 +1155,14 @@
       return;
     }
 
-    const opcode = ram[cpu.pc & 0xffff] & 0xff;
-    if (onIllegalOpcode(ctx, opcode)) return;
+    const fetchPc = cpu.pc & 0xffff;
+    const windowFetch = ctx.vbxeFetchMask !== null && ctx.vbxeFetchMask[fetchPc] !== 0;
+    if (windowFetch) stageWindowFetch(ctx, fetchPc);
+    const opcode = ram[fetchPc] & 0xff;
+    if (onIllegalOpcode(ctx, opcode)) {
+      if (windowFetch) restoreWindowFetch(ctx, fetchPc);
+      return;
+    }
     ctx.currentInstructionPc = cpu.pc & 0xffff;
     ctx.currentOpcode = opcode & 0xff;
     ctx.currentInstructionCycles = OPCODE_BASE_CYCLES[opcode] | 0;
@@ -1154,6 +1190,7 @@
     }
 
     OPCODE_EXEC_FUNCS[opcode](ctx);
+    if (windowFetch) restoreWindowFetch(ctx, fetchPc);
 
     ctx.cycleCounter += OPCODE_BASE_CYCLES[opcode];
     ctx.instructionCounter = (ctx.instructionCounter + 1) >>> 0;
@@ -1193,8 +1230,12 @@
           continue;
         }
 
-        const opcode = ram[cpu.pc & 0xffff] & 0xff;
+        const fetchPc = cpu.pc & 0xffff;
+        const windowFetch = ctx.vbxeFetchMask !== null && ctx.vbxeFetchMask[fetchPc] !== 0;
+        if (windowFetch) stageWindowFetch(ctx, fetchPc);
+        const opcode = ram[fetchPc] & 0xff;
         if (onIllegalOpcode(ctx, opcode)) {
+          if (windowFetch) restoreWindowFetch(ctx, fetchPc);
           if (ctx.breakRun) {
             ctx.breakRun = false;
             break;
@@ -1231,6 +1272,7 @@
           nextEvent > ctx.cycleCounter &&
           ctx.cycleCounter + OPCODE_BASE_CYCLES[opcode] > nextEvent
         ) {
+          if (windowFetch) restoreWindowFetch(ctx, fetchPc);
           ctx.cycleCounter = nextEvent;
           cycles = nextEvent;
           continue;
@@ -1259,6 +1301,7 @@
         }
 
         OPCODE_EXEC_FUNCS[opcode](ctx);
+        if (windowFetch) restoreWindowFetch(ctx, fetchPc);
 
         ctx.cycleCounter += OPCODE_BASE_CYCLES[opcode];
         ctx.instructionCounter = (ctx.instructionCounter + 1) >>> 0;

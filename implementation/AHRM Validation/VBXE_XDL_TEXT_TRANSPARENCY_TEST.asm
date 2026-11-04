@@ -84,7 +84,7 @@ FILLFONT:
  LDA #0
  STA XDL2
  ; Enable XDL plus color-0 transparency: clear text backgrounds are transparent.
- LDA #$05
+ LDA #$01
  STA VIDEO
 LOOP: JMP LOOP
 .RUN START

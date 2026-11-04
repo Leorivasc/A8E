@@ -339,7 +339,8 @@
       case 4: cycles = source === 0 ? 2 : 3; break;
       default: cycles = 3; break;
     }
-    return Math.max(1, cycles - (sourceFetchSkipped ? 1 : 0));
+    const total = cycles - (sourceFetchSkipped ? 1 : 0);
+    return total < 1 ? 1 : total;
   }
 
   function advanceBlitter(state, budget, deferIrq) {
@@ -347,13 +348,19 @@
     let remaining = Math.max(0, budget | 0);
     const scheduled = state.localBusSchedule &&
       state.localBusSchedule.length === LOCAL_BUS_SLOTS;
+    // Free slots from the cursor onwards. Only consume() changes the
+    // schedule while the blitter runs, so count once and keep it current
+    // instead of rescanning every slot for each blitted byte.
+    let freeFromCursor = -1;
     const scheduledFree = function () {
       if (!scheduled) return remaining;
-      let count = 0;
-      for (let i = state.localBusCursor | 0; i < LOCAL_BUS_SLOTS; i++) {
-        if (state.localBusSchedule[i] === 0) count++;
+      if (freeFromCursor < 0) {
+        freeFromCursor = 0;
+        for (let i = state.localBusCursor | 0; i < LOCAL_BUS_SLOTS; i++) {
+          if (state.localBusSchedule[i] === 0) freeFromCursor++;
+        }
       }
-      return count;
+      return freeFromCursor;
     };
     const consume = function (cycles) {
       const count = cycles | 0;
@@ -372,6 +379,7 @@
         consumed++;
         state.localBusCursor = i + 1;
       }
+      freeFromCursor -= consumed;
       remaining -= count;
       return true;
     };
@@ -674,6 +682,18 @@
         ((layers & 0x80) !== 0 && (priorityMask & 0x08) !== 0);
   }
 
+  // VIDEO_CONTROL D2 selects an opaque overlay when set; with D2 clear (the
+  // reset value) overlay color 0 is transparent, and D3 additionally makes
+  // color $F transparent. This is Altirra's WriteControl/RenderOverlay
+  // behaviour (mbOvTrans = (value & 4) == 0) and what real VBXE software such
+  // as the D600 demo and Popeye relies on; the AHRM prose states the D2
+  // polarity the other way round. Returns 0 opaque, 1 color 0, 3 colors 0/15.
+  function overlayTransparency(state) {
+    const control = state.videoControlActive;
+    if ((control & 0x04) !== 0) return 0;
+    return (control & 0x08) !== 0 ? 3 : 1;
+  }
+
   function overlayCollisionEnabled(state, color) {
     return (state.collisionMask & (1 << ((color & 0xff) >>> 5))) !== 0;
   }
@@ -689,27 +709,50 @@
     // For a negative overscroll offset, Altirra keeps fetching the first
     // buffered cell until the counter reaches zero. Do not turn that into a
     // fictitious preceding map column.
-    const column = x < 0 ? 0 : Math.floor(x / width);
+    const column = x < 0 ? 0 : (x / width) | 0;
     // AHRM 12.4 limits the buffered line to 43 four-byte cells.
     if (column < 0 || column >= 43) return null;
     // `attributeAddress` already names the currently buffered map row. Its
     // five-bit vertical counter is advanced by nextXdlLine after each line.
     const buffer = line.attributeBuffer;
     const address = (column << 2) | 0;
-    const read = function (offset) {
-      return buffer
-        ? buffer[address + offset] & 0xff
-        : state.vram[(line.attributeAddress + address + offset) & 0x7ffff] & 0xff;
-    };
-    const playfield0 = read(0);
-    const playfield1 = read(1);
-    const playfield2 = read(2);
-    const control = read(3);
-    return { control: control, playfield0: playfield0, playfield1: playfield1,
+    // Every pixel of a cell shares the same four bytes, and the buffered row
+    // does not change during the line. Reuse the decoded cell; only the
+    // priority register is re-read because it can change between spans.
+    if (line.attributeCellCache === undefined ||
+        line.attributeCellCacheSource !== buffer) {
+      line.attributeCellCache = new Array(43);
+      line.attributeCellCacheSource = buffer;
+    }
+    const cache = line.attributeCellCache;
+    const cached = cache[column];
+    if (cached !== undefined && buffer) {
+      cached.priority = state.priority[cached.control & 0x03] & 0xff;
+      return cached;
+    }
+    // Called for every rendered pixel, so read the four cell bytes directly
+    // instead of allocating a reader closure per call.
+    let playfield0, playfield1, playfield2, control;
+    if (buffer) {
+      playfield0 = buffer[address] & 0xff;
+      playfield1 = buffer[address + 1] & 0xff;
+      playfield2 = buffer[address + 2] & 0xff;
+      control = buffer[address + 3] & 0xff;
+    } else {
+      const base = line.attributeAddress + address;
+      playfield0 = state.vram[base & 0x7ffff] & 0xff;
+      playfield1 = state.vram[(base + 1) & 0x7ffff] & 0xff;
+      playfield2 = state.vram[(base + 2) & 0x7ffff] & 0xff;
+      control = state.vram[(base + 3) & 0x7ffff] & 0xff;
+    }
+    const cell = { control: control, playfield0: playfield0, playfield1: playfield1,
       playfield2: playfield2, reverse: (control & 0x04) !== 0,
       playfieldPalette: (control >>> 6) & 0x03,
       overlayPalette: (control >>> 4) & 0x03,
       priority: state.priority[control & 0x03] & 0xff };
+    // An unbuffered row reads live VRAM, which the CPU may change mid-line.
+    if (buffer) cache[column] = cell;
+    return cell;
   }
 
   // AHRM 12.4 calls out the PF3 bitmap separately from the map cell itself:
@@ -919,7 +962,7 @@
       else pixels.fill(0, base, base + 256);
     }
     const priorityMask = line.priority === undefined ? 0xff : line.priority;
-    const transparency = (state.videoControlActive >> 2) & 0x03;
+    const transparency = overlayTransparency(state);
     const standardWidth = signalWidth >> 1;
     const outputStart = span
       ? (target ? (span[0] * 2) : Math.floor(span[0] * outputPixels / standardWidth))
@@ -1007,7 +1050,7 @@
       const color = hires
         ? ((sourceX & 1) !== 0 ? sourceByte & 0x0f : sourceByte >>> 4)
         : sourceByte;
-      const transparency = (state.videoControlActive >> 2) & 0x03;
+      const transparency = overlayTransparency(state);
       const transparent = (color === 0 && transparency >= 1) ||
         (transparency === 3 && (hires ? color === 0x0f : (color & 0x0f) === 0x0f));
       if (transparent) continue;

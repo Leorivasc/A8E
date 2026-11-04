@@ -279,6 +279,9 @@
         if (ctx.accessFunctionList[address] === ioAccess) CPU.setRam(ctx, address, address);
       }
       const vbxe = ctx.ioData && ctx.ioData.vbxe;
+      // Addresses the CPU reads through a MEMAC window; instruction fetch
+      // needs them too (see stageWindowFetch in cpu.js).
+      let fetchMask = null;
       if (vbxe && vbxe.enabled) {
         for (let address = vbxe.page; address < vbxe.page + 0x20; address++) {
           CPU.setIo(ctx, address, ioAccess);
@@ -295,6 +298,8 @@
               if (!(expansion && expansion.ultimate1mb && expansion.cpuWindowEnabled &&
                     address >= 0x4000 && address < 0x8000)) {
                 CPU.setIo(ctx, address, ioAccess);
+                if (fetchMask === null) fetchMask = new Uint8Array(0x10000);
+                fetchMask[address] = 1;
               }
             }
           }
@@ -305,6 +310,11 @@
           }
         }
       }
+      ctx.vbxeFetchMask = fetchMask;
+      ctx.vbxeFetchRead = fetchMask === null ? null : function (fetchCtx, address) {
+        const local = vbxeMemacAddress(vbxe, address, false);
+        return local >= 0 ? vbxe.vram[local] : fetchCtx.ram[address];
+      };
     }
 
     return {

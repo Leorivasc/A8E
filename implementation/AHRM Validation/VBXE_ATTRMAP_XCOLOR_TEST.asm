@@ -149,7 +149,7 @@ FILLMAP:
  LDA #0
  STA XDL2
  ; XDL enable + XCOLOR: odd map codes must remain odd.
- LDA #3
+ LDA #7
  STA VIDEO
 LOOP: JMP LOOP
 .RUN START

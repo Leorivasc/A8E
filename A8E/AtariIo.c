@@ -1446,7 +1446,13 @@ static void AtariIo_DrawClockAction(_6502_Context_t *pContext)
 	 * scanline only through cycle 5, so the exit-line DLI decision is
 	 * evaluated once the beam reaches cycle 6.
 	 */
+	/* Mode lines are not processed in vertical blank, where the row counter no
+	 * longer advances and would keep matching VSCROL, raising a DLI on every
+	 * line after scan line 247.
+	 */
 	if(lCycleInLine == 6 && pIoData->bModeLineExitDli &&
+	   pIoData->tVideoData.lCurrentDisplayLine >= 8 &&
+	   pIoData->tVideoData.lCurrentDisplayLine <= 247 &&
 	   pIoData->cModeLineRowCounter == AtariIo_CurrentVscrolRegister(pContext))
 	{
 		pIoData->llDliCycle = llLineStartCycle + DLI_HORIZONTAL_OFFSET;
@@ -1707,10 +1713,11 @@ static IoInitValue_t m_aIoInitValues[] =
 		{IO_COLPF2, 0x00, 0x0f, Gtia_COLPF2},
 		{IO_COLPF3, 0x00, 0x0f, Gtia_COLPF3},
 		{IO_COLBK, 0x00, 0x0f, Gtia_COLBK},
-		{IO_PRIOR, 0x00, 0xff, Gtia_PRIOR},
-		{IO_VDELAY, 0x00, 0xff, Gtia_VDELAY},
-		{IO_GRACTL, 0x00, 0xff, Gtia_GRACTL},
-		{IO_HITCLR, 0x00, 0xff, Gtia_HITCLR},
+		/* AHRM 6.1: unassigned GTIA reads in $D015-$D01E return $0F. */
+		{IO_PRIOR, 0x00, 0x0f, Gtia_PRIOR},
+		{IO_VDELAY, 0x00, 0x0f, Gtia_VDELAY},
+		{IO_GRACTL, 0x00, 0x0f, Gtia_GRACTL},
+		{IO_HITCLR, 0x00, 0x0f, Gtia_HITCLR},
 		{IO_CONSOL, 0x00, 0x07, Gtia_CONSOL},
 
 		{IO_AUDF1_POT0, 0x00, 0xff, Pokey_AUDF1_POT0},
