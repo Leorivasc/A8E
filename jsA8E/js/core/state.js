@@ -264,8 +264,35 @@
       }
     }
 
-    function installIoHandlers(ctx, ioAccess) {
+    // `onlyIfChanged` is for MEMAC register writes: when they leave the set of
+    // routed windows as it was, nothing needs rebuilding.
+    function installIoHandlers(ctx, ioAccess, onlyIfChanged) {
       if (!ioAccess) throw new Error("A8EState: missing ioAccess");
+      const vbxe = ctx.ioData && ctx.ioData.vbxe;
+      const vbxeActive = !!(vbxe && vbxe.enabled);
+      const expansion = ctx.ioData && ctx.ioData.memoryExpansion;
+      const u1mbWindow = !!(expansion && expansion.ultimate1mb && expansion.cpuWindowEnabled);
+      // MEMAC A covers [base, base + size); MEMAC B always sits at $4000-$7FFF.
+      // Within a window the CPU either sees the VRAM or it does not, so the
+      // CPU-enable bit decides for the whole range.
+      const windows = [];
+      if (vbxeActive && vbxeMemacAddress) {
+        const control = vbxe.memacControl & 0xff;
+        if ((vbxe.memacBankSelect & 0x80) !== 0 && (control & 0x0c) !== 0) {
+          const base = (control & 0xf0) << 8;
+          windows.push(base, Math.min(0xd000, base + (0x1000 << (control & 0x03))),
+            (control & 0x08) !== 0);
+        }
+        if ((vbxe.memacBControl & 0xc0) !== 0) {
+          windows.push(0x4000, 0x8000, (vbxe.memacBControl & 0x80) !== 0);
+        }
+      }
+      const rambo = vbxeActive && !!vbxeRamboAddress && vbxe.profile === "fx1.26r";
+      const routeKey = (vbxeActive ? vbxe.page : -1) + ":" + windows.join(",") +
+        ":" + rambo + ":" + u1mbWindow;
+      if (onlyIfChanged && ctx.vbxeRouteKey === routeKey) return;
+      ctx.vbxeRouteKey = routeKey;
+
       for (let i = 0; i < IO_INIT_VALUES.length; i++) {
         CPU.setIo(ctx, IO_INIT_VALUES[i].addr, ioAccess);
       }
@@ -274,15 +301,37 @@
       // return those addresses to plain RAM before the active windows are
       // installed again; otherwise writes fall into ioAccess's write-only
       // shadow and never reach RAM.
-      const ramAccess = ctx.accessFunctionList[0];
-      for (let address = 0; address < 0xd000; address++) {
-        if (ctx.accessFunctionList[address] === ioAccess) CPU.setRam(ctx, address, address);
+      // Only the ranges the previous call routed can be stale, so after the
+      // first call scan just those; software such as Mr. Proper rewrites a
+      // MEMAC register around every blit and a full scan was costly.
+      const list = ctx.accessFunctionList;
+      const ramAccess = list[0];
+      const previous = ctx.vbxeRoutedRanges;
+      const previousUniform = ctx.vbxeRoutedUniform;
+      if (!previous) {
+        for (let address = 0; address < 0xd000; address++) {
+          if (list[address] === ioAccess) CPU.setRam(ctx, address, address);
+        }
+      } else {
+        for (let r = 0; r < previous.length; r += 2) {
+          if (onlyIfChanged && previousUniform[r >> 1]) {
+            // Every address was routed by the last call and nothing has
+            // remapped memory since (a map rebuild never takes this path).
+            list.fill(ramAccess, previous[r], previous[r + 1]);
+          } else {
+            for (let address = previous[r]; address < previous[r + 1]; address++) {
+              if (list[address] === ioAccess) CPU.setRam(ctx, address, address);
+            }
+          }
+          if (ctx.vbxeFetchMaskStore) ctx.vbxeFetchMaskStore.fill(0, previous[r], previous[r + 1]);
+        }
       }
-      const vbxe = ctx.ioData && ctx.ioData.vbxe;
       // Addresses the CPU reads through a MEMAC window; instruction fetch
       // needs them too (see stageWindowFetch in cpu.js).
       let fetchMask = null;
-      if (vbxe && vbxe.enabled) {
+      const routed = [];
+      const uniform = [];
+      if (vbxeActive) {
         for (let address = vbxe.page; address < vbxe.page + 0x20; address++) {
           CPU.setIo(ctx, address, ioAccess);
         }
@@ -290,26 +339,47 @@
         for (let address = configBase; address < configBase + 0x40; address++) {
           CPU.setIo(ctx, address, ioAccess);
         }
-        if (vbxeMemacAddress) {
-          for (let address = 0; address < 0xd000; address++) {
-            if (vbxeMemacAddress(vbxe, address, false) >= 0 &&
-                ctx.accessFunctionList[address] === ramAccess) {
-              const expansion = ctx.ioData.memoryExpansion;
-              if (!(expansion && expansion.ultimate1mb && expansion.cpuWindowEnabled &&
-                    address >= 0x4000 && address < 0x8000)) {
-                CPU.setIo(ctx, address, ioAccess);
-                if (fetchMask === null) fetchMask = new Uint8Array(0x10000);
-                fetchMask[address] = 1;
-              }
+        for (let w = 0; w < windows.length; w += 3) {
+          const start = windows[w];
+          const end = windows[w + 1];
+          routed.push(start, end);
+          if (!windows[w + 2]) {
+            uniform.push(false);
+            continue;
+          }
+          let allRam = true;
+          for (let address = start; address < end; address++) {
+            if (list[address] !== ramAccess) { allRam = false; break; }
+          }
+          if (fetchMask === null) {
+            fetchMask = ctx.vbxeFetchMaskStore ||
+              (ctx.vbxeFetchMaskStore = new Uint8Array(0x10000));
+          }
+          if (allRam && !(u1mbWindow && start < 0x8000 && end > 0x4000)) {
+            list.fill(ioAccess, start, end);
+            fetchMask.fill(1, start, end);
+            uniform.push(true);
+            continue;
+          }
+          uniform.push(false);
+          for (let address = start; address < end; address++) {
+            if (list[address] === ramAccess &&
+                !(u1mbWindow && address >= 0x4000 && address < 0x8000)) {
+              CPU.setIo(ctx, address, ioAccess);
+              fetchMask[address] = 1;
             }
           }
         }
-        if (vbxeRamboAddress && vbxe.profile === "fx1.26r") {
+        if (rambo) {
+          routed.push(0x4000, 0x8000);
+          uniform.push(false);
           for (let address = 0x4000; address < 0x8000; address++) {
-            if (ctx.accessFunctionList[address] === ramAccess) CPU.setIo(ctx, address, ioAccess);
+            if (list[address] === ramAccess) CPU.setIo(ctx, address, ioAccess);
           }
         }
       }
+      ctx.vbxeRoutedRanges = routed;
+      ctx.vbxeRoutedUniform = uniform;
       ctx.vbxeFetchMask = fetchMask;
       ctx.vbxeFetchRead = fetchMask === null ? null : function (fetchCtx, address) {
         const local = vbxeMemacAddress(vbxe, address, false);

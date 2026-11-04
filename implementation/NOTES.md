@@ -1,5 +1,143 @@
 # NOTES.md
 
+- 2026-11-04 (revisión AHRM y generalidad): revisados los cambios de esta
+  sesión contra el AHRM. Corregido: la máscara de colisión de bytes del
+  blitter usaba `(valor-1)>>5`; el AHRM 12.4 dice bit 0 = `$01-1F`, bit 1 =
+  `$20-3F`, es decir `valor>>5` (también lo hace Altirra). Corregido: el
+  arranque a mitad de línea del blitter ahora resta el DMA de pantalla de esa
+  línea (overlay, XDL, recarga del mapa de atributos) en vez de usar todo el
+  tiempo restante. Documentadas como desviaciones deliberadas del texto del
+  AHRM, ambas por Altirra y por software real: polaridad de `VIDEO_CONTROL` D2
+  y bits de `MEMAC_B_CONTROL` (D7 CPU, D6 ANTIC; el AHRM los da al revés). Ningún
+  cambio depende de un título: todos son reglas del dispositivo o optimizaciones
+  que conservan la salida (verificado píxel a píxel en Mr. Proper). El marcador
+  `vbxe_blitter_short_overlay_timing_boot` pasó de VCOUNT 56 a 57 por el
+  descuento del DMA; la prueba no fija el valor y la dispersión documentada
+  frente a Altirra ya era de una muestra.
+
+- 2026-11-04 (Mr. Proper: frutas que no se comen, y rendimiento con MEMAC B):
+  `mrproper_vbxe.xex` arranca y dibuja, pero el usuario veía frutas que no
+  podían comerse y bloques repetidos. Causa: el juego lee `BLT_COLLISION_CODE`
+  (`$D650`) a los pocos ciclos de escribir `BLITTER_START` (`$25da`-`$25e2`,
+  sin esperar a que termine el blit) y guarda el resultado en el objeto. En
+  Altirra (`vbxe.cpp`, caso `0x53` de `WriteControl`) el arranque carga el BCB
+  y ejecuta de inmediato lo que quede de la línea de exploración
+  (`maxBlitTime = (mBlitterEndScanTime - ahora) * 8`), así que las primeras
+  filas del sprite ya han detectado colisión cuando el juego lee el registro.
+  Nosotros dábamos el presupuesto de la línea completa al final de la línea,
+  por lo que `$D650` valía casi siempre 0 (1823 de ~1900 lecturas) y la
+  detección nunca disparaba. Ahora `io.js` llama a `startBlitterMidLine` al
+  escribir `BLITTER_START` con el blitter parado: se ejecutan
+  `(114 - ciclo de línea) * 8` slots sin calendario de bus, se marca
+  `blitterEarlyRun` para que el presupuesto de esa línea no se gaste dos veces
+  (`antic.js`) y, si el blit termina, la IRQ de fin se coloca en su ciclo.
+  Con el cambio, 1021 de ~2000 lecturas son distintas de 0. Prueba nueva:
+  `vbxe_blitter_midline_start.test.js` (en `test:vbxe`). Las demás pruebas de
+  temporización del blitter siguen pasando (la inestable
+  `vbxe_blitter_attrmap_phase_boot` falla igual con y sin el cambio, 3 de 4
+  ejecuciones bajo carga).
+  Los fotogramas con manchas verdes y banda cian que aparecen en Mr. Proper
+  también salen en Altirra (comprobado capturando ambos), no son un artefacto.
+  Rendimiento: el juego escribe `$D65D` (MEMAC B) dos veces por blit, unas 21
+  llamadas a `installIoHandlers` por fotograma, y cada una recorría 16 K
+  direcciones llamando a `vbxeMemacAddress` (11,6 % del perfil de Node).
+  `installIoHandlers` ahora decide por rango con los bits de habilitación de
+  CPU, rellena el rango entero con `fill` cuando todo era RAM y no se
+  reconstruye si el conjunto de ventanas no ha cambiado (`onlyIfChanged`, solo
+  desde `syncVbxeWindows`; la reconstrucción del mapa de memoria sigue
+  recorriendo dirección a dirección para no pisar ROM). `applyPlayfieldAttributes`
+  consulta la celda del mapa de atributos una vez por tramo de celda y tiene
+  camino rápido para celdas sin Rev (la cadena de Rev solo se evalúa en celdas
+  Rev); las celdas decodificadas se guardan en el propio búfer de la fila.
+  Mr. Proper en Node: 42 a 51 fps; la salida es idéntica píxel a píxel antes y
+  después. Firefox 158 sin ventana, hilo principal, 60 fps con callbacks de
+  media 10 ms pero p95 de 29 ms y máximo de 58 ms (tirones); en modo worker
+  60 fps con el hilo principal casi libre. Sigue habiendo unas 45 recogidas de
+  basura por 300 fotogramas en Mr. Proper (frente a 1 en BASIC y 6-16 en otros
+  juegos VBXE), repartidas entre `renderXdlLine`, el mapa de atributos y el
+  blitter; no se localizó la fuente exacta de la asignación. El A8E nativo no
+  implementa VBXE, así que no hay nada que portar.
+
+- 2026-11-04 (rendimiento, segunda ronda): el perfil de CPU tomado dentro de
+  Chromium (CDP `Profiler`, no el de Node) mostró que lo más caro no era VBXE
+  sino `drawPlayerMissilesClock` de GTIA (36 %): se ejecuta en cada color
+  clock de cada línea aunque no haya jugadores ni misiles. Ahora sale al
+  principio cuando ningún registro de desplazamiento tiene bits, nada puede
+  cargarse en el tramo (`pmgMayReloadInSpan`) y no hay puesta al día de
+  tramos anteriores pendiente; el bucle por píxel y la mezcla de colisiones
+  no cambiaban nada en ese caso. El mismo arreglo está en el A8E nativo
+  (`AtariIo_PmgMayReloadInSpan`). Otros cambios en VBXE: `attributeMapPf3MaskBit`
+  sale al instante con máscara vacía (era el 32 % del perfil de Node en D600)
+  y sin `Math.floor`; `installIoHandlers` solo recorre las direcciones que
+  MEMAC puede cubrir y reutiliza la máscara de captura (D600 reescribe un
+  registro MEMAC cada frame); `buildLocalBusSchedule` reutiliza su búfer;
+  `loadAttributeMapBuffer` copia con `set`; y `applyPlayfieldAttributes` hace
+  una sola pasada por píxel (las dos cadenas de decisión eran idénticas) y
+  escribe el mismo RGB en el plano nativo y en el legacy con las mismas guardas
+  que tenía cada pasada. Resultados (la máquina estaba saturada por otras
+  pestañas del usuario, carga 8-12, así que son cotas bajas): D600 en el
+  arnés Node 28 a 49 fps, Firefox 158 sin ventana 34 a 49 fps. La ocupación
+  del hilo en Chromium no es comparable entre ejecuciones con esa carga.
+  Lecciones: dejar procesos de medida vivos (un Firefox sin ventana siguió
+  ejecutando el demo) falsea todo lo que se mida después; hay que cerrar la
+  instancia y las pestañas CDP al terminar. El A8E nativo no se midió en
+  tiempo; su sonda `antic_graphics_modes_probe` ya fallaba antes con el mismo
+  mensaje (`TestPmgModeZeroPlayfieldMix`).
+
+- 2026-11-04 — Resumen de la sesión «VBXE con software real» (el detalle está
+  en las entradas siguientes, de la más nueva a la más antigua). Punto de
+  partida: casi todo el software VBXE real se quedaba en el cargador y D600,
+  Popeye y compañía iban lentos o no dibujaban. Resultado: Popeye jugable,
+  D600 correcto y a 60 fps en Chromium, Phoenix/Celeste/Galaga/Crysis/Falcon
+  funcionando. Causas, en el orden en que aparecieron:
+  1. Remapeo de ventanas MEMAC (RAM que no volvía a RAM al desactivar la
+     ventana; reconstrucción completa del mapa que borraba la RAM bajo el ROM).
+  2. Rendimiento: búsquedas `window.A8EVbxe` por byte de DMA, reescaneo de
+     912 slots por byte de blitter, `Math.*` en rutas calientes.
+  3. Lecturas de GTIA `$D01B-$D01E` (`$FF` en vez de `$0F`).
+  4. Polaridad de `VIDEO_CONTROL` D2 (transparencia) invertida respecto a
+     Altirra; el AHRM lo describe al revés.
+  5. Captura de instrucciones desde ventanas MEMAC (el CPU leía la RAM).
+  6. DLI espurio en el vblank (decisión de salida de región con VSCROL sin
+     comprobar línea visible). Portado también al A8E nativo, junto con (3).
+  Metodología que funcionó: (a) comparar con Altirra 4.40 en wine (`/run`,
+  depurador con F8, `ba w <dir>` para ver quién escribe una dirección,
+  `.writemem` para volcar 64 KiB, `.vbxe_xdl`, `.antic`, `.restart`) y con la
+  RAM de jsA8E; (b) pcHooks en jsA8E para contar y ordenar el flujo; (c) leer
+  del XEX la estructura del cargador (Popeye: 623 segmentos con descompresor
+  LZ en `$8E6A`); (d) la pila al entrar el VBI revela qué interrumpió; (e)
+  `Object.defineProperty` sobre una propiedad de `ioData` para ver quién la
+  escribe; (f) medir fps en el arnés Node, en una pestaña nueva de Chromium
+  por CDP (puerto 9222, `Page.bringToFront`, `Performance.getMetrics`) y en
+  Firefox por WebDriver BiDi (puerto 9223).
+  Trampas: en el arnés headless cada acceso a un global (`window.X`, `Math`)
+  es una búsqueda lenta del contexto `vm`, así que sobrestima ese coste frente
+  al navegador; varios archivos mezclan saltos de línea CRLF y LF (editar por
+  bytes y revisar `git diff --stat`); `pkill -f`/`pgrep -f` con un patrón
+  presente en la propia orden mata la shell; un script propio llamado `dis.py`
+  sombrea el módulo `dis` de Python; las pruebas `phase_boot` y similares
+  usan timeouts de reloj y fallan de forma intermitente con la máquina
+  cargada; `vbxe_fx124_priority_probe_boot` ya fallaba antes de esta sesión.
+  Pendiente: gates `vbxe_real_software_scene` que esperen al fin de la carga,
+  Firefox (≈2x más lento que Chromium), y comparar Galaga/Crysis/Falcon/
+  Phoenix/Celeste con Altirra.
+
+- 2026-11-04: A8E nativo: portados los dos arreglos de núcleo hechos en
+  jsA8E; los de VBXE no aplican porque el nativo no implementa VBXE.
+  (1) `AtariIo.c`: la decisión de DLI de salida de región con VSCROL (ciclo
+  6) solo se evalúa en las líneas 8-247; sin esa guarda un último comando de
+  lista `$94` tras `$B4` dejaba `bModeLineExitDli` activo y ANTIC levantaba
+  un DLI en cada línea 249-261 (en Popeye bloqueaba el juego). (2) Tabla de
+  registros de GTIA: `PRIOR`, `VDELAY`, `GRACTL` y `HITCLR` leen `$0F`, no
+  `$FF` (AHRM 6.1). Pruebas: `TestExitDliIsNotArmedInVerticalBlank` en
+  `antic_timing_probe.c` y `TestUnassignedReadsReturnF` en
+  `gtia_consol_probe.c` (fallan sin los arreglos). La sonda existente
+  `TestVscrolExitDliDeadlineCycle5` ahora fija una línea visible (100) antes
+  de armar el DLI. CTest ejecuta con la raíz del repositorio como directorio
+  de trabajo y necesita los ROM allí; se comprobó con enlaces temporales.
+  Líneas base ya rotas en el nativo, no relacionadas:
+  `antic_graphics_modes_probe` y `pokey_sio_contract_probe`.
+
 - 2026-11-04: Popeye ya avanza y se puede usar: tras el título y la tabla de
   puntuaciones llega a la pantalla de juego con todos los colores. El
   bloqueo era un DLI espurio en el vblank. `clockAction`

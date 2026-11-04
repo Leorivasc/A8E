@@ -7,6 +7,11 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- Browser regression tests for MEMAC windows (`vbxe_memac_window_sync`,
+  `vbxe_memac_code_fetch`), GTIA unassigned reads
+  (`gtia_unassigned_reads`), and a vertical-blank exit-line DLI case in
+  `antic_vscrol_timing`; native probes `TestExitDliIsNotArmedInVerticalBlank`
+  and `TestUnassignedReadsReturnF`.
 - Native and browser support for the AHRM 130XE, RAMBO, COMPY, and initial
   Ultimate1MB memory profiles, including native memory-expansion regression
   probes and the reusable `U1MB_MEMORY_TEST.XEX` and `MEMORY_STRESS_TEST.XEX`
@@ -14,7 +19,31 @@ All notable changes to this project will be documented in this file.
 - Browser headless automation and MCP coverage for grouped lifecycle, media,
   debugger, HostFS, assembler, snapshot, artifact, and memory-profile flows.
 
+### Fixed
+- VBXE `BLITTER_START` now runs the rest of the current scanline's blitter
+  budget immediately, as Altirra does, so software that polls
+  `BLT_COLLISION_CODE` right after starting a blit (Mr. Proper's fruit pickup)
+  sees collisions found in the first rows. Regression test
+  `vbxe_blitter_midline_start`.
+
 ### Changed
+- Faster VBXE paths for software that toggles MEMAC windows or uses attribute
+  maps on every line: MEMAC B remapping is decided per window, the attribute
+  map is looked up once per cell run, and decoded cells are kept on the row
+  buffer.
+- VBXE `VIDEO_CONTROL` D2 now follows Altirra: overlay color 0 is transparent
+  with D2 clear (the reset value) and opaque with D2 set. The AHRM validation
+  programs and their `.XEX` artifacts were updated to keep each test's intent.
+- VBXE performance: the MEMAC reader resolves the VBXE API once, the blitter no
+  longer rescans the local-bus schedule for every byte, attribute-map cells are
+  cached per line, and per-byte/per-pixel paths avoid `Math.*`. D600 runs at
+  60 fps in Chromium and about 4x faster in the headless harness.
+- GTIA player/missile drawing returns early when no player or missile can draw
+  or load in the current color-clock span (previously about a third of frame
+  time in Chromium even with none in use); applied to `jsA8E` and native `A8E`.
+  VBXE attribute-map composition decides each pixel once for both planes and
+  skips the PF3-mask math when the mask is empty; MEMAC register writes only
+  revisit the addresses a window can cover.
 - Documentation now consistently states that Atari 800 XL PAL/NTSC hardware-emulation implementation work should use `AHRM/index.md` as the reference baseline (applied across non-AHRM Markdown docs).
 - Native `A8E` build caption/version is now injected at compile time from `jsA8E/version.json` (with `dev` fallback when unavailable).
 - Browser `jsA8E` frame timing now accumulates CPU cycles and runs whole-frame steps with capped catch-up to reduce visible speed jitter.
@@ -27,6 +56,17 @@ All notable changes to this project will be documented in this file.
   patches.
 
 ### Fixed
+- VBXE MEMAC: addresses a window stopped covering now return to plain RAM, and
+  writing MEMAC registers only reinstalls the windows instead of rebuilding the
+  memory map (which discarded RAM written under the OS ROM). Together these
+  were why most real VBXE XEXs never got past their loader.
+- CPU instruction fetch now honors VBXE MEMAC windows, so code executed from a
+  window onto VRAM (Popeye) runs from VRAM instead of the RAM underneath.
+- ANTIC no longer raises a DLI on every scan line 249-261 when the last display
+  list instruction is a VSCROL region exit with DLI; this deadlocked Popeye's
+  VBI handler. Fixed in `jsA8E` and in native `A8E`.
+- GTIA reads of `$D01B-$D01E` (`PRIOR`, `VDELAY`, `GRACTL`, `HITCLR`) return
+  `$0F` instead of `$FF`, per AHRM 6.1, in `jsA8E` and native `A8E`.
 - Native `A8E` now ignores out-of-range SDL keysyms (e.g. macOS Command/LGUI) when mapping to Atari key codes; previously hitting ⌘ would index past the key table and crash the emulator.
 - Hardened `jsA8E` SIO disk sector access checks across read/write/verify paths to reject invalid offsets consistently.
 - POKEY IRQ requests now follow level-sensitive source state when `IRQEN`

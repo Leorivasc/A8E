@@ -235,6 +235,20 @@ comparación con Altirra.
 **Estado: en progreso; el corpus headless ya tiene un gate visual de progreso,
 pero la comparación diferencial con Altirra sigue pendiente.**
 
+**Actualización 2026-11-04.** Con los arreglos de MEMAC (remapeo de ventanas y
+captura de instrucciones desde una ventana), la polaridad de transparencia de
+`VIDEO_CONTROL` D2 (la de Altirra: con D2 = 0 el color 0 del overlay es
+transparente) y el DLI espurio en el vblank, el corpus se comporta así: Popeye
+es jugable (título, menú, tabla de puntuaciones, partida), D600 se ve como en
+Altirra (fondo arcoíris + sprites del blitter; requiere BASIC apagado o
+ENTER + tecla), Phoenix y Celeste muestran su título y Galaga, Crysis y Falcon
+funcionan. Popeye y D600 se compararon visualmente con Altirra en wine. Falta
+convertir esto en gates reproducibles: los checkpoints de 480 frames de
+`vbxe_real_software_scene` solo ven el cargador de los XEX grandes (Phoenix
+~4200 frames, Popeye ~4800, Galaga ~19000), así que deben esperar al fin de la
+carga, pulsar teclas en los menús y exigir VBXE activa. Detalle en
+[`VBXE.md`](VBXE.md#real-software-status--2026-11-04).
+
 - Mantener las puertas de Popeye, Galaga, DACTest, Textmode Test, Crysis,
   Celeste, D600, Falcon y Phoenix.
 - Reforzar el harness XEX: `runXex({ awaitEntry: false })` y el avance de

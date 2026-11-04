@@ -98,6 +98,7 @@
     const pokeyPotReadValue = cfg.pokeyPotReadValue;
     const vbxeAccess = cfg.vbxeAccess;
     const vbxeSoftReset = cfg.vbxeSoftReset;
+    const vbxeStartBlitterMidLine = cfg.vbxeStartBlitterMidLine;
     const vbxeMemacAddress = cfg.vbxeMemacAddress;
     const vbxeRamboAddress = cfg.vbxeRamboAddress;
     const vbxeNoteMemacAccess = cfg.vbxeNoteMemacAccess;
@@ -452,8 +453,23 @@
         vbxeSoftReset(io.vbxe);
       }
       if (io && io.vbxe && io.vbxe.enabled && vbxeAccess) {
+        const blitterWasIdle = value != null && (value & 1) !== 0 &&
+          addr === io.vbxe.page + 0x13 && io.vbxe.blitterBusy === 0;
         const vbxeValue = vbxeAccess(io.vbxe, addr, value);
         if (vbxeValue !== null && vbxeValue !== undefined) {
+          if (blitterWasIdle && vbxeStartBlitterMidLine) {
+            // Eight local-bus slots per CPU cycle remain in this scanline.
+            const lineCycle = ((io.clock | 0) +
+              Math.max((ctx.currentInstructionCycles | 0) - 1, 0)) -
+              (io.displayListFetchCycle | 0);
+            const slotsLeft = (CYCLES_PER_LINE - Math.max(lineCycle, 0)) * 8;
+            const residual = vbxeStartBlitterMidLine(io.vbxe, slotsLeft, io.drawLine.vbxeLine);
+            if (residual >= 0) {
+              io.vbxeBlitterIrqCycle = io.displayListFetchCycle +
+                CYCLES_PER_LINE - (residual >> 3);
+              cycleTimedEventUpdate(ctx);
+            }
+          }
           if (value != null && addr === io.vbxe.page + 0x0a &&
               io.drawLine && io.drawLine.vbxeCollisionClearCycles) {
             const lineCycle = ((io.clock | 0) +

@@ -36,6 +36,12 @@ maps, MEMAC, blitter operations, completion IRQs, snapshots, and the supplied
 FX 1.26 software corpus. VBXE is disabled by default and uses the worker
 OffscreenCanvas when available, with main-thread fallback.
 
+Real software running in the browser core: the Popeye game (title, menu, and
+gameplay) and the D600 blitter demo, both compared visually with Altirra 4.40
+(D600 needs BASIC off, or ENTER plus a key, exactly as in Altirra), plus
+Phoenix, Celeste, Galaga, Crysis, and Falcon. The native `A8E` does not
+implement VBXE.
+
 This is functional compatibility, not a claim of complete hardware or
 pixel-perfect equivalence. Mid-scanline overlay/map composition, exact local
 bus phase timing, broader GTIA-special combinations, visual Altirra capture

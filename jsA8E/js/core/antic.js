@@ -503,7 +503,9 @@
           if (io.vbxe && vbxeAdvanceBlitter) {
             const blitterBudget = vbxeLocalBusBudget
               ? vbxeLocalBusBudget(io.vbxe, xdlLine, io.displayListFetchCycle) : 912;
-            vbxeAdvanceBlitter(io.vbxe, blitterBudget, true);
+            // A blit started earlier in this line already ran its share.
+            if (io.vbxe.blitterEarlyRun) io.vbxe.blitterEarlyRun = false;
+            else vbxeAdvanceBlitter(io.vbxe, blitterBudget, true);
             if (vbxeScheduleBlitterIrq) {
               const residual = vbxeScheduleBlitterIrq(io.vbxe);
               if (residual >= 0) {

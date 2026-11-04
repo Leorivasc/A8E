@@ -103,6 +103,7 @@
       blitterIrqPending: false,
       blitterIrqScheduled: false,
       blitterIrqResidual: 0,
+      blitterEarlyRun: false,
       memacSlots: 0,
       memacReadSlots: 0,
       memacWriteSlots: 0,
@@ -150,6 +151,7 @@
     state.blitterIrqPending = false;
     state.blitterIrqScheduled = false;
     state.blitterIrqResidual = 0;
+    state.blitterEarlyRun = false;
     state.memacSlots = 0;
     state.memacReadSlots = 0;
     state.memacWriteSlots = 0;
@@ -220,8 +222,13 @@
 
   function loadAttributeMapBuffer(state, xdl) {
     const buffer = new Uint8Array(43 * 4);
-    for (let i = 0; i < buffer.length; i++) {
-      buffer[i] = state.vram[(xdl.attributeAddress + i) & 0x7ffff];
+    const base = xdl.attributeAddress & 0x7ffff;
+    if (base + buffer.length <= state.vram.length) {
+      buffer.set(state.vram.subarray(base, base + buffer.length));
+    } else {
+      for (let i = 0; i < buffer.length; i++) {
+        buffer[i] = state.vram[(xdl.attributeAddress + i) & 0x7ffff];
+      }
     }
     xdl.attributeBuffer = buffer;
   }
@@ -250,8 +257,10 @@
     state.blitterBusy = 0x02;
   }
 
+  // AHRM 12.4: bit n enables destination values $20n-$20n+1F, with $00
+  // transparent (bit 0 therefore covers $01-1F, bit 1 covers $20-3F).
   function byteCollisionEnabled(mask, value) {
-    return value !== 0 && (mask & (1 << ((value - 1) >>> 5))) !== 0;
+    return value !== 0 && (mask & (1 << (value >>> 5))) !== 0;
   }
 
   function nibbleCollisionEnabled(mask, value) {
@@ -343,10 +352,10 @@
     return total < 1 ? 1 : total;
   }
 
-  function advanceBlitter(state, budget, deferIrq) {
+  function advanceBlitter(state, budget, deferIrq, unscheduled) {
     if (!state || !state.enabled || state.blitterBusy === 0) return 0;
     let remaining = Math.max(0, budget | 0);
-    const scheduled = state.localBusSchedule &&
+    const scheduled = !unscheduled && state.localBusSchedule &&
       state.localBusSchedule.length === LOCAL_BUS_SLOTS;
     // Free slots from the cursor onwards. Only consume() changes the
     // schedule while the blitter runs, so count once and keep it current
@@ -484,6 +493,21 @@
       loadCyclesRemaining: 21,
     };
     state.blitterBusy = 0x01;
+  }
+
+  // Altirra executes the rest of the current scanline's blitter budget as
+  // soon as BLITTER_START is written, so a guest that polls the collision
+  // code right after starting a blit already sees the rows completed in that
+  // slice. The line-end budget of this line is then consumed, not repeated.
+  // Returns the free slots left in the line when the blit completed (for the
+  // completion-IRQ position), or -1.
+  function startBlitterMidLine(state, slotsLeftInLine, line) {
+    if (!state || state.blitterBusy === 0) return -1;
+    state.blitterEarlyRun = true;
+    // The blitter only gets what display DMA leaves free (AHRM 12.4).
+    const free = LOCAL_BUS_SLOTS - lineDmaSlots(state, line);
+    advanceBlitter(state, Math.min(slotsLeftInLine, free), true, true);
+    return scheduleBlitterIrq(state);
   }
 
   function stopBlitter(state) {
@@ -716,17 +740,17 @@
     // five-bit vertical counter is advanced by nextXdlLine after each line.
     const buffer = line.attributeBuffer;
     const address = (column << 2) | 0;
-    // Every pixel of a cell shares the same four bytes, and the buffered row
-    // does not change during the line. Reuse the decoded cell; only the
-    // priority register is re-read because it can change between spans.
-    if (line.attributeCellCache === undefined ||
-        line.attributeCellCacheSource !== buffer) {
-      line.attributeCellCache = new Array(43);
-      line.attributeCellCacheSource = buffer;
+    // Every pixel of a cell shares the same four bytes, and a buffered row is
+    // never modified (a reload installs a new buffer). Keep the decoded cells
+    // on the buffer so they survive across the scanlines of a map row; only
+    // the priority register is re-read because it can change between spans.
+    let cache;
+    if (buffer) {
+      cache = buffer.cellCache;
+      if (cache === undefined) cache = buffer.cellCache = new Array(43);
     }
-    const cache = line.attributeCellCache;
-    const cached = cache[column];
-    if (cached !== undefined && buffer) {
+    const cached = buffer ? cache[column] : undefined;
+    if (cached !== undefined) {
       cached.priority = state.priority[cached.control & 0x03] & 0xff;
       return cached;
     }
@@ -759,13 +783,16 @@
   // the mask begins at the left edge of each scrolled cell and is sampled at
   // 1, 2, or 4 standard-resolution pixels per bit according to cell width.
   function attributeMapPf3MaskBit(line, standardX, mask) {
+    // Called for every pixel; most cells carry an empty mask.
+    if ((mask & 0xff) === 0) return false;
     const width = line.attributeCellWidth | 0;
     if (width < 1 || width > 32) return false;
     const rawScroll = line.attributeScrollX & 0x1f;
     const x = (standardX | 0) + (rawScroll >= width ? rawScroll - 32 : rawScroll);
-    const cellX = ((x % width) + width) % width;
+    const remainder = x % width;
+    const cellX = remainder < 0 ? remainder + width : remainder;
     const bitPixelWidth = width <= 8 ? 1 : (width <= 16 ? 2 : 4);
-    const bit = 7 - Math.floor(cellX / bitPixelWidth);
+    const bit = 7 - ((cellX / bitPixelWidth) | 0);
     return (mask & (1 << bit)) !== 0;
   }
 
@@ -1193,132 +1220,118 @@
     const atariBase = (scanline | 0) * 456 + signalStart;
     if (atariBase < 0 || atariBase + standardWidth > video.vbxeRgb.length) return;
     const extendedColor = (state.videoControlActive & 0x02) !== 0;
-    const renderLine = gtiaRegisters ? Object.assign({}, line, {
-      anticPf3: gtiaRegisters[7] & 0xff,
-      anticGtiaMode: (gtiaRegisters[9] >>> 6) & 0x03,
-    }) : line;
+    // The span's GTIA registers override two line fields while it renders;
+    // restore them at the end instead of copying the whole line object.
+    const renderLine = line;
+    const savedPf3 = line.anticPf3;
+    const savedGtiaMode = line.anticGtiaMode;
+    if (gtiaRegisters) {
+      line.anticPf3 = gtiaRegisters[7] & 0xff;
+      line.anticGtiaMode = (gtiaRegisters[9] >>> 6) & 0x03;
+    }
     const first = Math.max(0, x1 === undefined ? 0 : x1 | 0);
     const last = Math.min(standardWidth, x2 === undefined ? standardWidth : x2 | 0);
 
     // Mirror the final map color into the hires presentation plane, two
     // samples per standard-resolution pixel. The target width and source
     // position must follow the same narrow/normal/wide signal as the overlay.
+    // Both planes get the same color, so decide it once per pixel and write
+    // it to every plane whose overlay guard allows it.
     const nativeTarget = hiresTarget(video, scanline, signalWidth);
     const nativeAtariBase = (scanline | 0) * 456 + signalStart;
-    if (nativeTarget && nativeAtariBase >= 0 &&
-        nativeAtariBase + standardWidth <= video.priority.length) {
+    const writeNative = !!nativeTarget && nativeAtariBase >= 0 &&
+      nativeAtariBase + standardWidth <= video.priority.length;
+    if (writeNative) {
       // Direct state callers do not have renderXdlLine's off-overlay clear.
       if (x1 === undefined && (!line.mode || line.mode === "off")) {
         nativeTarget.pixels.fill(0, nativeTarget.rowBase,
           nativeTarget.rowBase + nativeTarget.width);
       }
-      for (let standardX = first; standardX < last; standardX++) {
-        const sourcePixel = nativeAtariBase + standardX;
-        const targetPixel = nativeTarget.base + standardX * 2;
-        // A legacy standard/lores overlay is still stored in vbxeRgb. Do not
-        // let a playfield override appear above it while that renderer path is
-        // migrated to the native plane.
-        const legacyOverlay = video.vbxeRgb[
-          atariBase + standardX
-        ];
-        if ((line.overlayEnabled !== false && nativeTarget.pixels[targetPixel] !== 0) ||
-            (line.overlayEnabled !== false && legacyOverlay !== 0)) continue;
-        const visible = video.vbxeCollisionPriority &&
-            (video.vbxeCollisionPriority[sourcePixel] & VBXE_CONTRIBUTOR_VALID) !== 0
-          ? video.vbxeCollisionPriority[sourcePixel] & ~VBXE_CONTRIBUTOR_VALID
-          : (video.priority ? video.priority[sourcePixel] : 0);
-        const map = attributeMapCell(state, renderLine, standardX);
-        if (!map) continue;
+    }
+    const overlayGuard = line.overlayEnabled !== false;
+    const anticHires = isAnticHiresSource(renderLine);
+    const cellWidth = renderLine.attributeCellWidth | 0;
+    const rawScroll = renderLine.attributeScrollX & 0x1f;
+    const effectiveScroll = rawScroll >= cellWidth ? rawScroll - 32 : rawScroll;
+    const collisionPriority = video.vbxeCollisionPriority;
+    const vbxeRgb = video.vbxeRgb;
+    const palette = state.palette;
+    let x = first;
+    while (x < last) {
+      // Every pixel of a map cell shares its four bytes, so look the cell up
+      // once per run. A negative scrolled position keeps using the first
+      // buffered cell until the counter reaches zero.
+      const scrolled = x + effectiveScroll;
+      let runEnd = cellWidth > 0
+        ? (scrolled < 0 ? -effectiveScroll : (((scrolled / cellWidth) | 0) + 1) * cellWidth - effectiveScroll)
+        : last;
+      if (runEnd > last || runEnd <= x) runEnd = last;
+      const map = attributeMapCell(state, renderLine, x);
+      if (!map) { x = runEnd; continue; }
+      const reverse = map.reverse;
+      for (; x < runEnd; x++) {
+        const pixel = atariBase + x;
+        // A visible overlay already has its final RGB value in this plane and
+        // must remain above the playfield override. A legacy standard/lores
+        // overlay is still stored in vbxeRgb, so it also guards the native
+        // plane while that renderer path is migrated.
+        const legacyOverlay = vbxeRgb[pixel];
+        const targetPixel = writeNative ? nativeTarget.base + x * 2 : 0;
+        const toNative = writeNative &&
+          !(overlayGuard && (nativeTarget.pixels[targetPixel] !== 0 || legacyOverlay !== 0));
+        const toLegacy = !(overlayGuard && legacyOverlay !== 0);
+        if (!toNative && !toLegacy) continue;
+        const visible = collisionPriority &&
+            (collisionPriority[pixel] & VBXE_CONTRIBUTOR_VALID) !== 0
+          ? collisionPriority[pixel] & ~VBXE_CONTRIBUTOR_VALID
+          : (video.priority ? video.priority[pixel] : 0);
         let color = -1;
-        if (map.reverse && isGtiaReverseBlackMode(renderLine) && isAnticHiresSource(renderLine) &&
-            reverseHiresColor(renderLine, map, video.anticSourceBits, sourcePixel) >= 0) {
-          // The raw GTIA mode-9/11 fields are visible without VBXE, but FX
-          // 1.26 composes these validated reversed cells as opaque palette 0.
+        if (!reverse) {
+          if (anticHires && (visible & PRIO_PF2) &&
+              attributeMapPf3MaskBit(renderLine, x, map.playfield0)) {
+            color = renderLine.anticPf3 & 0xff;
+          } else if (visible & PRIO_PF0) color = map.playfield0;
+          else if (visible & PRIO_PF1) color = map.playfield1;
+          else if (visible & PRIO_PF2) color = map.playfield2;
+        } else if (isGtiaReverseBlackMode(renderLine) && anticHires &&
+            reverseHiresColor(renderLine, map, video.anticSourceBits, pixel) >= 0) {
           color = 0;
-        } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresCharacterMode(renderLine)) {
-          color = reverseLoresMode10Color(map, video.anticSourceLores, sourcePixel);
-        } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresSelectorCharacterMode(renderLine) &&
-            hasReverseLoresSource(video.anticSourceLores, sourcePixel)) {
+        } else if (isGtiaMode10(renderLine) && isAnticLoresCharacterMode(renderLine)) {
+          color = reverseLoresMode10Color(map, video.anticSourceLores, pixel);
+        } else if (isGtiaMode10(renderLine) && isAnticLoresSelectorCharacterMode(renderLine) &&
+            hasReverseLoresSource(video.anticSourceLores, pixel)) {
           color = 0;
-        } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresGraphicsMode(renderLine)) {
+        } else if (isGtiaMode10(renderLine) && isAnticLoresGraphicsMode(renderLine)) {
           color = 0;
-        } else if (map.reverse && isGtiaMode9Or11(renderLine) && isAnticLoresCharacterMode(renderLine) &&
-            hasReverseLoresSource(video.anticSourceLores, sourcePixel)) {
+        } else if (isGtiaMode9Or11(renderLine) && isAnticLoresCharacterMode(renderLine) &&
+            hasReverseLoresSource(video.anticSourceLores, pixel)) {
           color = 0;
-        } else if (map.reverse && isGtiaMode9Or11(renderLine) && isAnticLoresSelectorCharacterMode(renderLine) &&
-            hasReverseLoresSource(video.anticSourceLores, sourcePixel)) {
+        } else if (isGtiaMode9Or11(renderLine) && isAnticLoresSelectorCharacterMode(renderLine) &&
+            hasReverseLoresSource(video.anticSourceLores, pixel)) {
           color = 0;
-        } else if (map.reverse && isGtiaMode9Or11(renderLine) && isValidatedGtia9Or11GraphicsMode(renderLine)) {
+        } else if (isGtiaMode9Or11(renderLine) && isValidatedGtia9Or11GraphicsMode(renderLine)) {
           color = 0;
-        } else if (map.reverse && !hasGtiaSpecialMode(renderLine) && isAnticHiresSource(renderLine)) {
-          color = reverseHiresColor(renderLine, map, video.anticSourceBits, sourcePixel);
-        } else if (map.reverse && !hasGtiaSpecialMode(renderLine) && isAnticLoresMode(renderLine)) {
-          color = reverseLoresColor(map, video.anticSourceLores, sourcePixel);
-        } else if (!map.reverse && isAnticHiresSource(renderLine) &&
-            (visible & PRIO_PF2) &&
-            attributeMapPf3MaskBit(renderLine, standardX, map.playfield0)) {
-          color = renderLine.anticPf3 & 0xff;
+        } else if (!hasGtiaSpecialMode(renderLine) && anticHires) {
+          color = reverseHiresColor(renderLine, map, video.anticSourceBits, pixel);
+        } else if (!hasGtiaSpecialMode(renderLine) && isAnticLoresMode(renderLine)) {
+          color = reverseLoresColor(map, video.anticSourceLores, pixel);
         } else if (visible & PRIO_PF0) color = map.playfield0;
         else if (visible & PRIO_PF1) color = map.playfield1;
         else if (visible & PRIO_PF2) color = map.playfield2;
         if (color === undefined || color === null || color < 0) continue;
         color = extendedColor ? color & 0xff : color & 0xfe;
         const p = ((map.playfieldPalette * 256 + color) * 3) | 0;
-        const rgb = ((255 << 24) | (state.palette[p + 2] << 16) |
-          (state.palette[p + 1] << 8) | state.palette[p]) >>> 0;
-        nativeTarget.pixels[targetPixel] = rgb;
-        nativeTarget.pixels[targetPixel + 1] = rgb;
+        const rgb = ((255 << 24) | (palette[p + 2] << 16) |
+          (palette[p + 1] << 8) | palette[p]) >>> 0;
+        if (toNative) {
+          nativeTarget.pixels[targetPixel] = rgb;
+          nativeTarget.pixels[targetPixel + 1] = rgb;
+        }
+        if (toLegacy) vbxeRgb[pixel] = rgb;
       }
     }
-
-    for (let x = first; x < last; x++) {
-      const pixel = atariBase + x;
-      // A visible overlay already has its final RGB value in this plane and
-      // must remain above the playfield override.
-      if (line.overlayEnabled !== false && video.vbxeRgb[pixel] !== 0) continue;
-      const visible = video.vbxeCollisionPriority &&
-          (video.vbxeCollisionPriority[pixel] & VBXE_CONTRIBUTOR_VALID) !== 0
-        ? video.vbxeCollisionPriority[pixel] & ~VBXE_CONTRIBUTOR_VALID
-        : (video.priority ? video.priority[pixel] : 0);
-      const standardX = x;
-      const map = attributeMapCell(state, renderLine, standardX);
-      if (!map) continue;
-      let color = -1;
-      if (map.reverse && isGtiaReverseBlackMode(renderLine) && isAnticHiresSource(renderLine) &&
-          reverseHiresColor(renderLine, map, video.anticSourceBits, pixel) >= 0) {
-        color = 0;
-      } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresCharacterMode(renderLine)) {
-        color = reverseLoresMode10Color(map, video.anticSourceLores, pixel);
-      } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresSelectorCharacterMode(renderLine) &&
-          hasReverseLoresSource(video.anticSourceLores, pixel)) {
-        color = 0;
-      } else if (map.reverse && isGtiaMode10(renderLine) && isAnticLoresGraphicsMode(renderLine)) {
-        color = 0;
-      } else if (map.reverse && isGtiaMode9Or11(renderLine) && isAnticLoresCharacterMode(renderLine) &&
-          hasReverseLoresSource(video.anticSourceLores, pixel)) {
-        color = 0;
-      } else if (map.reverse && isGtiaMode9Or11(renderLine) && isAnticLoresSelectorCharacterMode(renderLine) &&
-          hasReverseLoresSource(video.anticSourceLores, pixel)) {
-        color = 0;
-      } else if (map.reverse && isGtiaMode9Or11(renderLine) && isValidatedGtia9Or11GraphicsMode(renderLine)) {
-        color = 0;
-      } else if (map.reverse && !hasGtiaSpecialMode(renderLine) && isAnticHiresSource(renderLine)) {
-        color = reverseHiresColor(renderLine, map, video.anticSourceBits, pixel);
-      } else if (map.reverse && !hasGtiaSpecialMode(renderLine) && isAnticLoresMode(renderLine)) {
-        color = reverseLoresColor(map, video.anticSourceLores, pixel);
-      } else if (!map.reverse && isAnticHiresSource(renderLine) &&
-          (visible & PRIO_PF2) &&
-          attributeMapPf3MaskBit(renderLine, standardX, map.playfield0)) {
-        color = renderLine.anticPf3 & 0xff;
-      } else if (visible & PRIO_PF0) color = map.playfield0;
-      else if (visible & PRIO_PF1) color = map.playfield1;
-      else if (visible & PRIO_PF2) color = map.playfield2;
-      if (color === undefined || color === null || color < 0) continue;
-      color = extendedColor ? color & 0xff : color & 0xfe;
-      const p = ((map.playfieldPalette * 256 + color) * 3) | 0;
-      video.vbxeRgb[pixel] = ((255 << 24) | (state.palette[p + 2] << 16) |
-        (state.palette[p + 1] << 8) | state.palette[p]) >>> 0;
-    }
+    line.anticPf3 = savedPf3;
+    line.anticGtiaMode = savedGtiaMode;
   }
 
   function isAddress(state, address) {
@@ -1423,6 +1436,20 @@
     return remaining === 0;
   }
 
+  // Local-bus slots that display DMA takes from this scanline: overlay fetch,
+  // XDL entry and the attribute-map row reload (see buildLocalBusSchedule).
+  function lineDmaSlots(state, line) {
+    let slots = state.xdlSlots | 0;
+    if (line && line.overlayEnabled) {
+      const width = overlayWidthCode(line);
+      slots += line.mode === "text" ? OVERLAY_TEXT_SLOTS[width]
+        : OVERLAY_MACHINE_CYCLES[width] * (line.mode === "lores" ? 2 : 4);
+    }
+    if (line && line.attributeMapEnabled &&
+        (line.attributeMapReload || line.attributeRow === 0)) slots += 43 * 4;
+    return slots;
+  }
+
   function reserveOverlaySlots(schedule, line) {
     if (!line || !line.overlayEnabled) return 0;
     const width = overlayWidthCode(line);
@@ -1457,7 +1484,10 @@
   }
 
   function buildLocalBusSchedule(state, line, lineStartCycle) {
-    const schedule = new Uint8Array(LOCAL_BUS_SLOTS);
+    // Rebuilt every scanline; reuse the buffer instead of allocating one each time.
+    const schedule = state.localBusSchedule && state.localBusSchedule.length === LOCAL_BUS_SLOTS
+      ? state.localBusSchedule.fill(0)
+      : new Uint8Array(LOCAL_BUS_SLOTS);
     reservedLocalSlots = 0;
     reserveOverlaySlots(schedule, line);
     // AHRM 12.4 assigns local-bus phase 1 to reads and phase 3 to writes.
@@ -1766,6 +1796,7 @@
     powerCycle: powerCycle,
     verticalSync: verticalSync,
     advanceBlitter: advanceBlitter,
+    startBlitterMidLine: startBlitterMidLine,
     scheduleBlitterIrq: scheduleBlitterIrq,
     raiseScheduledBlitterIrq: raiseScheduledBlitterIrq,
     localBusBudget: localBusBudget,

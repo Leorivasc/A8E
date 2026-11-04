@@ -80,6 +80,57 @@ opaque palette color 0 throughout the mapped field. This is implemented for
 the complete 8-E graphics source family. In GTIA modes 9 and 11, the
 complete graphics modes 8-E are likewise opaque palette color 0.
 
+## Real-software status — 2026-11-04
+
+Behavior of the supplied FX 1.26 corpus in jsA8E after the MEMAC, transparency,
+GTIA-read, and vertical-blank fixes recorded in `NOTES.md`. "Compared" means a
+visual comparison against Altirra 4.40 running the same XEX under wine.
+
+| Software | State | Notes |
+| --- | --- | --- |
+| Popeye | Playable | Title, menu (`START` twice), "TOP FIVE CHART", and gameplay with colors. Code runs from a MEMAC A window; needed the instruction-fetch window path and the vertical-blank DLI fix. Compared. |
+| D600 blitter demo | Correct | Rainbow Atari-logo background (ANTIC mode F + attribute map, one color per line) with 24 chrome blitter sprites. Needs BASIC off: with BASIC on the program waits for a line from `E:` (Altirra behaves the same), so press ENTER and then any key, or enable Option-on-Start. Compared. |
+| Phoenix | Title screen | Image restored from VRAM into RAM through MEMAC A. |
+| Celeste | Title screen | |
+| Galaga, Crysis, Falcon | Confirmed running by the user | Crysis and Falcon are 320x480i. Not re-compared in this pass. |
+| DACTest, Textmode Test | Not re-checked | Covered by the existing launch gates. |
+
+Known gaps: the `vbxe_real_software_scene` gates still use 480-frame
+checkpoints and therefore only observe boot screens for the large XEXs (Phoenix
+needs about 4200 frames, Popeye about 4800, Galaga about 19000); they should
+wait for load completion, press keys at menus, and require VBXE to be active.
+`vbxe_fx124_priority_probe_boot` fails ("legacy bit 6 must win over PF2") and
+did before this pass. `vbxe_blitter_attrmap_phase_boot` is timing-sensitive and
+fails intermittently when the machine is loaded.
+
+Performance (headless Node harness unless stated): D600 went from about 8 fps
+to 27-45 fps and VBXE overhead on a text-mode XEX from 2.7x to roughly 1.1x.
+In Chromium (main thread, WebGL2) D600 holds 60 fps with the main thread about
+70% busy; the committed code before these fixes ran at 17 fps with the thread
+saturated. Firefox 158 reaches roughly 30-35 fps for D600 (a headless instance
+with software rendering, so not a clean comparison); the result is nearly
+identical with WebGL2, Canvas2D, and the worker, which points at the emulation
+core rather than drawing. The costs removed were per-DMA-byte `window.A8EVbxe`
+lookups, a 912-slot rescan of the local-bus schedule for every blitted byte, a
+per-line recount of free slots, and `Math.*` calls on per-pixel/per-byte paths.
+A CPU profile taken inside Chromium afterwards showed the largest remaining
+core cost was GTIA's per-color-clock player/missile pass (about a third of the
+time, even with no player/missile in use); it now returns early when nothing
+can draw or load in the span. VBXE-side follow-ups: an empty PF3 mask skips its
+per-pixel math, `installIoHandlers` only visits addresses MEMAC can cover,
+the local-bus schedule buffer and attribute-map line buffer copy are cheaper,
+and the attribute-map playfield pass decides each pixel once for both
+presentation planes. Remaining VBXE cost is dominated by the blitter loop and
+the per-pixel attribute-map composition.
+
+`mrproper_vbxe.xex` (2026-11-04): runs and draws. Its fruit pickup reads
+`BLT_COLLISION_CODE` a few cycles after writing `BLITTER_START`, without
+waiting for completion. Altirra executes the rest of the current scanline's
+blitter budget at START, so the first rows of the sprite have already been
+tested; `startBlitterMidLine` reproduces that, and the line-end budget of that
+line is then not spent a second time. The green/cyan garbage frames that show
+up in this game also appear in Altirra.
+
 ## Audit de cobertura — 2026-11-03
 
 La auditoría de limpieza de esta revisión no detectó funciones VBXE muertas ni
@@ -238,6 +289,15 @@ part of the conformance tests. `XDL_ADR0-2` and the XDL-enable bit of
 transparency bits of `VIDEO_CONTROL` apply immediately. A write must not
 change the active XDL halfway through a frame.
 
+`VIDEO_CONTROL` D2 has the polarity Altirra implements
+(`mbOvTrans = (value & 4) == 0`): with D2 clear, which is the reset value,
+overlay color 0 is transparent; with D2 set the overlay is opaque. D3 adds
+color `$F` (hires) or `$xF` (lores/standard) to the transparent set, and only
+takes effect while D2 is clear. The AHRM prose describes D2 the other way
+round; real software (the D600 demo and Popeye both write `VIDEO_CONTROL=3`
+and rely on an all-zero overlay being see-through) matches Altirra, and the
+implementation follows it (`overlayTransparency` in `vbxe.js`).
+
 The I/O layer must also notify VBXE of GTIA writes. It must do so without
 intercepting GTIA reads or altering existing GTIA access timing.
 
@@ -253,12 +313,26 @@ MEMAC is the bridge into that VRAM:
   its VRAM address is aligned to that size.
 - MEMAC B maps one 16 KiB CPU and/or ANTIC window at `$4000-$7FFF`;
   its CPU read/write enable is bit 7 and its ANTIC-DMA enable is bit 6.
+  (The AHRM prose lists D7 as ANTIC and D6 as CPU; like `VIDEO_CONTROL` D2,
+  this follows Altirra, which Mr. Proper and other real software rely on.)
 - MEMAC A wins when both windows match.
 - Neither window may override hardware I/O, ROM, or cartridge space. It only
   overlays eligible system RAM.
 - CPU and ANTIC enables are independent. ANTIC DMA must therefore use the
   VBXE mapping only when ANTIC access is enabled, not merely because the CPU
   sees the window.
+- CPU instruction fetch goes through the window too. Software may execute
+  code that lives in VRAM (Popeye decompresses its game code into an 8 KiB
+  MEMAC A window at `$9000-$AFFF` and jumps into it). The CPU core fetches
+  opcodes from `ctx.ram`, so `installIoHandlers` publishes `vbxeFetchMask`
+  (the addresses a CPU-enabled window routes to VRAM) and `run`/`executeOne`
+  stage the three instruction bytes from VRAM into `ctx.ram` for the duration
+  of that instruction, restoring them afterwards.
+- Moving or disabling a window must return every address it stopped covering
+  to plain RAM, and writing the MEMAC registers must only reinstall the
+  windows (`syncVbxeWindows`); rebuilding the whole memory map there reloads
+  RAM hidden under the OS ROM from a stale shadow and discards bytes the CPU
+  has just written.
 
 The mapping order must be explicit and tested against existing 130XE,
 RAMBO/COMPY, and Ultimate1MB windows. In particular, the AHRM specifies that
@@ -616,3 +690,17 @@ comparison.
 - Changing ANTIC's VBI/DLI ownership or GTIA's existing collision registers.
 - Claiming precise blitter throughput before local-memory arbitration exists.
 - Enabling the device by default or silently changing base Atari behavior.
+
+### Deliberate deviations from the AHRM prose
+
+Both follow Altirra 4.40 and are required by real VBXE software; each is a
+hardware-level rule, not a per-title workaround.
+
+- `VIDEO_CONTROL` D2: clear makes overlay color 0 transparent.
+- `MEMAC_B_CONTROL`: D7 is CPU enable, D6 is ANTIC enable.
+
+Blitter collision masks follow the AHRM: bit n covers destination values
+`$20n-$20n+1F` (`$00` is transparent), so `$20` belongs to bit 1.
+`BLITTER_START` executes the rest of the current scanline's free local-bus
+budget at once (the AHRM only states that the blitter then runs
+concurrently); display DMA of that line is subtracted first.

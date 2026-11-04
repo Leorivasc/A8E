@@ -34,6 +34,11 @@ For the implementation contract, support matrix, diagrams, test commands, and
 stage exit criteria, see [`../implementation/VBXE.md`](../implementation/VBXE.md)
 and [`../implementation/VBXE_ROADMAP.md`](../implementation/VBXE_ROADMAP.md).
 
+Notes for running VBXE software: the D600 blitter demo asks `E:` for a line
+when BASIC is enabled, so enable Option-on-Start (BASIC off) or press ENTER
+and then a key, as in Altirra. Popeye needs `START` twice (title to menu, menu
+to game). Large XEXs load at normal SIO speed and take thousands of frames.
+
 VBXE regression commands:
 
 ```sh

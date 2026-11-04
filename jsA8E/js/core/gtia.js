@@ -349,6 +349,46 @@
       return (((hpos & 0xff) << 1) + PMG_POSITION_BIAS_PIXELS) | 0;
     }
 
+    // True when a player or missile with graphics data starts inside
+    // [from, to). Conservative: it ignores the two-pixel stepping of the draw
+    // loop, so it may say yes for a position the loop never lands on.
+    function pmgMayReloadInSpan(sram, from, to) {
+      let hpos;
+      if (sram[IO_GRAFP3_TRIG0] & 0xff) {
+        hpos = pmgStartX(sram[IO_HPOSP3_M3PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (sram[IO_GRAFP2_P3PL] & 0xff) {
+        hpos = pmgStartX(sram[IO_HPOSP2_M2PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (sram[IO_GRAFP1_P2PL] & 0xff) {
+        hpos = pmgStartX(sram[IO_HPOSP1_M1PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (sram[IO_GRAFP0_P1PL] & 0xff) {
+        hpos = pmgStartX(sram[IO_HPOSP0_M0PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      const missiles = sram[IO_GRAFM_TRIG1] & 0xff;
+      if (missiles & 0xc0) {
+        hpos = pmgStartX(sram[IO_HPOSM3_P3PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (missiles & 0x30) {
+        hpos = pmgStartX(sram[IO_HPOSM2_P2PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (missiles & 0x0c) {
+        hpos = pmgStartX(sram[IO_HPOSM1_P1PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (missiles & 0x03) {
+        hpos = pmgStartX(sram[IO_HPOSM0_P0PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      return false;
+    }
     function reloadPlayerShift(shiftState, stateState, index, data) {
       shiftState[index] = (shiftState[index] | data) & 0xff;
       stateState[index] = 0;
@@ -833,6 +873,25 @@
       const spanPixelStart = spanStart | 0;
       const spanPixelEnd = (spanPixelStart + 4) | 0;
       if (spanPixelEnd <= 0 || spanPixelStart >= PIXELS_PER_LINE) return;
+
+      // Nothing to draw: no shift register holds bits, nothing can load in this
+      // span, and no catch-up of earlier spans is pending. The per-pixel loop
+      // and the collision merge would change nothing, and this runs for every
+      // color clock of every line even with no player/missile in use, so it
+      // is checked before any per-call setup.
+      {
+        const drawState = io.drawLine;
+        const pShift = drawState.playerPmgShift;
+        const mShift = drawState.missilePmgShift;
+        if (
+          !drawState.pmgFirstVisibleSpan &&
+          (pShift[0] | pShift[1] | pShift[2] | pShift[3] |
+            mShift[0] | mShift[1] | mShift[2] | mShift[3]) === 0 &&
+          !pmgMayReloadInSpan(sram, spanPixelStart > 0 ? spanPixelStart : 0, spanPixelEnd)
+        ) {
+          return;
+        }
+      }
 
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;

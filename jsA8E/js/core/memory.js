@@ -1875,7 +1875,7 @@
       // map here would reload RAM hidden under ROM from sram, which is stale
       // while that RAM is visible, and discard bytes the CPU just wrote there.
       function syncVbxeWindows() {
-        installIoHandlers(machine.ctx, ioAccess);
+        installIoHandlers(machine.ctx, ioAccess, true);
       }
 
       function applyResetOverrides(options) {

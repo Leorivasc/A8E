@@ -472,6 +472,7 @@
           pokeySioCommandLineChanged: pokeySioCommandLineChanged,
           vbxeAccess: vbxeApi.access,
           vbxeSoftReset: vbxeApi.softReset,
+          vbxeStartBlitterMidLine: vbxeApi.startBlitterMidLine,
           vbxeMemacAddress: vbxeApi.memacAddress,
           vbxeRamboAddress: vbxeApi.ramboAddress,
           vbxeNoteMemacAccess: vbxeApi.noteMemacAccess,

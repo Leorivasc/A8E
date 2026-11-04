@@ -4567,6 +4567,58 @@ static u16 AtariIo_DrawMissileSpan(
 	return cCollision;
 }
 
+/* True when a player or missile with graphics data starts inside
+ * [lFrom, lTo).  Conservative: it ignores the two-pixel stepping of the draw
+ * loop, so it may report a position the loop never lands on.
+ */
+static u8 AtariIo_PmgMayReloadInSpan(_6502_Context_t *pContext, u32 lFrom, u32 lTo)
+{
+	u32 lHpos;
+	u8 cMissiles = SRAM[IO_GRAFM_TRIG1];
+
+	if(SRAM[IO_GRAFP3_TRIG0])
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSP3_M3PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(SRAM[IO_GRAFP2_P3PL])
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSP2_M2PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(SRAM[IO_GRAFP1_P2PL])
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSP1_M1PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(SRAM[IO_GRAFP0_P1PL])
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSP0_M0PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(cMissiles & 0xc0)
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSM3_P3PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(cMissiles & 0x30)
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSM2_P2PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(cMissiles & 0x0c)
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSM1_P1PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(cMissiles & 0x03)
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSM0_P0PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	return 0;
+}
+
 static void AtariIo_DrawPlayerMissilesClock(_6502_Context_t *pContext)
 {
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
@@ -4607,6 +4659,26 @@ static void AtariIo_DrawPlayerMissilesClock(_6502_Context_t *pContext)
 
 	lSpanEndX = MIN(lSpanStartX + 4, PIXELS_PER_LINE);
 	lVisibleSpanStartX = lSpanStartX;
+
+	/* Nothing to draw: no shift register holds bits, nothing can load in this
+	 * span, and no catch-up of earlier spans is pending.  The per-pixel loop
+	 * and the collision merge would change nothing, and this runs for every
+	 * color clock of every line even with no player/missile in use.
+	 */
+	if(!pIoData->tDrawLineData.cPmgFirstVisibleSpan &&
+	   (pIoData->tDrawLineData.aPlayerPmgShift[0] |
+	    pIoData->tDrawLineData.aPlayerPmgShift[1] |
+	    pIoData->tDrawLineData.aPlayerPmgShift[2] |
+	    pIoData->tDrawLineData.aPlayerPmgShift[3] |
+	    pIoData->tDrawLineData.aMissilePmgShift[0] |
+	    pIoData->tDrawLineData.aMissilePmgShift[1] |
+	    pIoData->tDrawLineData.aMissilePmgShift[2] |
+	    pIoData->tDrawLineData.aMissilePmgShift[3]) == 0 &&
+	   !AtariIo_PmgMayReloadInSpan(pContext, lVisibleSpanStartX, lSpanEndX))
+	{
+		return;
+	}
+
 	pLineDestination =
 		(u8 *)pIoData->tVideoData.pSdlAtariSurface->pixels +
 		lDisplayLine * PIXELS_PER_LINE;
