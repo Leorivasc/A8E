@@ -165,7 +165,10 @@ writeBlock(0x3e0, [
 ]);
 start(0x3e0, false);
 vbxe.advanceBlitter(state, 22);
-assert.equal(state.vram[0x281], 0x5a, "constant mode-0 fill takes one output cycle");
+assert.equal(state.vram[0x281], 0,
+  "constant mode-0 fill charges its initial source fetch separately");
+vbxe.advanceBlitter(state, 1);
+assert.equal(state.vram[0x281], 0x5a, "constant mode-0 fill takes one output cycle after setup");
 
 // The local-bus budget starts at 912 cycles and reserves AHRM DMA consumers
 // before the low-priority blitter. The FX scheduler charges each overlay
@@ -180,6 +183,71 @@ assert.equal(vbxe.localBusBudget(state, {
   attributeScrollY: 0, attributeCellHeight: 8,
 }), 372, "busy standard line reserves FX aggregate overlay bandwidth");
 assert.equal(state.memacSlots, 0, "scanline budget consumes recorded MEMAC slots");
+assert.equal(state.localBusSchedule.reduce((count, slot) => count + (slot !== 0 ? 1 : 0), 0), 540,
+  "phase schedule reserves the same local cycles as the aggregate budget");
+assert.equal(state.localBusSchedule[18], 1,
+  "normal overlay starts on an even local-bus phase");
+assert.equal(state.localBusSchedule[19], 0,
+  "normal overlay leaves the adjacent odd phase available");
+assert.equal(state.localBusSchedule[1], 1,
+  "MEMAC occupies an odd read phase");
+assert.equal(state.localBusSchedule[658], 1,
+  "the fixed XDL update follows the active overlay region");
+assert.equal(state.localBusSchedule[680], 1,
+  "the attribute-map fetch follows the XDL update");
+
+// Altirra's kOvDMAStart is indexed Narrow=0, Normal=1, Wide=2. Keep the
+// phase schedule aligned for all widths, not only the normal-width case above.
+const overlayStartCases = [
+  { width: 0, start: 10 },
+  { width: 1, start: 18 },
+  { width: 2, start: 26 },
+];
+const overlayStartState = vbxe.createState("fx1.26");
+for (const item of overlayStartCases) {
+  vbxe.localBusBudget(overlayStartState, {
+    mode: "standard", overlayEnabled: true, overlayWidth: item.width,
+  });
+  assert.equal(overlayStartState.localBusSchedule[item.start], 1,
+    "overlay width " + item.width + " starts at the Altirra DMA phase");
+  assert.equal(overlayStartState.localBusSchedule[item.start - 2], 0,
+    "overlay width " + item.width + " leaves the preceding even phase free");
+}
+
+state.memacReadSlots = 0;
+state.memacWriteSlots = 2;
+state.memacSlots = 2;
+assert.equal(vbxe.localBusBudget(state, null), 910,
+  "two MEMAC writes reserve two local slots");
+assert.equal(state.localBusSchedule[1], 0,
+  "MEMAC writes do not consume the read phase");
+assert.equal(state.localBusSchedule[3], 1,
+  "the first MEMAC write occupies phase three");
+assert.equal(state.localBusSchedule[11], 1,
+  "the second MEMAC write occupies the next write phase");
+
+// Timestamped MEMAC events retain their horizontal position for diagnostics
+// and local-bus scheduling. The phase is still derived from the AHRM access
+// kind: reads at phase 1, CPU writes at phase 3.
+const timed = vbxe.createState("fx1.26");
+vbxe.noteMemacAccess(timed, "antic-read", 104, 100);
+vbxe.noteMemacAccess(timed, "cpu-write", 105, 100);
+assert.equal(vbxe.localBusBudget(timed, null, 100), 910,
+  "timestamped MEMAC accesses reserve two local slots");
+assert.equal(timed.localBusSchedule[33], 1,
+  "ANTIC read keeps its horizontal phase-one slot");
+assert.equal(timed.localBusSchedule[43], 1,
+  "CPU write keeps its horizontal phase-three slot");
+assert.deepEqual(vbxe.getMemacTrace(timed).map(event => ({
+  kind: event.kind,
+  phase: event.phase,
+  cpuCycle: event.cpuCycle,
+  lineCycle: event.lineCycle,
+  localSlot: event.localSlot,
+})), [
+  { kind: "antic-read", phase: 1, cpuCycle: 104, lineCycle: 4, localSlot: 33 },
+  { kind: "cpu-write", phase: 3, cpuCycle: 105, lineCycle: 5, localSlot: 43 },
+]);
 
 assert.equal(vbxe.localBusBudget(state, {
   mode: "lores", overlayEnabled: true, overlayWidth: 0,

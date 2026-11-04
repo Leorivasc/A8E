@@ -78,7 +78,8 @@ vbxe.access(state, 0xd640, 0x0f);
 vbxe.access(state, 0xd641, 0x34);
 vbxe.access(state, 0xd642, 0x12);
 vbxe.access(state, 0xd643, 0x07);
-assert.equal(state.videoControlActive, 0);
+assert.equal(state.videoControlActive, 0x0e,
+  "VIDEO_CONTROL transparency and extended color apply before VSync");
 assert.equal(state.xdlAddressActive, 0);
 vbxe.verticalSync(state);
 assert.equal(state.videoControlActive, 0x0f);
@@ -159,14 +160,31 @@ vbxe.verticalSync(state);
 for (let row = 0; row < 8; row++) {
   const textLine = vbxe.nextXdlLine(state, 8 + row);
   assert.equal(textLine.mode, "text");
-  assert.equal(textLine.address, 0x1000);
+  assert.equal(textLine.address, row >= 4 ? 0x10a0 : 0x1000);
   assert.equal(textLine.stride, 0xa0);
   assert.equal(textLine.characterBase, 0x10000);
   assert.equal(textLine.textScrollX, 3, "text horizontal scroll is three bits");
   assert.equal(textLine.textScrollY, 4, "text vertical scroll is three bits");
-  assert.equal(textLine.textRow, row);
+  assert.equal(textLine.textRow, (4 + row) & 7);
 }
 assert.equal(state.xdl.overlayAddress, 0x10a0);
+// A new text entry starts at its own vertical scroll row. The previous entry
+// must not leak its current character row into the new entry.
+state.xdlAddressPending = 0x44;
+state.vram.set([0xe1, 0x81, 0x07, 0x00, 0x10, 0x00, 0x40, 0x00, 0x03, 0x04, 0x00], 0x44);
+vbxe.verticalSync(state);
+const scrolledTextLine = vbxe.nextXdlLine(state, 8);
+assert.equal(scrolledTextLine.mode, "text");
+assert.equal(scrolledTextLine.textRow, 4,
+  "a new XDL text entry starts at OvScrollY");
+
+// Control bits 0-1 set to 3 are disabled by Altirra's mode table.
+state.xdlAddressPending = 0x48;
+state.vram.set([0x03, 0x10], 0x48);
+vbxe.verticalSync(state);
+assert.equal(vbxe.nextXdlLine(state, 8), null,
+  "the invalid combined graphics/text mode is disabled");
+
 // Attribute-map optional blocks preserve an address/4-byte stride, layout,
 // and the per-line map state. Bit 3 of control byte 0 enables the map.
 state.xdlAddressPending = 0x50;
@@ -189,6 +207,9 @@ assert.equal(attributeLine.attributeCellHeight, 8);
 assert.equal(attributeLine.attributeRow, 0);
 assert.equal(attributeLine.attributeMapReload, true,
   "AtMapOn/address update starts with a freshly buffered map row");
+state.vram[0x2000] = 0x7e;
+assert.equal(vbxe.attributeMapCell(state, attributeLine, 0).playfield0, 0,
+  "attribute-map rendering uses the fetched 43-cell line buffer");
 // A repeat count is the number of additional lines, so $BF supplies this
 // attribute-map entry for 192 scanlines in total before the following XDL
 // entry is fetched.
@@ -210,6 +231,28 @@ assert.equal(vbxe.nextXdlLine(state, 200), null,
 assert.equal(state.xdl.ended, true, "End terminates the XDL");
 assert.equal(state.xdl.attributeMapEnabled, false, "AtMapOff clears the map before End");
 assert.equal(state.xdl.address, 0x8a, "termination entry is fetched after the repeated field");
+// A repeated XDL entry must refill the 43-cell line buffer after the
+// attribute row counter wraps. Otherwise the first line of the next map row
+// would keep rendering the previous row's cells.
+const mapRepeatState = vbxe.createState("fx1.26");
+mapRepeatState.videoControlPending = 1;
+mapRepeatState.xdlAddressPending = 0x100;
+mapRepeatState.vram.set([
+  0x28, 0x02, 0x08, // AtMapOn + repeat, eight additional lines.
+  0x00, 0x20, 0x00, // Attribute map address $02000.
+  0x04, 0x00,       // Four-byte row stride.
+], 0x100);
+mapRepeatState.vram[0x2000] = 0x11;
+mapRepeatState.vram[0x2004] = 0x22;
+vbxe.verticalSync(mapRepeatState);
+const firstMapRow = vbxe.nextXdlLine(mapRepeatState, 8);
+assert.equal(vbxe.attributeMapCell(mapRepeatState, firstMapRow, 0).playfield0, 0x11);
+for (let line = 1; line < 8; line++) vbxe.nextXdlLine(mapRepeatState, 8 + line);
+const secondMapRow = vbxe.nextXdlLine(mapRepeatState, 16);
+assert.equal(secondMapRow.attributeMapReload, true,
+  "the wrapped repeated line refills the attribute-map buffer");
+assert.equal(vbxe.attributeMapCell(mapRepeatState, secondMapRow, 0).playfield0, 0x22,
+  "the wrapped line must use the next buffered map row");
 // AHRM keeps the overlay and attribute-map address/stride latches across the
 // next VSync restart. The visual XDL latches still return to their defaults,
 // and a later entry can explicitly replace either address block.
@@ -229,6 +272,7 @@ assert.equal(state.xdl.overlayAddress, 0x3040,
   "the overlay address advances after the first active line");
 
 state.xdlAddressPending = 0xb0;
+state.xdl.characterBase = 0x10000;
 state.vram.set([0x0a, 0x00], 0xb0);
 vbxe.verticalSync(state);
 const carriedAddressLine = vbxe.nextXdlLine(state, 8);
@@ -244,6 +288,8 @@ assert.equal(carriedAddressLine.attributeStride, 0xa0,
   "VSync must preserve the attribute-map stride");
 assert.equal(carriedAddressLine.overlayWidth, 1,
   "VSync still resets visual XDL parameters to defaults");
+assert.equal(carriedAddressLine.characterBase, 0x10000,
+  "the character-base latch remains available after VSync");
 // XDLC_END takes effect after, rather than instead of, the terminating
 // entry's repeat count. Altirra keeps the decoded mode active for both lines.
 state.xdlAddressPending = 0x90;
@@ -253,6 +299,20 @@ assert.equal(vbxe.nextXdlLine(state, 8).mode, "standard");
 assert.equal(vbxe.nextXdlLine(state, 9).mode, "standard");
 assert.equal(vbxe.nextXdlLine(state, 10), null,
   "End must stop only after the final repeated line");
+
+// Warm reset stops presentation but preserves the address/stride latches used
+// by the next XDL restart, matching Altirra WarmReset.
+state.xdl.overlayAddress = 0x23450;
+state.xdl.overlayStride = 0x120;
+state.xdl.attributeAddress = 0x34560;
+state.xdl.attributeStride = 0x1a0;
+state.xdl.characterBase = 0x1c000;
+vbxe.softReset(state);
+assert.equal(state.xdl.overlayAddress, 0x23450);
+assert.equal(state.xdl.overlayStride, 0x120);
+assert.equal(state.xdl.attributeAddress, 0x34560);
+assert.equal(state.xdl.attributeStride, 0x1a0);
+assert.equal(state.xdl.characterBase, 0x1c000);
 state.vram[0x1000] = 0x02;
 state.palette.set([0x12, 0x34, 0x56], (256 + 2) * 3);
 const video = {
@@ -514,6 +574,39 @@ assert.equal(spanVideo.vbxeHiresRgb[1 * 672 + 16], 0xff332211,
   "native map span before PF3 write must use the line-start color");
 assert.equal(spanVideo.vbxeHiresRgb[1 * 672 + 16 + 96], 0xff665544,
   "native map span after PF3 write must use the updated color");
+// Replay also replaces the initial line's VBXE collision contribution. A
+// mid-line PRIOR write into GTIA mode 10 must therefore change the collision
+// group for the later span instead of leaving the first render's bit set.
+const collisionSpanState = vbxe.createState("fx1.26");
+collisionSpanState.videoControlActive = 0x03;
+collisionSpanState.collisionMask = 0xff;
+collisionSpanState.vram[0x3200] = 0x20;
+const collisionSpanVideo = {
+  vbxeRgb: new Uint32Array(456 * 16),
+  vbxeHiresRgb: new Uint32Array(672 * 16),
+  vbxeHiresWidth: 672,
+  pixels: new Uint8Array(456 * 16),
+  priority: new Uint16Array(456 * 16),
+};
+collisionSpanVideo.priority.fill(0x01, 9 * 456 + 96, 9 * 456 + 416);
+const collisionSpanLine = {
+  mode: "standard", overlayEnabled: true, address: 0x3200,
+  overlayWidth: 1, overlayPalette: 1, priority: 0xff,
+  anticGtiaMode: 0,
+};
+vbxe.renderXdlLine(collisionSpanState, collisionSpanVideo, 9, collisionSpanLine);
+assert.equal(collisionSpanState.collisionDetect, 0x10,
+  "the initial line render records the ordinary PF0 collision group");
+vbxe.applyGtiaSpans(collisionSpanState, collisionSpanVideo, 9, collisionSpanLine, {
+  gtiaEventOverflow: false,
+  gtiaEventCount: 1,
+  gtiaInitialRegisters: new Uint8Array(10),
+  gtiaEventRegisters: new Uint8Array([9]),
+  gtiaEventValues: new Uint8Array([0x80]),
+  gtiaEventCycles: new Uint8Array([30]),
+});
+assert.equal(collisionSpanState.collisionDetect, 0x7f,
+  "replayed GTIA mode 10 must replace the initial collision group");
 // In ANTIC Graphics 8 (mode F), byte 0 is a PF3 bitmap rather than a PF0
 // override. A set bit replaces a visible PF2 source; its palette remains the
 // playfield palette selected by the cell.

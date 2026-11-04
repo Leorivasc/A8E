@@ -163,6 +163,7 @@
       }
       drawLine.gtiaEventCount = 0;
       drawLine.gtiaEventOverflow = false;
+      drawLine.vbxeCollisionClearCount = 0;
       for (let i = 0; i < GTIA_SPAN_REGISTER_ADDRESSES.length; i++) {
         drawLine.gtiaInitialRegisters[i] = sram[GTIA_SPAN_REGISTER_ADDRESSES[i]] & 0xff;
       }
@@ -464,6 +465,17 @@
         cycleTimedEventUpdate(ctx);
 
         try {
+          // The VBXE collision-priority plane is a per-scanline view of the
+          // current GTIA contributors. Unlike the ordinary priority plane,
+          // it is only written where a player/missile renderer visits a
+          // pixel, so stale valid entries must not survive when the same
+          // scanline is rendered in the next frame.
+          if (io.videoOut.vbxeCollisionPriority) {
+            const lineBase = (io.video.currentDisplayLine | 0) * PIXELS_PER_LINE;
+            io.videoOut.vbxeCollisionPriority.fill(0, lineBase,
+              Math.min(lineBase + PIXELS_PER_LINE,
+                io.videoOut.vbxeCollisionPriority.length));
+          }
           drawLine(ctx);
           if (!io.drawLine.playerMissileInterleaved) drawPlayerMissiles(ctx);
           let xdlLine = null;
@@ -490,7 +502,7 @@
           // from the local-bus residue after display/XDL/MEMAC reservation.
           if (io.vbxe && vbxeAdvanceBlitter) {
             const blitterBudget = vbxeLocalBusBudget
-              ? vbxeLocalBusBudget(io.vbxe, xdlLine) : 912;
+              ? vbxeLocalBusBudget(io.vbxe, xdlLine, io.displayListFetchCycle) : 912;
             vbxeAdvanceBlitter(io.vbxe, blitterBudget, true);
             if (vbxeScheduleBlitterIrq) {
               const residual = vbxeScheduleBlitterIrq(io.vbxe);

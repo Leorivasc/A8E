@@ -1259,7 +1259,7 @@
 
       function attachVbxeState(io) {
         if (io && createVbxeState) io.vbxe = createVbxeState();
-        if (io) io.vbxeMapSync = setupMemoryMap;
+        if (io) io.vbxeMapSync = syncVbxeWindows;
         return io;
       }
       machine.memoryExpansion = createMemoryExpansionState(
@@ -1529,30 +1529,42 @@
         }
       }
 
+      // The VBXE module loads after this one, so resolve it on first use. ANTIC
+      // calls the reader for every DMA byte; repeated `window` property
+      // lookups were the dominant cost of running with VBXE enabled.
+      let vbxeApi = null;
+      function getVbxeApi() {
+        if (vbxeApi === null) vbxeApi = window.A8EVbxe || null;
+        return vbxeApi;
+      }
+
       function readExpansionMemoryByte(ctx, address, isAnticRead) {
         const addr = address & 0xffff;
         const mem = getMemoryExpansionState();
         const vbxe = ctx.ioData && ctx.ioData.vbxe;
+        const api = vbxe && vbxe.enabled ? getVbxeApi() : null;
         const vbxeLocalAddress =
-          isAnticRead && vbxe && vbxe.enabled &&
-          typeof window.A8EVbxe !== "undefined" && window.A8EVbxe.memacAddress
-            ? window.A8EVbxe.memacAddress(vbxe, addr, true)
+          isAnticRead && api && api.memacAddress
+            ? api.memacAddress(vbxe, addr, true)
             : -1;
         const vbxeRamboAddress =
-          vbxe && vbxe.enabled && typeof window.A8EVbxe !== "undefined" &&
-          window.A8EVbxe.ramboAddress
-            ? window.A8EVbxe.ramboAddress(vbxe, addr, ctx.sram[IO_PORTB]) : -1;
+          api && api.ramboAddress
+            ? api.ramboAddress(vbxe, addr, ctx.sram[IO_PORTB]) : -1;
         if (vbxeRamboAddress >= 0) {
-          if (typeof window.A8EVbxe.noteMemacAccess === "function")
-            window.A8EVbxe.noteMemacAccess(vbxe);
+          if (typeof api.noteMemacAccess === "function")
+            api.noteMemacAccess(vbxe,
+              isAnticRead ? "antic-read" : "cpu-read",
+              ctx.cycleCounter, ctx.ioData.displayListFetchCycle);
           return vbxe.vram[vbxeRamboAddress] & 0xff;
         }
         const u1mbWindowOwnsAddress =
           mem.ultimate1mb && addr >= 0x4000 && addr < 0x8000 &&
           (mem.sharedWindow ? mem.cpuWindowEnabled : mem.anticWindowEnabled);
         if (vbxeLocalAddress >= 0 && !u1mbWindowOwnsAddress) {
-          if (typeof window.A8EVbxe.noteMemacAccess === "function")
-            window.A8EVbxe.noteMemacAccess(vbxe);
+          if (typeof api.noteMemacAccess === "function")
+            api.noteMemacAccess(vbxe,
+              isAnticRead ? "antic-read" : "cpu-read",
+              ctx.cycleCounter, ctx.ioData.displayListFetchCycle);
           return vbxe.vram[vbxeLocalAddress] & 0xff;
         }
         if (!mem.enabled || addr < 0x4000 || addr > 0x7fff) {
@@ -1857,6 +1869,13 @@
         // I/O overrides must come after ROM mapping.
         installIoHandlers(ctx, ioAccess);
         syncMemoryExpansionWindow(ctx, portB, portB);
+      }
+
+      // MEMAC register writes only move the VBXE windows. Rebuilding the whole
+      // map here would reload RAM hidden under ROM from sram, which is stale
+      // while that RAM is visible, and discard bytes the CPU just wrote there.
+      function syncVbxeWindows() {
+        installIoHandlers(machine.ctx, ioAccess);
       }
 
       function applyResetOverrides(options) {
@@ -2438,7 +2457,7 @@
         if (state.vbxe && restoreVbxeState) {
           io.vbxe = restoreVbxeState(state.vbxe);
         }
-        io.vbxeMapSync = setupMemoryMap;
+        io.vbxeMapSync = syncVbxeWindows;
         return io;
       }
 
@@ -2561,6 +2580,7 @@
         writeMemory: writeMemory,
         writeRange: writeRange,
         setMemoryWriteHook: setMemoryWriteHook,
+        syncVbxeWindows: syncVbxeWindows,
         getBankState: getBankState,
         exportSnapshotState: exportSnapshotState,
         importSnapshotState: importSnapshotState,

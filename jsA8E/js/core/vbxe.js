@@ -8,6 +8,14 @@
   const REGISTER_COUNT = 0x20;
   const DEFAULT_PAGE = 0xd640;
   const XDL_UPDATE_CYCLES = 22;
+  const LOCAL_BUS_MACHINE_CYCLES = 114;
+  const LOCAL_BUS_SLOTS = LOCAL_BUS_MACHINE_CYCLES * 8;
+  // Altirra indexes this table by OvWidth: Narrow=0, Normal=1, Wide=2.
+  const OVERLAY_DMA_START = [10, 18, 26];
+  const OVERLAY_MACHINE_CYCLES = [64, 80, 84];
+  const OVERLAY_TEXT_SLOTS = [195, 243, 255];
+  const OVERLAY_NATIVE_WIDTH = [512, 640, 672];
+  const OVERLAY_LEGACY_START = [128, 96, 88];
   const VBXE_CONTRIBUTOR_VALID = 0x8000;
   // These match the shared GTIA layer bits in hw.js. VBXE deliberately reads
   // per-pixel layer metadata rather than the final RGB value: different GTIA
@@ -43,7 +51,7 @@
       textScrollX: 0, textScrollY: 0, characterBase: 0, textRow: 0,
       attributeMapEnabled: false, attributeAddress: 0, attributeStride: 0,
       attributeScrollX: 0, attributeScrollY: 0, attributeCellWidth: 8,
-      attributeCellHeight: 8, attributeRow: 0 };
+      attributeCellHeight: 8, attributeRow: 0, attributeBuffer: null };
   }
 
   function normalizeConfig(value) {
@@ -85,6 +93,7 @@
       paletteSelect: 0,
       collisionMask: 0,
       collisionDetect: 0,
+      collisionLineMask: 0,
       blitAddress: 0,
       blitCollisionCode: 0,
       blitterBusy: 0,
@@ -95,7 +104,14 @@
       blitterIrqScheduled: false,
       blitterIrqResidual: 0,
       memacSlots: 0,
+      memacReadSlots: 0,
+      memacWriteSlots: 0,
+      memacTrace: [],
+      lastMemacTrace: [],
+      memacSequence: 0,
       xdlSlots: 0,
+      localBusSchedule: null,
+      localBusCursor: 0,
       priority: new Uint8Array(4),
       memacBControl: 0,
       memacControl: 0,
@@ -111,12 +127,22 @@
 
   function softReset(state) {
     if (!state) return;
+    const previousXdl = state.xdl || createXdlState();
     state.videoControlPending = 0;
     state.videoControlActive = 0;
     // Altirra WarmReset disables current XDL execution but retains the
     // programmed start-address latch and COLDETECT until their own strobes.
     state.xdl = createXdlState();
+    // A warm reset stops the current XDL execution, but the hardware keeps
+    // the address/stride/character-base latches that are used by the next
+    // XDL restart. Altirra WarmReset preserves the same internal fields.
+    state.xdl.overlayAddress = previousXdl.overlayAddress & 0x7ffff;
+    state.xdl.overlayStride = previousXdl.overlayStride & 0xfff;
+    state.xdl.attributeAddress = previousXdl.attributeAddress & 0x7ffff;
+    state.xdl.attributeStride = previousXdl.attributeStride & 0xffc;
+    state.xdl.characterBase = previousXdl.characterBase & 0x7ffff;
     state.blitCollisionCode = 0;
+    state.collisionLineMask = 0;
     state.blitterBusy = 0;
     state.blitter = null;
     state.irqStatus = 0;
@@ -125,7 +151,14 @@
     state.blitterIrqScheduled = false;
     state.blitterIrqResidual = 0;
     state.memacSlots = 0;
+    state.memacReadSlots = 0;
+    state.memacWriteSlots = 0;
+    state.memacTrace.length = 0;
+    state.lastMemacTrace.length = 0;
+    state.memacSequence = 0;
     state.xdlSlots = 0;
+    state.localBusSchedule = null;
+    state.localBusCursor = 0;
     state.memacBControl &= 0x3f;
     state.memacControl &= 0xf3;
     state.memacBankSelect &= 0x7f;
@@ -141,6 +174,7 @@
     state.paletteSelect = 0;
     state.collisionMask = 0;
     state.collisionDetect = 0;
+    state.collisionLineMask = 0;
     state.blitAddress = 0;
     state.blitCollisionCode = 0;
     state.priority.fill(0);
@@ -159,7 +193,8 @@
     // are not reset automatically. An XDL entry may still overwrite either
     // address and stride when its corresponding control bit is present.
     const previousXdl = state.xdl;
-    state.videoControlActive = state.videoControlPending & 0x0f;
+    state.videoControlActive = (state.videoControlActive & 0x0e) |
+      (state.videoControlPending & 0x01);
     state.xdlAddressActive = state.xdlAddressPending & 0x7ffff;
     state.xdl = createXdlState();
     state.xdl.address = state.xdlAddressActive;
@@ -168,6 +203,7 @@
       state.xdl.overlayStride = previousXdl.overlayStride & 0xfff;
       state.xdl.attributeAddress = previousXdl.attributeAddress & 0x7ffff;
       state.xdl.attributeStride = previousXdl.attributeStride & 0xffc;
+      state.xdl.characterBase = previousXdl.characterBase & 0x7ffff;
     }
   }
 
@@ -180,6 +216,14 @@
     const block = new Uint8Array(21);
     for (let i = 0; i < block.length; i++) block[i] = state.vram[(address + i) & 0x7ffff];
     return block;
+  }
+
+  function loadAttributeMapBuffer(state, xdl) {
+    const buffer = new Uint8Array(43 * 4);
+    for (let i = 0; i < buffer.length; i++) {
+      buffer[i] = state.vram[(xdl.attributeAddress + i) & 0x7ffff];
+    }
+    xdl.attributeBuffer = buffer;
   }
 
   function loadBlitterBlock(state) {
@@ -200,6 +244,7 @@
       zoomX: 1 + (block[18] & 0x07), zoomY: 1 + ((block[18] >>> 4) & 0x07),
       patternEnabled: (block[19] & 0x80) !== 0, patternWidth: 1 + (block[19] & 0x3f),
       mode: block[20] & 0x07, next: (block[20] & 0x08) !== 0,
+      constantFetchPending: block[15] === 0,
       x: 0, y: 0, repeatX: 0, repeatY: 0,
     };
     state.blitterBusy = 0x02;
@@ -300,21 +345,78 @@
   function advanceBlitter(state, budget, deferIrq) {
     if (!state || !state.enabled || state.blitterBusy === 0) return 0;
     let remaining = Math.max(0, budget | 0);
+    const scheduled = state.localBusSchedule &&
+      state.localBusSchedule.length === LOCAL_BUS_SLOTS;
+    const scheduledFree = function () {
+      if (!scheduled) return remaining;
+      let count = 0;
+      for (let i = state.localBusCursor | 0; i < LOCAL_BUS_SLOTS; i++) {
+        if (state.localBusSchedule[i] === 0) count++;
+      }
+      return count;
+    };
+    const consume = function (cycles) {
+      const count = cycles | 0;
+      if (count <= 0) return true;
+      if (!scheduled) {
+        if (remaining < count) return false;
+        remaining -= count;
+        return true;
+      }
+      if (scheduledFree() < count) return false;
+      let consumed = 0;
+      for (let i = state.localBusCursor | 0;
+        i < LOCAL_BUS_SLOTS && consumed < count; i++) {
+        if (state.localBusSchedule[i] !== 0) continue;
+        state.localBusSchedule[i] = 2;
+        consumed++;
+        state.localBusCursor = i + 1;
+      }
+      remaining -= count;
+      return true;
+    };
+    const consumeAvailable = function (cycles) {
+      const count = Math.max(0, cycles | 0);
+      if (!scheduled) {
+        const taken = Math.min(remaining, count);
+        remaining -= taken;
+        return taken;
+      }
+      const taken = Math.min(scheduledFree(), count);
+      if (taken > 0) consume(taken);
+      return taken;
+    };
     let completed = 0;
     while (remaining > 0 && state.blitterBusy !== 0) {
       if (state.blitterBusy === 0x01) {
         const loading = state.blitter;
         const loadCycles = loading.loadCyclesRemaining === undefined
           ? 21 : loading.loadCyclesRemaining | 0;
-        if (remaining < loadCycles) {
+        if (remaining < loadCycles && !scheduled) {
           loading.loadCyclesRemaining = loadCycles - remaining;
           break;
         }
-        remaining -= loadCycles;
+        if (scheduled && scheduledFree() < loadCycles) {
+          const taken = consumeAvailable(loadCycles);
+          loading.loadCyclesRemaining = loadCycles - taken;
+          break;
+        }
+        if (!consume(loadCycles)) {
+          loading.loadCyclesRemaining = loadCycles;
+          break;
+        }
         loadBlitterBlock(state);
         continue;
       }
       const work = state.blitter;
+      // Altirra charges one initial source-read cycle for a constant-source
+      // BCB. Subsequent output bytes can reuse that value and therefore take
+      // the reduced per-byte cost from the AHRM table.
+      if (work.constantFetchPending) {
+        if (!consume(1)) break;
+        work.constantFetchPending = false;
+        continue;
+      }
       const sourceX = work.patternEnabled ? work.x % work.patternWidth : work.x;
       const sourceAddress = (work.source + work.y * work.sourceYStep +
         sourceX * work.sourceXStep) & 0x7ffff;
@@ -325,11 +427,10 @@
       const source = ((state.vram[sourceAddress] & work.dataAnd) ^ work.dataXor) & 0xff;
       const sourceFetchSkipped = work.dataAnd === 0 || work.repeatX !== 0;
       const cycles = blitByteCycles(work, source, sourceFetchSkipped);
-      if (cycles > remaining) break;
+      if (!consume(cycles)) break;
       state.vram[destinationAddress] = applyBlitOperation(
         state, work, source, state.vram[destinationAddress] & 0xff);
       completed++;
-      remaining -= cycles;
       work.repeatX++;
       if (work.repeatX < work.zoomX) continue;
       work.repeatX = 0;
@@ -405,9 +506,23 @@
       // A new entry claims exactly the bytes it contains; repeated lines
       // reuse the latched entry without another XDL fetch.
       const c0 = read(); const c1 = read();
-      if (c0 & 1) { x.mode = "text"; x.enabled = true; }
-      if (c0 & 2) { x.mode = (c1 & 0x10) ? "hires" : ((c1 & 0x20) ? "lores" : "standard"); x.enabled = true; }
-      if (c0 & 4) x.enabled = false;
+      // Match Altirra's kOvModeTable: control bits 0-1 select text or
+      // graphics, while the combined value 3 is an invalid/disabled mode.
+      // Bit 2 has priority and explicitly disables the overlay.
+      const modeBits = c0 & 0x03;
+      if (c0 & 0x04) {
+        x.mode = "off";
+        x.enabled = false;
+      } else if (modeBits === 1) {
+        x.mode = "text";
+        x.enabled = true;
+      } else if (modeBits === 2) {
+        x.mode = (c1 & 0x10) ? "hires" : ((c1 & 0x20) ? "lores" : "standard");
+        x.enabled = true;
+      } else if (modeBits === 3) {
+        x.mode = "off";
+        x.enabled = false;
+      }
       if (c0 & 0x10) x.attributeMapEnabled = false;
       else if (c0 & 0x08) {
         x.attributeMapEnabled = true;
@@ -416,6 +531,7 @@
         // rolled over.
         attributeMapReload = true;
       }
+      if (c0 & 0x10) x.attributeBuffer = null;
       if (c0 & 0x20) x.repeat = read();
       if (c0 & 0x40) { x.overlayAddress = read() | (read() << 8) | ((read() & 7) << 16); x.overlayStride = read() | ((read() & 15) << 8); }
       // XDLC_OVSCRL carries only the three pixel-offset bits used by text
@@ -451,6 +567,9 @@
         x.overlayPalette = (misc >>> 4) & 0x03;
         x.priority = read();
       }
+      // Altirra restarts text rendering at the latched vertical scroll for
+      // every newly decoded XDL entry, not at the previous entry's row.
+      x.textRow = x.textScrollY & 7;
       if (c1 & 0x80) x.ended = true;
       if (attributeMapReload) x.attributeRow = x.attributeScrollY;
       // AHRM 12.4: the XDL update occupies 22 local cycles after the active
@@ -462,6 +581,15 @@
       // full value for the line that loaded the entry, then consume one on
       // each following line (AHRM 12.4, XDL repeat count).
       x.repeat--;
+    }
+    if (x.attributeMapEnabled && (attributeMapReload || x.attributeRow === 0)) {
+      // AHRM buffers exactly 43 four-byte cells during horizontal blanking.
+      // Reload both after an AtMap/address update and after the row counter
+      // wraps on a repeated XDL entry. Rendering must use this snapshot for
+      // the complete line so a MEMAC write during active display cannot alter
+      // already fetched cells.
+      loadAttributeMapBuffer(state, x);
+      attributeMapReload = true;
     }
     const line = (x.enabled || x.attributeMapEnabled) ? {
       mode: x.mode, overlayEnabled: !!x.enabled,
@@ -484,6 +612,7 @@
       attributeCellHeight: x.attributeCellHeight,
       attributeRow: x.attributeRow,
       attributeMapReload: attributeMapReload,
+      attributeBuffer: x.attributeBuffer,
     } : null;
     if (x.enabled) {
       if (x.mode === "text") {
@@ -565,11 +694,17 @@
     if (column < 0 || column >= 43) return null;
     // `attributeAddress` already names the currently buffered map row. Its
     // five-bit vertical counter is advanced by nextXdlLine after each line.
-    const address = (line.attributeAddress + (column << 2)) & 0x7ffff;
-    const playfield0 = state.vram[address] & 0xff;
-    const playfield1 = state.vram[(address + 1) & 0x7ffff] & 0xff;
-    const playfield2 = state.vram[(address + 2) & 0x7ffff] & 0xff;
-    const control = state.vram[(address + 3) & 0x7ffff] & 0xff;
+    const buffer = line.attributeBuffer;
+    const address = (column << 2) | 0;
+    const read = function (offset) {
+      return buffer
+        ? buffer[address + offset] & 0xff
+        : state.vram[(line.attributeAddress + address + offset) & 0x7ffff] & 0xff;
+    };
+    const playfield0 = read(0);
+    const playfield1 = read(1);
+    const playfield2 = read(2);
+    const control = read(3);
     return { control: control, playfield0: playfield0, playfield1: playfield1,
       playfield2: playfield2, reverse: (control & 0x04) !== 0,
       playfieldPalette: (control >>> 6) & 0x03,
@@ -703,8 +838,12 @@
     return !!sourceValues && sourceValues[pixel] <= 3;
   }
 
-  function compositeOverlayPixel(state, video, target, targetPixel, priorityPixel, color, sourceByte, overlayPalette, priorityMask, attribute, gtiaMode) {
-    if (attribute && (attribute.control & 0x08)) state.collisionDetect |= 0x80;
+  function compositeOverlayPixel(state, video, target, targetPixel, priorityPixel, color, sourceByte, overlayPalette, priorityMask, attribute, gtiaMode, suppressCollisionReplay) {
+    const replayCollisions = suppressCollisionReplay !== true;
+    if (replayCollisions && attribute && (attribute.control & 0x08)) {
+      state.collisionDetect |= 0x80;
+      state.collisionLineMask |= 0x80;
+    }
     if (attribute) {
       overlayPalette = attribute.overlayPalette;
       priorityMask = attribute.priority;
@@ -719,12 +858,17 @@
     const visiblePriority = (storedContributors & VBXE_CONTRIBUTOR_VALID) !== 0
       ? storedContributors & ~VBXE_CONTRIBUTOR_VALID
       : atariPriority;
-    if (sourceByte !== null && overlayCollisionEnabled(state, sourceByte)) {
+    if (replayCollisions && sourceByte !== null && overlayCollisionEnabled(state, sourceByte)) {
       // AHRM 12.4: COLMASK selects source-byte ranges and collision
       // detection is independent of whether the overlay wins its priority
       // comparison. The caller supplies the hardware-visible source byte for
       // its overlay mode.
-      state.collisionDetect |= collisionBitsForPriority(visiblePriority, gtiaMode);
+      const collisionPriority = suppressCollisionReplay === "atari"
+        ? atariPriority & (PRIO_PF0 | PRIO_PF1 | PRIO_PF2 | PRIO_PF3)
+        : visiblePriority;
+      const collisionBits = collisionBitsForPriority(collisionPriority, gtiaMode);
+      state.collisionDetect |= collisionBits;
+      state.collisionLineMask |= collisionBits;
     }
     // AHRM 12.4 defines both collision and overlay priority against the
     // color inputs that survive GTIA PRIOR processing. The raw priority plane
@@ -740,13 +884,13 @@
   }
 
   function overlayNativeWidth(line) {
-    return [512, 640, 672][overlayWidthCode(line)];
+    return OVERLAY_NATIVE_WIDTH[overlayWidthCode(line)];
   }
 
   function overlayLegacyStart(line) {
     // Altirra RenderOverlay bounds, converted from color clocks to jsA8E's
     // ANTIC line buffer: narrow $40-BF, normal $30-CF, wide $2C-D3.
-    return [128, 96, 88][overlayWidthCode(line)];
+    return OVERLAY_LEGACY_START[overlayWidthCode(line)];
   }
 
   function hiresTarget(video, scanline, signalWidth) {
@@ -763,18 +907,27 @@
       : null;
   }
 
-  function renderTextXdlLine(state, video, scanline, line) {
+  function renderTextXdlLine(state, video, scanline, line, span) {
     const atariBase = (scanline | 0) * 456 + 128;
     const signalWidth = overlayNativeWidth(line);
     const target = hiresTarget(video, scanline, signalWidth);
     const pixels = target ? target.pixels : video.vbxeRgb;
     const base = target ? target.base : atariBase;
     const outputPixels = target ? signalWidth : 256;
-    if (target) pixels.fill(0, target.rowBase, target.rowBase + target.width);
-    else pixels.fill(0, base, base + 256);
+    if (!span) {
+      if (target) pixels.fill(0, target.rowBase, target.rowBase + target.width);
+      else pixels.fill(0, base, base + 256);
+    }
     const priorityMask = line.priority === undefined ? 0xff : line.priority;
     const transparency = (state.videoControlActive >> 2) & 0x03;
-    for (let x = 0; x < outputPixels; x++) {
+    const standardWidth = signalWidth >> 1;
+    const outputStart = span
+      ? (target ? (span[0] * 2) : Math.floor(span[0] * outputPixels / standardWidth))
+      : 0;
+    const outputEnd = span
+      ? (target ? (span[1] * 2) : Math.ceil(span[1] * outputPixels / standardWidth))
+      : outputPixels;
+    for (let x = outputStart; x < outputEnd; x++) {
       const sourceX = (target ? x : Math.floor(x * 640 / 256)) + (line.textScrollX || 0);
       const sourceRow = (line.textRow & 7) + (line.textScrollY || 0);
       const cell = sourceX >> 3;
@@ -795,7 +948,7 @@
         target ? (x >> 1) : Math.floor(x * 320 / 256));
       // Altirra FX 1.26 text-collision probe: COLMASK selects the cell's
       // attribute byte, rather than its character name or fetched glyph byte.
-      compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, attribute, line.overlayPalette, priorityMask, map, line.anticGtiaMode);
+      compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, attribute, line.overlayPalette, priorityMask, map, line.anticGtiaMode, line.suppressCollisionReplay);
     }
   }
 
@@ -808,8 +961,9 @@
     if (target) target.pixels.fill(0, target.rowBase, target.rowBase + target.width);
   }
 
-  function renderXdlLine(state, video, scanline, line) {
+  function renderXdlLine(state, video, scanline, line, span) {
     if (!video || !video.vbxeRgb) return;
+    if (!span && state) state.collisionLineMask = 0;
     // The presentation planes are an overlay, not a framebuffer. Clear this
     // scanline when XDL has been disabled at VSync so a prior attribute-map
     // result cannot survive after hardware has returned to pure ANTIC/GTIA.
@@ -820,16 +974,16 @@
     // The legacy and native presentation planes are mutually exclusive for a
     // given overlay mode. Clear both before drawing so a prior standard line
     // cannot leak through when this line switches to hires/text (or back).
-    clearXdlOutputLine(video, scanline);
+    if (!span) clearXdlOutputLine(video, scanline);
     if (line.mode === "text") {
-      renderTextXdlLine(state, video, scanline, line);
+      renderTextXdlLine(state, video, scanline, line, span);
       return;
     }
     if (line.mode !== "standard" && line.mode !== "lores" && line.mode !== "hires") {
       // Attribute-map-only XDL entries have no overlay renderer to clear the
       // RGB plane.  Leaving its prior line contents in place both hides the
       // current map output and makes stale pixels survive across frames.
-      clearXdlOutputLine(video, scanline);
+      if (!span) clearXdlOutputLine(video, scanline);
       return;
     }
     const hires = line.mode === "hires";
@@ -839,8 +993,12 @@
     const atariBase = target ? 0 : (scanline | 0) * 456 + overlayLegacyStart(line);
     const base = target ? target.base : atariBase;
     const outputPixels = target ? nativeWidth : (nativeWidth >> 1);
+    const outputStart = span
+      ? (target ? span[0] * 2 : span[0]) : 0;
+    const outputEnd = span
+      ? (target ? span[1] * 2 : span[1]) : outputPixels;
     const priorityMask = line.priority === undefined ? 0xff : line.priority;
-    for (let x = 0; x < outputPixels; x++) {
+    for (let x = outputStart; x < outputEnd; x++) {
       const sourceX = hires ? x : (line.mode === "lores" ? x >> 1 : x);
       // AHRM 12.4: hires graphics store two 4-bit pixels per byte, most
       // significant nibble first. COLMASK still selects the complete source
@@ -858,7 +1016,7 @@
         : atariBase + x;
       const map = attributeMapCell(state, line,
         target ? (x >> 1) : x);
-      compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, sourceByte, line.overlayPalette, priorityMask, map, line.anticGtiaMode);
+      compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, sourceByte, line.overlayPalette, priorityMask, map, line.anticGtiaMode, line.suppressCollisionReplay);
     }
   }
 
@@ -905,6 +1063,12 @@
     const registers = new Uint8Array(drawLine.gtiaInitialRegisters);
     const width = overlayNativeWidth(line) >> 1;
     const start = overlayLegacyStart(line);
+    let collisionClearPixel = -1;
+    for (let i = 0; i < (drawLine.vbxeCollisionClearCount | 0); i++) {
+      collisionClearPixel = Math.max(collisionClearPixel,
+        Math.max(0, Math.min(width,
+          24 + (drawLine.vbxeCollisionClearCycles[i] | 0) * 4 - start)));
+    }
     // The line was composed once at its close, before the later GTIA writes
     // are replayed. Remove only map output before rebuilding the spans. A
     // standard/lores overlay lives in the legacy plane, so its native map
@@ -921,15 +1085,54 @@
         if (target) target.pixels.fill(0, target.rowBase, target.rowBase + target.width);
       }
     }
+    // Rebuild the overlay and map together for every GTIA span. Altirra's
+    // RenderScanline does this in one horizontal compositor; replaying the
+    // same operation here prevents a mid-line PRIOR/transparency change from
+    // leaving the overlay composed with the state from the first span.
+    // Remove the contribution from the initial whole-line render before
+    // recalculating it. Historical COLDETECT bits from earlier lines remain.
+    if (state.collisionLineMask) {
+      state.collisionDetect &= ~state.collisionLineMask;
+      state.collisionLineMask = 0;
+    }
+    clearXdlOutputLine(video, scanline);
+    function renderReplaySpan(spanLine, first, last) {
+      if (last <= first) return;
+      if (collisionClearPixel < 0 || last <= collisionClearPixel || first >= collisionClearPixel) {
+        const replayLine = collisionClearPixel >= 0 && first < collisionClearPixel
+          ? Object.assign({}, spanLine, { suppressCollisionReplay: true })
+          : (collisionClearPixel >= 0
+            ? Object.assign({}, spanLine, { suppressCollisionReplay: "atari" })
+            : spanLine);
+        renderXdlLine(state, video, scanline, replayLine, [first, last]);
+        return;
+      }
+      renderXdlLine(state, video, scanline,
+        Object.assign({}, spanLine, { suppressCollisionReplay: true }),
+        [first, collisionClearPixel]);
+      renderXdlLine(state, video, scanline,
+        Object.assign({}, spanLine, { suppressCollisionReplay: "atari" }),
+        [collisionClearPixel, last]);
+    }
     let pixel = 0;
     for (let i = 0; i < drawLine.gtiaEventCount; i++) {
       const next = Math.max(0, Math.min(overlayNativeWidth(line) >> 1,
         24 + (drawLine.gtiaEventCycles[i] | 0) * 4 - start));
-      applyPlayfieldAttributes(state, video, scanline, line, registers, pixel, next);
+      const spanLine = Object.assign({}, line, {
+        anticPf3: registers[7] & 0xff,
+        anticGtiaMode: (registers[9] >>> 6) & 0x03,
+      });
+      renderReplaySpan(spanLine, pixel, next);
+      applyPlayfieldAttributes(state, video, scanline, spanLine, registers, pixel, next);
       registers[drawLine.gtiaEventRegisters[i]] = drawLine.gtiaEventValues[i];
       pixel = next;
     }
-    applyPlayfieldAttributes(state, video, scanline, line, registers, pixel, width);
+    const finalLine = Object.assign({}, line, {
+      anticPf3: registers[7] & 0xff,
+      anticGtiaMode: (registers[9] >>> 6) & 0x03,
+    });
+    renderReplaySpan(finalLine, pixel, width);
+    applyPlayfieldAttributes(state, video, scanline, finalLine, registers, pixel, width);
   }
 
   function applyPlayfieldAttributes(state, video, scanline, line,
@@ -1123,41 +1326,177 @@
     return (0x40000 + bank + addr - 0x4000) & 0x7ffff;
   }
 
-  // The exact odd local-bus phase is resolved by the CPU/ANTIC caller. Keep
-  // the per-scanline claim here so the lower-priority blitter budget can be
-  // reduced even when the CPU and ANTIC access local VRAM through different
-  // memory paths.
-  function noteMemacAccess(state) {
+  // Memory callers report the access kind and, when available, the CPU cycle
+  // relative to the current display-list fetch. The trace is diagnostic state
+  // as well as the source for temporal local-slot hints; aggregate counters
+  // remain useful for compatibility with older callers and snapshots.
+  function noteMemacAccess(state, accessKind, cpuCycle, lineStartCycle) {
     if (!state || !state.enabled) return;
     state.memacSlots = Math.min(912, (state.memacSlots | 0) + 1);
+    const kind = accessKind === "cpu-write" || accessKind === "cpu-read" ||
+      accessKind === "antic-read" ? accessKind : "cpu-read";
+    const phase = kind === "cpu-write" ? 3 : 1;
+    if (kind === "cpu-write") {
+      state.memacWriteSlots = Math.min(912, (state.memacWriteSlots | 0) + 1);
+    } else {
+      // CPU reads and ANTIC fetches both use the AHRM read phase; the trace
+      // retains their origin for later horizontal arbitration.
+      state.memacReadSlots = Math.min(912, (state.memacReadSlots | 0) + 1);
+    }
+    if (!Array.isArray(state.memacTrace)) state.memacTrace = [];
+    if (state.memacTrace.length < 2048) {
+      const hasCycle = Number.isFinite(cpuCycle) && Number.isFinite(lineStartCycle);
+      const lineCycle = hasCycle ? (cpuCycle | 0) - (lineStartCycle | 0) : -1;
+      state.memacTrace.push({
+        sequence: state.memacSequence++,
+        kind: kind,
+        phase: phase,
+        cpuCycle: Number.isFinite(cpuCycle) ? (cpuCycle | 0) : null,
+        lineCycle: lineCycle >= 0 && lineCycle < 114 ? lineCycle : -1,
+        localSlot: lineCycle >= 0 && lineCycle < 114
+          ? lineCycle * 8 + phase : -1,
+      });
+    }
   }
 
-  function localBusBudget(state, line) {
-    if (!state || !state.enabled) return 0;
-    let used = state.memacSlots | 0;
-    // XDL DMA is charged by the decoder using the actual entry length.
-    used += state.xdlSlots | 0;
-    if (line && line.overlayEnabled) {
-      // Altirra's FX scheduler reserves a different number of local cycles
-      // for each of the three actual overlay widths.  This remains an
-      // aggregate scanline reservation; individual even-cycle fetch phases
-      // are outside this renderer's interface.
-      const width = overlayWidthCode(line);
-      if (line.mode === "lores") used += [128, 160, 168][width];
-      else if (line.mode === "text") used += [195, 243, 255][width];
-      else used += [256, 320, 336][width];
+  // Slots reserved in the schedule currently being built; counting here avoids
+  // rescanning all slots on every scanline.
+  let reservedLocalSlots = 0;
+
+  function reserveLocalSlot(schedule, index) {
+    const slot = index | 0;
+    if (slot < 0 || slot >= LOCAL_BUS_SLOTS || schedule[slot] !== 0) return false;
+    schedule[slot] = 1;
+    reservedLocalSlots++;
+    return true;
+  }
+
+  function reserveFreeLocalSlots(schedule, start, count) {
+    let remaining = Math.max(0, count | 0);
+    for (let i = Math.max(0, start | 0);
+      i < LOCAL_BUS_SLOTS && remaining > 0; i++) {
+      if (reserveLocalSlot(schedule, i)) remaining--;
     }
+    return remaining === 0;
+  }
+
+  function reserveOverlaySlots(schedule, line) {
+    if (!line || !line.overlayEnabled) return 0;
+    const width = overlayWidthCode(line);
+    // Altirra's overlay-start table is expressed in local-bus slots. The
+    // subsequent fetch pattern advances in eight-slot machine-cycle groups.
+    const start = OVERLAY_DMA_START[width];
+    // The active widths are 128/160/168 color clocks, i.e. 64/80/84
+    // machine-cycle positions. Each machine cycle contributes the even local
+    // phases listed below, producing Altirra's 128/160/168 lores and
+    // 256/320/336 standard/hires reservations.
+    const machineCycles = OVERLAY_MACHINE_CYCLES[width];
+    const phases = line.mode === "lores" ? [0, 4] : [0, 2, 4, 6];
+    if (line.mode === "text") {
+      // Text fetches three even-phase bytes per eight local slots. The
+      // cycle counts intentionally match Altirra's 195/243/255 table.
+      const count = OVERLAY_TEXT_SLOTS[width];
+      const groups = Math.ceil(count / 3);
+      for (let group = 0; group < groups; group++) {
+        const base = start + group * 8;
+        for (let phase = 0; phase < 3 && group * 3 + phase < count; phase++)
+          reserveLocalSlot(schedule, base + phase * 2);
+      }
+      return count;
+    }
+    let count = 0;
+    for (let cycle = 0; cycle < machineCycles; cycle++) {
+      for (let i = 0; i < phases.length; i++) {
+        if (reserveLocalSlot(schedule, start + cycle * 8 + phases[i])) count++;
+      }
+    }
+    return count;
+  }
+
+  function buildLocalBusSchedule(state, line, lineStartCycle) {
+    const schedule = new Uint8Array(LOCAL_BUS_SLOTS);
+    reservedLocalSlots = 0;
+    reserveOverlaySlots(schedule, line);
+    // AHRM 12.4 assigns local-bus phase 1 to reads and phase 3 to writes.
+    // Keep the legacy aggregate field as a read fallback for callers that
+    // have not supplied an access kind yet.
+    let memacReads = state.memacReadSlots | 0;
+    let memacWrites = state.memacWriteSlots | 0;
+    if (memacReads === 0 && memacWrites === 0 && state.memacSlots) {
+      memacReads = state.memacSlots | 0;
+    }
+    // When the CPU/ANTIC caller supplied a cycle, preserve its relative
+    // position instead of collapsing every access to the beginning of the
+    // scanline. Un-timestamped accesses continue through the aggregate path.
+    let timedReads = 0;
+    let timedWrites = 0;
+    const trace = Array.isArray(state.memacTrace) ? state.memacTrace : [];
+    for (let i = 0; i < trace.length; i++) {
+      const event = trace[i];
+      if (event.localSlot < 0 || event.localSlot >= LOCAL_BUS_SLOTS) continue;
+      if (Number.isFinite(lineStartCycle) && event.cpuCycle !== null) {
+        const lineCycle = (event.cpuCycle | 0) - (lineStartCycle | 0);
+        if (lineCycle >= 0 && lineCycle < 114) {
+          event.lineCycle = lineCycle;
+          event.localSlot = lineCycle * 8 + event.phase;
+        }
+      }
+      if (event.localSlot < 0 || event.localSlot >= LOCAL_BUS_SLOTS) continue;
+      if (reserveLocalSlot(schedule, event.localSlot)) {
+        if (event.kind === "cpu-write") timedWrites++;
+        else timedReads++;
+      }
+    }
+    memacReads = Math.max(0, memacReads - timedReads);
+    memacWrites = Math.max(0, memacWrites - timedWrites);
+    for (let cycle = 0; cycle < LOCAL_BUS_MACHINE_CYCLES && memacReads > 0; cycle++) {
+      if (reserveLocalSlot(schedule, cycle * 8 + 1)) memacReads--;
+    }
+    for (let cycle = 0; cycle < LOCAL_BUS_MACHINE_CYCLES && memacWrites > 0; cycle++) {
+      if (reserveLocalSlot(schedule, cycle * 8 + 3)) memacWrites--;
+    }
+    const overlayEnd = line && line.overlayEnabled
+      ? (OVERLAY_DMA_START[overlayWidthCode(line)] +
+        (line.mode === "text"
+          ? Math.ceil(OVERLAY_TEXT_SLOTS[overlayWidthCode(line)] / 3) * 8
+          : OVERLAY_MACHINE_CYCLES[overlayWidthCode(line)] * 8))
+      : 0;
+    // XDL and the attribute row are scheduled after active overlay DMA. They
+    // skip MEMAC slots because MEMAC preempts these lower-priority fetches.
+    if (state.xdlSlots) reserveFreeLocalSlots(schedule, overlayEnd, state.xdlSlots);
     if (line && line.attributeMapEnabled &&
-        (line.attributeMapReload ||
-          line.attributeRow === 0)) {
-      // The buffered map row always fetches 172 bytes. MEMAC remains counted
-      // separately because it preempts this fetch rather than being hidden by
-      // it, which gives the documented 236-cycle busy-line minimum.
-      used += 172;
+        (line.attributeMapReload || line.attributeRow === 0)) {
+      const xdlEnd = overlayEnd + (state.xdlSlots | 0);
+      reserveFreeLocalSlots(schedule, xdlEnd, 43 * 4);
     }
+    // Keep the count observable for diagnostics and assert the schedule's
+    // aggregate matches the existing AHRM budget contract.
+    const free = LOCAL_BUS_SLOTS - reservedLocalSlots;
+    // Keep the exact reserved-slot result if a future DMA shape overlaps
+    // itself; do not invent cycles from the aggregate estimate.
+    state.localBusSchedule = schedule;
+    return free;
+  }
+
+  function localBusBudget(state, line, lineStartCycle) {
+    if (!state || !state.enabled) return 0;
+    const budget = buildLocalBusSchedule(state, line, lineStartCycle);
+    state.lastMemacTrace = Array.isArray(state.memacTrace)
+      ? state.memacTrace.map(event => Object.assign({}, event)) : [];
+    state.memacTrace = [];
+    state.localBusCursor = 0;
     state.memacSlots = 0;
+    state.memacReadSlots = 0;
+    state.memacWriteSlots = 0;
     state.xdlSlots = 0;
-    return Math.max(0, 912 - used);
+    return budget;
+  }
+
+  function getMemacTrace(state) {
+    if (!state) return [];
+    const completed = Array.isArray(state.lastMemacTrace) ? state.lastMemacTrace : [];
+    const pending = Array.isArray(state.memacTrace) ? state.memacTrace : [];
+    return completed.concat(pending).map(event => Object.assign({}, event));
   }
 
   function paletteOffset(state) {
@@ -1206,6 +1545,10 @@
     switch (reg) {
       case 0x00:
         state.videoControlPending = v & 0x0f;
+        // AHRM buffers only XDL enable (D0) until VSync. Extended color and
+        // both transparency bits take effect immediately, as in Altirra's
+        // WriteControl implementation.
+        state.videoControlActive = (state.videoControlActive & 0x01) | (v & 0x0e);
         break;
       case 0x01:
         state.xdlAddressPending = (state.xdlAddressPending & 0x7ff00) | v;
@@ -1294,6 +1637,7 @@
       paletteSelect: state.paletteSelect & 0x03,
       collisionMask: state.collisionMask & 0xff,
       collisionDetect: state.collisionDetect & 0xff,
+      collisionLineMask: state.collisionLineMask & 0xff,
       blitAddress: state.blitAddress & 0x7ffff,
       blitCollisionCode: state.blitCollisionCode & 0xff,
       blitterBusy: state.blitterBusy & 0x03,
@@ -1304,13 +1648,23 @@
       blitterIrqScheduled: !!state.blitterIrqScheduled,
       blitterIrqResidual: state.blitterIrqResidual | 0,
       memacSlots: state.memacSlots | 0,
+      memacReadSlots: state.memacReadSlots | 0,
+      memacWriteSlots: state.memacWriteSlots | 0,
+      memacTrace: Array.isArray(state.memacTrace)
+        ? state.memacTrace.map(event => Object.assign({}, event)) : [],
+      lastMemacTrace: Array.isArray(state.lastMemacTrace)
+        ? state.lastMemacTrace.map(event => Object.assign({}, event)) : [],
+      memacSequence: state.memacSequence | 0,
       xdlSlots: state.xdlSlots | 0,
       priority: new Uint8Array(state.priority || 0),
       memacBControl: state.memacBControl & 0xff,
       memacControl: state.memacControl & 0xff,
       memacBankSelect: state.memacBankSelect & 0xff,
       configLatch: state.configLatch & 0x07,
-      xdl: Object.assign({}, state.xdl),
+      xdl: Object.assign({}, state.xdl, {
+        attributeBuffer: state.xdl.attributeBuffer
+          ? new Uint8Array(state.xdl.attributeBuffer) : null,
+      }),
     };
   }
 
@@ -1329,7 +1683,9 @@
     copy(state.priority, source.priority);
     ["videoControlPending", "videoControlActive", "colorSelect", "collisionMask",
       "collisionDetect", "blitCollisionCode", "blitterBusy", "irqStatus", "irqControl",
+      "collisionLineMask",
       "memacSlots", "xdlSlots",
+      "memacReadSlots", "memacWriteSlots",
       "memacBControl", "memacControl", "memacBankSelect", "configLatch"].forEach(function (key) {
       if (source[key] !== undefined) state[key] = source[key] & 0xff;
     });
@@ -1339,12 +1695,22 @@
     state.blitterIrqPending = !!source.blitterIrqPending;
     state.blitterIrqScheduled = !!source.blitterIrqScheduled;
     state.blitterIrqResidual = source.blitterIrqResidual | 0;
+    state.memacTrace = Array.isArray(source.memacTrace)
+      ? source.memacTrace.map(event => Object.assign({}, event)) : [];
+    state.lastMemacTrace = Array.isArray(source.lastMemacTrace)
+      ? source.lastMemacTrace.map(event => Object.assign({}, event)) : [];
+    state.memacSequence = source.memacSequence | 0;
     state.xdlAddressPending = source.xdlAddressPending & 0x7ffff;
     state.xdlAddressActive = source.xdlAddressActive & 0x7ffff;
     state.blitAddress = source.blitAddress & 0x7ffff;
     state.blitter = source.blitter ? Object.assign({}, source.blitter) : null;
     state.paletteSelect = source.paletteSelect & 0x03;
-    if (source.xdl) state.xdl = Object.assign(createXdlState(), source.xdl);
+    if (source.xdl) {
+      state.xdl = Object.assign(createXdlState(), source.xdl, {
+        attributeBuffer: source.xdl.attributeBuffer
+          ? new Uint8Array(source.xdl.attributeBuffer) : null,
+      });
+    }
     return state;
   }
 
@@ -1371,6 +1737,7 @@
     memacAddress: memacAddress,
     ramboAddress: ramboAddress,
     noteMemacAccess: noteMemacAccess,
+    getMemacTrace: getMemacTrace,
     access: access,
     cloneState: cloneState,
     restoreState: restoreState,

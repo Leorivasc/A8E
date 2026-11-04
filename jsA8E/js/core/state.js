@@ -163,6 +163,8 @@
           gtiaEventRegisters: new Uint8Array(64),
           gtiaEventValues: new Uint8Array(64),
           gtiaEventCycles: new Uint8Array(64),
+          vbxeCollisionClearCount: 0,
+          vbxeCollisionClearCycles: new Uint8Array(16),
           vbxeLine: null,
           vbxeScanline: -1,
           playerPmgShift: new Uint8Array(4),
@@ -267,9 +269,17 @@
       for (let i = 0; i < IO_INIT_VALUES.length; i++) {
         CPU.setIo(ctx, IO_INIT_VALUES[i].addr, ioAccess);
       }
+      // MEMAC windows route RAM addresses below $D000 through ioAccess. A
+      // previous mapping may be stale after MEMAC is disabled or moved, so
+      // return those addresses to plain RAM before the active windows are
+      // installed again; otherwise writes fall into ioAccess's write-only
+      // shadow and never reach RAM.
+      const ramAccess = ctx.accessFunctionList[0];
+      for (let address = 0; address < 0xd000; address++) {
+        if (ctx.accessFunctionList[address] === ioAccess) CPU.setRam(ctx, address, address);
+      }
       const vbxe = ctx.ioData && ctx.ioData.vbxe;
       if (vbxe && vbxe.enabled) {
-        const ramAccess = ctx.accessFunctionList[0];
         for (let address = vbxe.page; address < vbxe.page + 0x20; address++) {
           CPU.setIo(ctx, address, ioAccess);
         }

@@ -1120,7 +1120,7 @@
 
     machine.ctx.ioData = makeIoData(video);
     machine.ctx.ioData.vbxe = vbxeApi.createState(vbxeConfig, video.paletteRgb);
-    machine.ctx.ioData.vbxeMapSync = memoryRuntime.setupMemoryMap;
+    machine.ctx.ioData.vbxeMapSync = memoryRuntime.syncVbxeWindows;
     machine.ctx.ioData.optionOnStart = optionOnStart;
     machine.ctx.ioData.sioTurbo = sioTurbo;
     machine.ctx.ioData.piaSetControlLine = ioApi.piaSetControlLine;

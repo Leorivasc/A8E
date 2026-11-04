@@ -435,6 +435,20 @@
     return null;
   }
 
+  function resolveRendererPreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    const raw = boot && boot.renderer !== undefined
+      ? boot.renderer
+      : (window.location && typeof window.location.search === "string" &&
+        typeof window.URLSearchParams === "function"
+        ? new window.URLSearchParams(window.location.search).get("a8e_renderer")
+        : null);
+    return String(raw || "").trim().toLowerCase() === "2d" ? "2d" : "auto";
+  }
+
   function resolvePokeyTracePreference() {
     const boot =
       window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
@@ -475,6 +489,7 @@
     const nativeScreenW = canvas.width | 0;
     const nativeScreenH = canvas.height | 0;
     const workerPreference = resolveWorkerPreference();
+    const rendererPreference = resolveRendererPreference();
     const pokeyTracePreference = resolvePokeyTracePreference();
     let crtEnabled = true;
     try {
@@ -529,7 +544,7 @@
           workerPreference !== false &&
           window.A8EApp.supportsWorker()));
     let gl = null;
-    if (!useWorkerApp) {
+    if (!useWorkerApp && rendererPreference !== "2d") {
       try {
         gl =
           canvas.getContext("webgl2", {
@@ -1557,6 +1572,7 @@
         memoryExpansion: memoryExpansionPreference,
         vbxe: vbxeConfigForPreference(vbxePreference),
         pokeyTrace: pokeyTracePreference,
+        renderer: rendererPreference,
       }, workerPreference));
       resizeCrtCanvas();
     } else {
@@ -1576,6 +1592,7 @@
           memoryExpansion: memoryExpansionPreference,
           vbxe: vbxeConfigForPreference(vbxePreference),
           pokeyTrace: pokeyTracePreference,
+          renderer: rendererPreference,
         }, workerPreference));
       } catch (e) {
         // If WebGL init succeeded but shader/program setup failed, fall back to 2D by replacing the canvas.
@@ -1612,6 +1629,7 @@
               memoryExpansion: memoryExpansionPreference,
               vbxe: vbxeConfigForPreference(vbxePreference),
               pokeyTrace: pokeyTracePreference,
+              renderer: rendererPreference,
             }, workerPreference));
             resizeCrtCanvas();
           } else {

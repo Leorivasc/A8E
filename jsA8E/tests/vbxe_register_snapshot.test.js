@@ -35,11 +35,14 @@ for (const page of [0xd640, 0xd740]) {
   at(0x02, 0x12);
   at(0x03, 0x07);
   assert.equal(state.videoControlPending, 0x0f, "VIDEO_CONTROL ignores upper bits");
+  assert.equal(state.videoControlActive, 0x0e,
+    "VIDEO_CONTROL transparency and extended-color bits apply immediately");
   assert.equal(state.xdlAddressPending, 0x71234, "XDL address keeps only 19 bits");
   assert.equal(read(0x00), 0x10, "CORE_REVISION readback is unaffected by VIDEO_CONTROL writes");
   assert.equal(read(0x01), 0x26, "MINOR_REVISION readback is unaffected by XDL writes");
   vbxe.verticalSync(state);
-  assert.equal(state.videoControlActive, 0x0f, "VIDEO_CONTROL latches at VSync");
+  assert.equal(state.videoControlActive, 0x0f,
+    "VIDEO_CONTROL applies D0 at VSync while retaining immediate bits");
   assert.equal(state.xdlAddressActive, 0x71234, "XDL address latches at VSync");
 
   at(0x1d, 0xc5);

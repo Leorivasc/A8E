@@ -454,6 +454,18 @@
       if (io && io.vbxe && io.vbxe.enabled && vbxeAccess) {
         const vbxeValue = vbxeAccess(io.vbxe, addr, value);
         if (vbxeValue !== null && vbxeValue !== undefined) {
+          if (value != null && addr === io.vbxe.page + 0x0a &&
+              io.drawLine && io.drawLine.vbxeCollisionClearCycles) {
+            const lineCycle = ((io.clock | 0) +
+              Math.max((ctx.currentInstructionCycles | 0) - 1, 0)) -
+              (io.displayListFetchCycle | 0);
+            const clearIndex = io.drawLine.vbxeCollisionClearCount | 0;
+            if (lineCycle >= 0 && lineCycle < CYCLES_PER_LINE &&
+                clearIndex < io.drawLine.vbxeCollisionClearCycles.length) {
+              io.drawLine.vbxeCollisionClearCycles[clearIndex] = lineCycle & 0xff;
+              io.drawLine.vbxeCollisionClearCount = clearIndex + 1;
+            }
+          }
           if (value != null && addr >= io.vbxe.page + 0x1d && addr <= io.vbxe.page + 0x1f &&
               typeof io.vbxeMapSync === "function") io.vbxeMapSync(ctx);
           // IRQ_CONTROL both configures and acknowledges the VBXE's
@@ -468,13 +480,17 @@
         const ramboLocalAddress = vbxeRamboAddress
           ? vbxeRamboAddress(io.vbxe, addr, sram[IO_PORTB]) : -1;
         if (ramboLocalAddress >= 0) {
-          if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe);
+          if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe,
+            value == null ? "cpu-read" : "cpu-write",
+            ctx.cycleCounter, io.displayListFetchCycle);
           if (value != null) io.vbxe.vram[ramboLocalAddress] = value & 0xff;
           return io.vbxe.vram[ramboLocalAddress] & 0xff;
         }
         const localAddress = vbxeMemacAddress(io.vbxe, addr, false);
         if (localAddress >= 0) {
-          if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe);
+          if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe,
+            value == null ? "cpu-read" : "cpu-write",
+            ctx.cycleCounter, io.displayListFetchCycle);
           if (value != null) io.vbxe.vram[localAddress] = value & 0xff;
           return io.vbxe.vram[localAddress] & 0xff;
         }

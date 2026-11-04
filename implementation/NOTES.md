@@ -1,5 +1,160 @@
 # NOTES.md
 
+- 2026-11-03: con VBXE el emulador iba 2,7 veces más lento (31 fps frente a
+  83 sin VBXE, medido con Celeste en headless). El perfil mostró dos costes
+  fijos por scanline/byte de DMA: (1) `readExpansionMemoryByte` (llamada por
+  cada byte de DMA de ANTIC) consultaba `window.A8EVbxe` entre 4 y 8 veces
+  por llamada, y en un contexto `vm` cada acceso al global es lento; ahora la
+  API se resuelve una vez (`getVbxeApi`) y solo si la VBXE está habilitada.
+  (2) `buildLocalBusSchedule` recorría las 912 posiciones del bus local en
+  cada scanline para contar las libres; ahora `reserveLocalSlot` lleva el
+  contador. Resultado: 77 fps con VBXE (83 sin ella). `test:vbxe` pasa.
+  Observación pendiente (Popeye): su bucle principal en `$21A3` espera
+  `VCOUNT=$7E` y luego conmuta DMACTL entre 3 y 0 con temporización por ciclo
+  dentro de la línea; el playfield no aparece, y el overlay de `$0-$1E000`
+  queda vacío con el blitter sin arrancar.
+
+- 2026-11-03: corregidos dos fallos del remapeo de ventanas MEMAC que
+  perdían escrituras de la CPU y explicaban que la mayoría del software VBXE
+  real no pasara del cargador. (1) `installIoHandlers` enruta a `ioAccess` las
+  direcciones RAM bajo una ventana MEMAC activa, pero nunca las devolvía a RAM
+  al desactivarla; fuera de la ventana `ioAccess` trata la dirección como
+  registro de solo escritura (`sram[addr] = v`) y la RAM no cambiaba. Ahora se
+  restauran a RAM antes de reinstalar las ventanas activas. (2) `vbxeMapSync`
+  apuntaba a `setupMemoryMap`, que con el OS ROM apagado recargaba
+  `$C000-$FFFF` desde `sram` (obsoleto mientras esa RAM está visible) al
+  escribir `MEMAC_CONTROL`/`BANK_SEL`, borrando la imagen que el programa
+  acababa de copiar. Ahora usa `syncVbxeWindows`, que solo reinstala las
+  ventanas. Phoenix copia su imagen de VRAM a `$0400-$FFFF` con un stub en
+  `$4000` y salta a `$D800`; antes ejecutaba BRK (RAM a cero), caía en
+  PC=0 y la VBXE no llegaba a activarse; ahora ejecuta su código propio con
+  `VIDEO_CONTROL=1` y XDL en `$49000`. `vbxe_memac_window_sync` cubre ambos
+  casos y falla si cualquiera de los dos arreglos se desactiva. Diagnóstico
+  asociado: los XEX se montan como disco y cargan a velocidad SIO normal
+  (~5 frames por sector), así que los gates de 480 frames de
+  `vbxe_real_software_scene` solo veían el cargador; Phoenix necesita ~4200
+  frames, Falcon/Crysis ~9000 y Galaga ~19000. Esos gates siguen sin probar
+  el software real y deben esperar el fin de la carga antes de aceptar una
+  escena.
+
+- 2026-11-03: auditoría de limpieza de VBXE: no se encontraron funciones
+  muertas ni exports retirables; las APIs del blitter, snapshots y traza MEMAC
+  tienen consumidores en runtime o regresiones. Se centralizaron las tablas
+  repetidas de geometría y DMA del overlay y se eliminó una rama redundante del
+  scheduler que devolvía exactamente el mismo resultado que el camino común.
+
+- 2026-11-03: corregido el inicio DMA del overlay en la agenda local. La tabla
+  ahora usa los índices de Altirra `Narrow=0`, `Normal=1`, `Wide=2` y reserva
+  los primeros slots en `10/18/26`, respectivamente; antes narrow y wide
+  estaban intercambiados. `vbxe_blitter_state` cubre las tres anchuras. El
+  consumo ciclo a ciclo del residuo por el blitter y el orden físico MEMAC
+  siguen requiriendo una comparación diferencial independiente.
+
+- 2026-11-03: los accesos MEMAC conservan ahora una traza temporal con tipo,
+  fase AHRM, ciclo CPU, ciclo relativo de scanline y slot local candidato.
+  `localBusBudget()` usa ese slot cuando el caller dispone de timestamp y
+  mantiene el camino agregado para accesos antiguos. La traza se conserva en
+  snapshots y `getMemacTrace()` la expone para diagnósticos diferenciales.
+
+- 2026-11-03: `vbxe_browser_backend` compara las cuatro rutas contra la
+  baseline persistida `tests/fixtures/vbxe_browser_golden.json`. También acepta
+  `A8E_VBXE_REFERENCE` para comparar un JSON externo de Altirra con el mismo
+  esquema, sin introducir dependencias.
+
+- 2026-11-03: el gate browser acepta `a8e_renderer=2d` y fuerza Canvas2D
+  tanto en main-thread como en worker. La captura VBXE valida ahora cuatro
+  rutas (WebGL2 main/worker y Canvas2D main/worker), con dimensiones, PNG no
+  vacío y hash idéntico entre los dos backends de cada pareja.
+
+- 2026-11-03: el scheduler local ahora conserva el tipo de acceso MEMAC:
+  lecturas CPU/ANTIC reservan fase 1 y escrituras CPU reservan fase 3. Se
+  mantiene el contador agregado como compatibilidad para callers antiguos y
+  `vbxe_blitter_state` verifica que ambos tipos no se mezclen.
+
+- 2026-11-03: afinado el replay posterior a `COLCLR`: el tramo posterior
+  conserva la composición visual por `PRIOR`, pero la máscara de colisión usa
+  la prioridad de playfield vigente, evitando reinyectar contribuyentes P/M
+  latched del tramo anterior. Esto mantiene los oráculos históricos P5 y
+  GTIA-special mientras deja intacto el replay normal sin `COLCLR`.
+
+- 2026-11-03: completado el manejo raster de `COLCLR` durante el replay
+  GTIA. La línea registra el ciclo horizontal del clear, descarta las
+  contribuciones anteriores y reconstruye solo el tramo posterior; en el
+  camino validado por FX 1.26 el cálculo posterior usa la prioridad de
+  playfield vigente para no reintroducir P/M de un tramo pre-clear. Los
+  probes P5 y GTIA-special vuelven a pasar.
+
+- 2026-11-03: limpiada por scanline la planeación de contribuyentes de
+  `vbxeCollisionPriority` antes de dibujar GTIA. La planeación conserva una
+  marca válida solo para la línea actual; sin esta limpieza el replay de
+  colisiones podía reutilizar P0/P1 de la misma línea del frame anterior y
+  romper el probe P5 cuando esos jugadores se apagaban.
+
+- 2026-11-03: añadido `npm run test:vbxe:browser`, un gate CDP sin
+  dependencias externas que selecciona la misma aplicación en main-thread y
+  worker, espera una escena VBXE y compara dimensiones, tamaño y hash de la
+  captura PNG. Restaura la URL original y se puede hacer obligatorio con
+  `A8E_REQUIRE_CDP=1`; sin Chromium/CDP disponible queda como skip explícito.
+
+- 2026-11-03: sustituido el presupuesto VBXE puramente agregado por una
+  agenda explícita de 912 slots locales por scanline. Overlay usa las fases
+  pares de AHRM, MEMAC las fases impares, XDL reserva sus 22 slots después del
+  área activa y el reload de mapa reserva las 172 celdas siguientes; el
+  blitter consume únicamente slots libres. El contrato agregado se conserva y
+  ahora tiene regresión sobre posiciones concretas. La entrada MEMAC todavía
+  llega al modelo como contador, por lo que la fase exacta CPU-read/write del
+  bus externo queda como siguiente refinamiento.
+
+- 2026-11-03: el replay GTIA de VBXE ya recalcula también la contribución de
+  `COLDETECT` de la línea. Antes se preservaba para evitar doble conteo, lo que
+  impedía reflejar un cambio mid-line de `PRIOR`/modo GTIA. Ahora se retira la
+  máscara producida por el render inicial, se reconstruye por spans y se
+  conservan los bits históricos de líneas anteriores. El ciclo de `COLCLR`
+  se documenta y cubre en la entrada posterior.
+
+- 2026-11-03: corregida la recarga del buffer de attribute map al terminar una
+  fila en una entrada XDL repetida. La recarga ya no depende de decodificar una
+  entrada nueva: también ocurre cuando el contador vertical de cinco bits
+  vuelve a cero, después de avanzar la dirección por el stride. La regresión
+  cubre dos filas consecutivas y confirma que la segunda usa sus 43 celdas
+  recién capturadas.
+
+- 2026-11-03: ajustado el blitter para cobrar el ciclo de lectura inicial de
+  BCB con fuente constante (`AND=$00`), que Altirra descuenta aparte antes
+  de aplicar el coste reducido por byte de salida. La operación sigue siendo
+  funcional y las pruebas de estado/temporización continúan verdes.
+
+- 2026-11-03: el compositor VBXE ya puede reconstruir overlay y playfield por
+  spans GTIA dentro de una misma línea. `applyGtiaSpans()` vuelve a dibujar
+  cada intervalo con el `PRIOR`/modo GTIA vigente, en lugar de reaplicar solo
+  colores del mapa sobre un overlay compuesto con el primer estado. La
+  colisión se conserva del render primario durante este replay para no contar
+  dos veces el mismo píxel; la colisión dependiente de cambios mid-line queda
+  todavía como diferencial específico pendiente. Los probes P5/multicolor y
+  GTIA-special siguen pasando.
+
+- 2026-11-03: separado también el latch de `VIDEO_CONTROL` en el modelo
+  temporal: D1-D3 se aplican al escribir y D0 se consume en VSync, conforme a
+  AHRM 12.4. La regresión de registros se actualizó y permanece verde.
+
+- 2026-11-03: el attribute map ahora captura explícitamente las 43 celdas de
+  cuatro bytes durante la carga de fila y cada píxel de esa línea consume el
+  buffer, no la VRAM viva. Esto alinea el modelo con el buffer de línea de
+  AHRM/Altirra y evita que una escritura MEMAC durante el display modifique
+  retrospectivamente la línea. El buffer forma parte de snapshots y la
+  regresión de estado cubre la inmutabilidad de la captura.
+
+- 2026-11-03: corregidos cuatro bordes de la ruta XDL según AHRM 12.4 y
+  `vbxe.cpp` de Altirra 4.40. `VIDEO_CONTROL` aplica de inmediato EXT y los
+  dos bits de transparencia, dejando el bit XDL para VSync; el decodificador
+  desactiva la combinación inválida de modo `c0&3==3`; una nueva entrada de
+  texto comienza en `OvScrollY`; y VSync/warm reset conservan también el
+  `characterBase` y los latches de dirección/stride. Las regresiones de
+  `vbxe_device_state` y `vbxe_register_snapshot` pasan. Quedaban pendientes
+  el compositor raster completo, el buffer temporal del attribute map y el
+  arbitraje DMA por fase; el buffer y el primer replay raster se completaron
+  en las entradas posteriores, pero el arbitraje por fase sigue abierto.
+
 - 2026-11-03: completado el primer gate visual del corpus real FX1.26 en
   `vbxe_real_software_scene.test.js`, integrado en `test:vbxe:full`. Con
   `turbo=true`, `sioTurbo=true`, 130XE-128K, NTSC y render activo, el gate

@@ -13,11 +13,15 @@ trabajo, los criterios de salida, los diagramas y la ruta de validación.
 
 Hay tres niveles distintos y no deben mezclarse:
 
+La auditoría de limpieza de VBXE mantiene las APIs de diagnóstico y
+compatibilidad porque siguen siendo utilizadas por runtime, snapshots o tests;
+la limpieza se limitó a tablas duplicadas y control redundante del scheduler.
+
 | Nivel | Definición | Estado |
 | --- | --- | --- |
 | Compatibilidad práctica | Software VBXE real arranca y ejecuta XDL, mapas, MEMAC, blitter e IRQ en el runtime principal. | **Alcanzado** |
 | Fidelidad raster | Los cambios GTIA/VBXE dentro de una scanline se componen por spans y coinciden con Altirra en las escenas cubiertas. | **En progreso** |
-| Producto completo | La ruta worker presenta el plano RGB, la suite visual es reproducible y las diferencias con hardware están documentadas. | **Pendiente** |
+| Producto completo | La ruta worker presenta el plano RGB, la suite visual es reproducible y las diferencias con hardware están documentadas. | **Pendiente de validación** |
 
 La compatibilidad práctica no requiere esperar a la arbitraje exacta de cada
 slot local ni a la ruta worker. El selector VBXE sigue desactivado por defecto
@@ -58,7 +62,7 @@ y, cuando está activo, selecciona deliberadamente el runtime principal.
                  renderer main-thread
                     (WebGL o Canvas 2D)
 
-       worker: pendiente transportar el plano RGB separado
+       worker: OffscreenCanvas compone el plano VBXE; falta la regresión comparativa
 ```
 
 La regla importante es que VBXE no reemplaza ANTIC ni GTIA. El compositor
@@ -86,9 +90,10 @@ inicio de línea
               `--> publicar planos de presentación
 ```
 
-No se debe cambiar el scheduler agregado del blitter sólo por una hipótesis
-visual. Una modificación de arbitraje necesita primero un diagnóstico que
-muestre una diferencia horizontal reproducible.
+La agenda local ya existe y conserva una salida agregada compatible para el
+blitter. No se debe cambiar el orden MEMAC ni añadir excepciones sólo por una
+hipótesis visual: hace falta un diagnóstico que muestre una diferencia
+horizontal reproducible.
 
 ## Etapas de trabajo
 
@@ -117,13 +122,20 @@ muestre una diferencia horizontal reproducible.
 
 ### Etapa 2 — overlay XDL por spans
 
-**Estado: pendiente.**
+**Estado: parcialmente completada.**
 
 - Reproducir standard, lores, hires y texto por intervalos, respetando los
   límites narrow/normal/wide ya validados.
 - Aplicar transparencia de color 0/`$F`, paleta y prioridad en cada span.
 - Cubrir cambios de `VIDEO_CONTROL`, paleta, scroll y XDL durante una línea.
 - Verificar transiciones entre anchos y entre planos Atari/VBXE.
+
+La ruta `applyGtiaSpans()` ya reconstruye overlay y playfield por intervalo,
+incluyendo standard, lores, hires y texto en los planos de presentación
+correspondientes. Los límites narrow/normal/wide, la transparencia y la
+prioridad cubierta tienen regresiones. Siguen pendientes los cambios de
+registros VBXE dentro de la línea y el cruce completo de todas las
+combinaciones de overlay con modos GTIA especiales.
 
 **Salida:** overlay correcto cuando el estado GTIA cambia dentro de la línea.
 
@@ -141,6 +153,8 @@ los parámetros visuales. La regresión multi-frame está en
   celda y avance de dirección.
 - Aplicar paleta, P0–P3, PF0–PF3/P5, reverse y transparencia por celda/span.
 - Cubrir `AtMapOn`, `AtMapOff`, cambio de dirección, reload y límite de 43 celdas.
+- Recargar también el buffer al cambiar de fila dentro de una entrada repetida;
+  este borde ya tiene regresión en `vbxe_device_state`.
 - Añadir escenas que cambien GTIA y mapa durante la misma línea; ya existe una
   regresión de PF3/GTIA para los planos legacy y hires.
 
@@ -194,14 +208,17 @@ fase y la interacción con expansiones externas durante una ejecución real.
 
 ### Etapa 6 — temporización del blitter
 
-**Estado: contrato AHRM de XDL implementado; arbitraje exacto por fase
-pendiente.**
+**Estado: agenda local implementada; validación diferencial y coordenadas
+del orden físico y la validación horizontal de MEMAC pendientes.**
 
 - Ejecutar los diagnósticos continuous/restart de attribute-map en Altirra.
 - Comparar el borde azul/rojo y el campo de finalización persistente.
 - Si aparece una diferencia, aislarla entre XDL, reload del mapa, MEMAC e IRQ.
-- Añadir arbitraje por fase sólo si el diagnóstico demuestra que es necesario;
-  el coste XDL fijo de 22 ciclos ya está aplicado.
+- La agenda ya reserva 912 slots locales por scanline: overlay en fases pares,
+  con los inicios narrow/normal/wide alineados a la tabla de Altirra,
+  lecturas MEMAC en fase 1, escrituras CPU en fase 3, XDL y mapa después del
+  área activa, y blitter en el residuo. Falta validar el orden físico y el
+  consumo ciclo a ciclo del residuo de MEMAC/blitter.
 
 **Salida:** acuerdo reproducible de timing de baseline, overlay, mapa continuo y
 mapa reiniciado; la precisión por slot se declara sólo si existe marcador
@@ -209,9 +226,9 @@ horizontal suficiente.
 
 La implementación ya aplica la actualización XDL fija de 22 ciclos de AHRM,
 independientemente de los bytes decodificados; las líneas repetidas no generan
-una segunda actualización. La excepción restante es la arbitraje agregada por
-scanline frente a la secuencia física de ocho fases: se mantendrá así hasta
-que un diferencial con marcador horizontal demuestre una divergencia.
+una segunda actualización. La excepción restante es el orden físico de cada
+acceso MEMAC, el consumo ciclo a ciclo del residuo por el blitter y su
+comparación con Altirra.
 
 ### Etapa 7 — software real y comparación visual
 
@@ -256,12 +273,19 @@ declaradas; la equivalencia requiere además la comparación Altirra pendiente.
 
 ### Etapa 8 — worker y cierre de producto
 
-**Estado: integración implementada; validación worker/fallback pendiente.**
+**Estado: integración y gate browser implementados; ejecución depende de CDP.**
 
 - Mantener el plano RGB VBXE dentro del render de `OffscreenCanvas` del worker;
   ya no se fuerza el fallback main-thread cuando VBXE está activo.
 - Mantener equivalencia con WebGL, Canvas 2D, snapshots y automation API.
-- Validar selector, reset, `$D600/$D700`, PAL/NTSC y fallback sin worker.
+- Ejecutar `npm run test:vbxe:browser` con Chromium en CDP; el gate valida
+  worker/fallback WebGL2 y Canvas2D, capturas no vacías y hash PNG equivalente,
+  y restaura la URL.
+- Validar selector, reset, `$D600/$D700` y PAL/NTSC; la variante Canvas2D ya
+  tiene cobertura automatizada y la baseline provisional queda persistida en
+  `jsA8E/tests/fixtures/vbxe_browser_golden.json`.
+- Para una referencia independiente, `A8E_VBXE_REFERENCE` permite comparar
+  capturas JSON de Altirra con el mismo esquema sin modificar el gate interno.
 - Ejecutar la suite completa y actualizar la matriz de soporte.
 
 **Salida:** VBXE habilitable desde la aplicación normal sin seleccionar

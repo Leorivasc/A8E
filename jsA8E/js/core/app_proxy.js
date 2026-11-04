@@ -1621,6 +1621,7 @@
         videoStandard: videoStandard,
         memoryExpansion: state.memoryExpansion,
         vbxe: state.vbxe,
+        renderer: opts.renderer === "2d" ? "2d" : "auto",
         pokeyTrace: opts.pokeyTrace === true,
         keyboardMappingMode: keyboardMappingMode,
       },
