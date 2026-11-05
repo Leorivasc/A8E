@@ -44,6 +44,10 @@ typedef struct
 	u32 lBlockAddress;
 	/* Local cycles still needed to load the 21-byte BCB while loading. */
 	u32 lLoadCyclesRemaining;
+	/* BLITTER_START latches the first BCB at once (Altirra); the load cycles
+	 * that follow only account for its time. */
+	u8 aPreloaded[21];
+	u8 bPreloaded;
 	u32 lSource;
 	s32 lSourceYStep;
 	s32 lSourceXStep;

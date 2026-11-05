@@ -260,7 +260,9 @@ static void Vbxe_LoadBlitterBlock(Vbxe_t *pVbxe)
 	u32 lAddress = pWork->lBlockAddress & VBXE_VRAM_MASK;
 
 	for(lIndex = 0; lIndex < VBXE_BCB_SIZE; lIndex++)
-		aBlock[lIndex] = pVbxe->pVram[(lAddress + lIndex) & VBXE_VRAM_MASK];
+		aBlock[lIndex] = pWork->bPreloaded ? pWork->aPreloaded[lIndex] :
+			pVbxe->pVram[(lAddress + lIndex) & VBXE_VRAM_MASK];
+	pWork->bPreloaded = 0;
 
 	pWork->lBlockAddress = lAddress;
 	pWork->lLoadCyclesRemaining = 0;
@@ -516,6 +518,16 @@ static void Vbxe_StartBlitter(Vbxe_t *pVbxe)
 	memset(&pVbxe->tBlit, 0, sizeof(pVbxe->tBlit));
 	pVbxe->tBlit.lBlockAddress = pVbxe->lBlitAddress & VBXE_VRAM_MASK;
 	pVbxe->tBlit.lLoadCyclesRemaining = VBXE_BCB_SIZE;
+	/* Altirra loads the first entry immediately because some programs
+	 * overwrite it right after starting the blitter. */
+	{
+		u32 lIndex;
+
+		for(lIndex = 0; lIndex < VBXE_BCB_SIZE; lIndex++)
+			pVbxe->tBlit.aPreloaded[lIndex] =
+				pVbxe->pVram[(pVbxe->tBlit.lBlockAddress + lIndex) & VBXE_VRAM_MASK];
+		pVbxe->tBlit.bPreloaded = 1;
+	}
 	pVbxe->cBlitterBusy = 0x01;
 }
 

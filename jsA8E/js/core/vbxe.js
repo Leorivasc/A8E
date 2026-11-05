@@ -236,7 +236,10 @@
   function loadBlitterBlock(state) {
     const blockAddress = state.blitter && state.blitter.blockAddress !== undefined
       ? state.blitter.blockAddress & 0x7ffff : state.blitAddress & 0x7ffff;
-    const block = readBlitBlock(state, blockAddress);
+    // BLITTER_START latches the first BCB at once (Altirra), so a program that
+    // overwrites it right after starting the blitter does not change this blit.
+    const block = state.blitter && state.blitter.preloadedBlock
+      ? state.blitter.preloadedBlock : readBlitBlock(state, blockAddress);
     state.blitter = {
       blockAddress: blockAddress,
       source: (block[0] | (block[1] << 8) | (block[2] << 16)) & 0x7ffff,
@@ -535,6 +538,7 @@
     state.blitter = {
       blockAddress: state.blitAddress & 0x7ffff,
       loadCyclesRemaining: 21,
+      preloadedBlock: Array.from(readBlitBlock(state, state.blitAddress & 0x7ffff)),
     };
     state.blitterBusy = 0x01;
   }
@@ -952,7 +956,21 @@
     return !!sourceValues && sourceValues[pixel] <= 3;
   }
 
-  function compositeOverlayPixel(state, video, target, targetPixel, priorityPixel, color, sourceByte, overlayPalette, priorityMask, attribute, gtiaMode, suppressCollisionReplay) {
+  // Altirra RenderMode8: ANTIC hires (modes 2, 3, F, PRIOR top bits clear)
+  // feeds the priority logic PF2 for every pixel. Only FX 1.26 with extended
+  // color (VIDEO_CONTROL bit 1) lets set pixels carry PF1. A reverse
+  // attribute cell reinterprets the data as lores, which has no such
+  // substitution.
+  function hiresPriorityForOverlay(state, anticMode, gtiaMode, attribute, visible) {
+    const mode = anticMode & 0x0f;
+    if ((mode !== 0x02 && mode !== 0x03 && mode !== 0x0f) || (gtiaMode & 0x03) !== 0 ||
+        (attribute && attribute.reverse) || (visible & PRIO_PF1) === 0) return visible;
+    const fx126 = state.profile === "fx1.26" || state.profile === "fx1.26r";
+    if (fx126 && (state.videoControlActive & 0x02) !== 0) return visible;
+    return (visible & ~PRIO_PF1) | PRIO_PF2;
+  }
+
+  function compositeOverlayPixel(state, video, target, targetPixel, priorityPixel, color, sourceByte, overlayPalette, priorityMask, attribute, gtiaMode, suppressCollisionReplay, anticMode) {
     const replayCollisions = suppressCollisionReplay !== true;
     if (replayCollisions && attribute && (attribute.control & 0x08)) {
       state.collisionDetect |= 0x80;
@@ -969,9 +987,10 @@
     const storedContributors = video.vbxeCollisionPriority
       ? video.vbxeCollisionPriority[priorityPixel] & 0xffff
       : 0;
-    const visiblePriority = (storedContributors & VBXE_CONTRIBUTOR_VALID) !== 0
-      ? storedContributors & ~VBXE_CONTRIBUTOR_VALID
-      : atariPriority;
+    const visiblePriority = hiresPriorityForOverlay(state, anticMode, gtiaMode, attribute,
+      (storedContributors & VBXE_CONTRIBUTOR_VALID) !== 0
+        ? storedContributors & ~VBXE_CONTRIBUTOR_VALID
+        : atariPriority);
     if (replayCollisions && sourceByte !== null && overlayCollisionEnabled(state, sourceByte)) {
       // AHRM 12.4: COLMASK selects source-byte ranges and collision
       // detection is independent of whether the overlay wins its priority
@@ -1064,7 +1083,7 @@
         target ? (x >> 1) : Math.floor(x * 320 / 256));
       // Altirra FX 1.26 text-collision probe: COLMASK selects the cell's
       // attribute byte, rather than its character name or fetched glyph byte.
-      compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, attribute, line.overlayPalette, priorityMask, map, line.anticGtiaMode, line.suppressCollisionReplay);
+      compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, attribute, line.overlayPalette, priorityMask, map, line.anticGtiaMode, line.suppressCollisionReplay, line.anticMode);
     }
   }
 
@@ -1132,7 +1151,7 @@
         : atariBase + x;
       const map = attributeMapCell(state, line,
         target ? (x >> 1) : x);
-      compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, sourceByte, line.overlayPalette, priorityMask, map, line.anticGtiaMode, line.suppressCollisionReplay);
+      compositeOverlayPixel(state, video, pixels, base + x, priorityPixel, color, sourceByte, line.overlayPalette, priorityMask, map, line.anticGtiaMode, line.suppressCollisionReplay, line.anticMode);
     }
   }
 

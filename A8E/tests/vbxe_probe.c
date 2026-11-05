@@ -361,6 +361,33 @@ static int TestBlitterStartMidLine(void)
 	return 1;
 }
 
+static int TestBlitterStartLatchesBcb(void)
+{
+	_6502_Context_t *pContext = OpenMachine(VBXE_PROFILE_FX126, VBXE_PAGE_D6);
+	IoData_t *pIoData;
+	Vbxe_t *pVbxe;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+	pIoData = (IoData_t *)pContext->pIoData;
+	pVbxe = pIoData->pVbxe;
+	pVbxe->pVram[0x2000] = 0x05;
+	pVbxe->pVram[0x2100] = 0x07;
+	WriteBcb(pVbxe, 0x1000, 0x2000, 0x4000, 1, 1, 0xff, 0x00, 0x00, 0);
+	SetBlitAddress(pContext, 0x1000);
+
+	/* Almost no line left, so the BCB load cannot finish inside START. The
+	 * program then reuses the block for its next sprite (Gacek does). */
+	pIoData->llCycle = 113;
+	BusWrite(pContext, 0xd653, 0x01);
+	pVbxe->pVram[0x1001] = 0x21; /* source becomes $2100 */
+	Vbxe_EndOfLine(pVbxe);
+	Vbxe_EndOfLine(pVbxe);
+	REQUIRE(BusRead(pContext, 0xd653) == 0, "the blit did not finish");
+	REQUIRE(pVbxe->pVram[0x4000] == 0x05, "the blit used the rewritten BCB (%02X)", pVbxe->pVram[0x4000]);
+	CloseMachine(pContext);
+	return 1;
+}
+
 static int TestSoftResetStrobe(void)
 {
 	_6502_Context_t *pContext = OpenMachine(VBXE_PROFILE_FX126, VBXE_PAGE_D6);
@@ -470,7 +497,18 @@ static int TestXdlStandardOverlay(void)
 	StartXdl(pVbxe, 0x100);
 	m_aPriority[96] = 0x02;
 	Compose(pVbxe, 8);
-	REQUIRE(pVbxe->cCollisionDetect == 0x20, "COLDETECT is %02X, expected 20", pVbxe->cCollisionDetect);
+	/* The test line is ANTIC mode F: without extended color hires set pixels
+	 * reach the priority logic as PF2 (Altirra RenderMode8). */
+	REQUIRE(pVbxe->cCollisionDetect == 0x40, "COLDETECT is %02X, expected 40", pVbxe->cCollisionDetect);
+	/* FX 1.26 with extended color keeps PF1 for set pixels. */
+	pVbxe->cCollisionDetect = 0;
+	pVbxe->cVideoControlPending |= 0x02;
+	pVbxe->cVideoControlActive |= 0x02;
+	StartXdl(pVbxe, 0x100);
+	pVbxe->cVideoControlActive |= 0x02;
+	m_aPriority[96] = 0x02;
+	Compose(pVbxe, 8);
+	REQUIRE(pVbxe->cCollisionDetect == 0x20, "extended color COLDETECT is %02X, expected 20", pVbxe->cCollisionDetect);
 	CloseMachine(pContext);
 	return 1;
 }
@@ -670,6 +708,7 @@ int main(void)
 		TestBlitterBudgetAcrossLines,
 		TestBlitterCollisionGroups,
 		TestBlitterStartMidLine,
+		TestBlitterStartLatchesBcb,
 		TestSoftResetStrobe,
 		TestXdlStandardOverlay,
 		TestXdlTextOverlay,

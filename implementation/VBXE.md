@@ -99,9 +99,12 @@ Known gaps: the `vbxe_real_software_scene` gates still use 480-frame
 checkpoints and therefore only observe boot screens for the large XEXs (Phoenix
 needs about 4200 frames, Popeye about 4800, Galaga about 19000); they should
 wait for load completion, press keys at menus, and require VBXE to be active.
-`vbxe_fx124_priority_probe_boot` fails ("legacy bit 6 must win over PF2") and
-did before this pass. `vbxe_blitter_attrmap_phase_boot` is timing-sensitive and
-fails intermittently when the machine is loaded.
+`vbxe_fx124_priority_probe_boot` failed before this pass ("legacy bit 6 must
+win over PF2") and is fixed: Altirra's `RenderMode8` gives the overlay priority
+logic PF2 for every ANTIC hires pixel (modes 2, 3, F), and only FX 1.26 with
+extended color lets set pixels carry PF1 (see NOTES.md, 2026-11-05).
+`vbxe_blitter_attrmap_phase_boot` is timing-sensitive and fails intermittently
+when the machine is loaded.
 
 Performance (headless Node harness unless stated): D600 went from about 8 fps
 to 27-45 fps and VBXE overhead on a text-mode XEX from 2.7x to roughly 1.1x.

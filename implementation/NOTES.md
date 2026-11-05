@@ -1,5 +1,24 @@
 # NOTES.md
 
+- 2026-11-05 (VBXE overlay priority for ANTIC hires): `vbxe_fx124_priority_probe_boot`
+  (known failing "legacy bit 6 must win over PF2") traced to Altirra's
+  `RenderMode8` (`vbxe.cpp`, lines 2530-2690): in ANTIC hires (modes 2, 3, F
+  with PRIOR bits 7-6 clear) the priority logic sees PF2 for every pixel; the
+  luma bit only changes the color. Only FX 1.26 with extended color
+  (VIDEO_CONTROL bit 1) uses PF1 for set pixels (comments at lines 2539-2540:
+  "For V1.26+, use PF1 priority for set pixels. For V1.25-, use PF2/PF3
+  priority for all pixels"). jsA8E and the native core always gave set pixels
+  PF1, so the FX 1.24 bit-6 band did not cover them. Fix in both cores
+  (`hiresPriorityForOverlay` in `vbxe.js`, `Vbxe_Composite` in `VbxeVideo.c`):
+  the overlay's priority and collision input maps PF1 to PF2 for hires lines
+  unless FX 1.26 with extended color, and never for reverse attribute cells
+  (they read the data as lores). GTIA's own priority/collision data and the
+  attribute-map colors are unchanged. Results: the probe passes; the VBXE suite
+  is 56 of 57 (only the unstable `vbxe_blitter_attrmap_phase_boot` fails, as
+  before); `vbxe_probe` passes with a case for extended color. Not done: in
+  Altirra, without extended color a set pixel in an attribute-map cell takes the
+  cell's PF2 color with only the PF1 luminance (lines 2610-2620); both cores
+  still use the full PF1 color. No real program showed the difference yet.
 - 2026-11-05 (VBXE text mode: clipped top of characters): in Textmode Test
   modes 3 and 4 (80x30, 80x32) the XDL uses entries of 7 lines with
   `OVSCRL Y=1` (skipping the usually blank first glyph row). `nextXdlLine`

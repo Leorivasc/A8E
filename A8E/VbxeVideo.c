@@ -414,6 +414,17 @@ static void Vbxe_Composite(Vbxe_t *pVbxe, const VbxeLine_t *pLine, uint32_t *pTa
 		lPalette = pCell->cOverlayPalette;
 		cMask = pCell->cPriority;
 	}
+	/* Altirra RenderMode8: ANTIC hires (modes 2, 3, F without GTIA special
+	 * modes) feeds the priority logic PF2 for every pixel; only FX 1.26 with
+	 * extended color lets set pixels carry PF1. A reverse cell reads the data
+	 * as lores, so it does not apply there. */
+	if((pLine->cAnticMode == 0x02 || pLine->cAnticMode == 0x03 || pLine->cAnticMode == 0x0f) &&
+	   pLine->cGtiaMode == 0 && (lPriority & PRIO_PF1) != 0 &&
+	   (pCell == NULL || !pCell->bReverse) &&
+	   !(pVbxe->eProfile == VBXE_PROFILE_FX126 && (pVbxe->cVideoControlActive & 0x02)))
+	{
+		lPriority = (lPriority & ~(u32)PRIO_PF1) | PRIO_PF2;
+	}
 	/* COLMASK selects source-byte ranges; collisions do not depend on the
 	 * overlay winning the priority comparison. */
 	if(pVbxe->cCollisionMask & (1u << (cSourceByte >> 5)))
