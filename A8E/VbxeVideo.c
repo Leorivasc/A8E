@@ -442,7 +442,8 @@ static void Vbxe_Composite(Vbxe_t *pVbxe, const VbxeLine_t *pLine, uint32_t *pTa
 static u8 Vbxe_TextPixel(const Vbxe_t *pVbxe, const VbxeLine_t *pLine, u32 lSourceX,
 	u8 cTransparency, u32 *pColor, u8 *pSourceByte)
 {
-	u32 lSourceRow = (u32)pLine->cTextRow + pLine->cTextScrollY;
+	/* cTextRow already starts at the latched vertical scroll. */
+	u32 lSourceRow = pLine->cTextRow;
 	u32 lRowAddress = (pLine->lAddress + (lSourceRow >> 3) * pLine->lStride) & VBXE_VRAM_MASK;
 	u32 lCellAddress = (lRowAddress + ((lSourceX >> 3) << 1)) & VBXE_VRAM_MASK;
 	u8 cCharacter = pVbxe->pVram[lCellAddress];

@@ -28,6 +28,8 @@ All notable changes to this project will be documented in this file.
   debugger, HostFS, assembler, snapshot, artifact, and memory-profile flows.
 
 ### Fixed
+- VBXE text overlay (both cores): vertical scroll was applied twice, cutting the
+  top of characters in Textmode Test 80x30/80x32.
 - Firefox now runs the emulator on the main thread by default (the worker path
   caused seconds of input lag on desktop Firefox); `?a8e_worker=1` still opts
   in to the worker.

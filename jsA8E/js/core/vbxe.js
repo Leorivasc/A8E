@@ -1043,7 +1043,9 @@
       : outputPixels;
     for (let x = outputStart; x < outputEnd; x++) {
       const sourceX = (target ? x : Math.floor(x * 640 / 256)) + (line.textScrollX || 0);
-      const sourceRow = (line.textRow & 7) + (line.textScrollY || 0);
+      // textRow already starts at the latched vertical scroll (nextXdlLine),
+      // so the scroll must not be added a second time.
+      const sourceRow = line.textRow & 7;
       const cell = sourceX >> 3;
       const rowAddress = (line.address + Math.floor(sourceRow / 8) * (line.stride || 0)) & 0x7ffff;
       const cellAddress = (rowAddress + (cell << 1)) & 0x7ffff;

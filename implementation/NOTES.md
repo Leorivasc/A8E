@@ -1,5 +1,15 @@
 # NOTES.md
 
+- 2026-11-05 (VBXE text mode: clipped top of characters): in Textmode Test
+  modes 3 and 4 (80x30, 80x32) the XDL uses entries of 7 lines with
+  `OVSCRL Y=1` (skipping the usually blank first glyph row). `nextXdlLine`
+  already starts each entry at `textRow = scrollY`, but `renderTextXdlLine`
+  added `textScrollY` again (`sourceRow = textRow + textScrollY`), so the
+  first line showed glyph row 2 and the top of every character was cut. Fixed
+  in both cores (`sourceRow = textRow`); the `vbxe_device_state` render case
+  was rewritten for the corrected semantic, and `vbxe_probe` has
+  `TestTextVerticalScrollStartsAtLatchedRow`. The text, scroll, collision and
+  Textmode Test boot tests still pass.
 - 2026-11-04 (Native A8E: VBXE stage 2 on a real demo): running `demoD600.xex`
   (`./A8E -128k -n --vbxe`) showed every other screen column black. Cause: the
   project's `u32` is `unsigned long`, 8 bytes on LP64, and the ARGB overlay

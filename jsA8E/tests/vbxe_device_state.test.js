@@ -418,7 +418,7 @@ state.vram[0x1024] = 2;
 state.vram[0x1025] = 3;
 state.vram[0x110f] = 0;
 state.vram[0x1110] = 0x80;
-vbxe.renderXdlLine(state, video, 9, { mode: "text", address: 0x1020, stride: 4, characterBase: 0x1100, textRow: 7, textScrollY: 1 });
+vbxe.renderXdlLine(state, video, 9, { mode: "text", address: 0x1024, stride: 4, characterBase: 0x1100, textRow: 0, textScrollY: 1 });
 assert.equal(video.vbxeHiresRgb[hiresBase], 0xff332211);
 // Attribute-map control bits select an overlay palette and one of P0-P3 for
 // every 8x8 standard-resolution cell. Bit 3 independently latches ATT.

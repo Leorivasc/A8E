@@ -505,6 +505,39 @@ static int TestXdlTextOverlay(void)
 	return 1;
 }
 
+static int TestTextVerticalScrollStartsAtLatchedRow(void)
+{
+	_6502_Context_t *pContext = OpenMachine(VBXE_PROFILE_FX126, VBXE_PAGE_D6);
+	Vbxe_t *pVbxe;
+	static const u8 aXdl[] = {
+		0xc1, 0x89,             /* text, OVADR | OVSCRL, CHBASE | MISC | END */
+		0x00, 0x30, 0x00,       /* overlay address $003000 */
+		0x20, 0x00,             /* stride 32 */
+		0x00, 0x01,             /* scroll X 0, scroll Y 1 */
+		0x04,                   /* character base $2000 */
+		0x11,                   /* normal width, overlay palette 1 */
+		0xff};
+	const uint32_t *pRow;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+	pVbxe = ((IoData_t *)pContext->pIoData)->pVbxe;
+	memcpy(&pVbxe->pVram[0x100], aXdl, sizeof(aXdl));
+	pVbxe->pVram[0x3000] = 1;
+	pVbxe->pVram[0x3001] = 0x05;
+	pVbxe->pVram[0x2008] = 0x00;   /* glyph 1 row 0 */
+	pVbxe->pVram[0x2009] = 0x80;   /* glyph 1 row 1: first line shown */
+	pVbxe->pVram[0x200a] = 0x00;   /* glyph 1 row 2 */
+	SetPalette(pVbxe, 1, 5, 0x11, 0x22, 0x33);
+	StartXdl(pVbxe, 0x100);
+	pRow = Compose(pVbxe, 8);
+	REQUIRE(pRow != NULL && pRow[96] == PaletteArgb(0x11, 0x22, 0x33),
+			"the first line does not show glyph row 1");
+	pRow = Compose(pVbxe, 9);
+	REQUIRE(pRow[96] == 0, "the second line shows glyph row 1 again");
+	CloseMachine(pContext);
+	return 1;
+}
+
 static int TestAttributeMapAndPlayfieldPalette(void)
 {
 	_6502_Context_t *pContext = OpenMachine(VBXE_PROFILE_FX126, VBXE_PAGE_D6);
@@ -640,6 +673,7 @@ int main(void)
 		TestSoftResetStrobe,
 		TestXdlStandardOverlay,
 		TestXdlTextOverlay,
+		TestTextVerticalScrollStartsAtLatchedRow,
 		TestAttributeMapAndPlayfieldPalette,
 		TestHiresPairIsAveraged,
 		TestOverlayReachesScreen,
