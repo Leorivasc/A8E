@@ -1,342 +1,342 @@
-# VBXE — roadmap de funcionalidad y fidelidad
+# VBXE — feature and fidelity roadmap
 
-Este documento es el plan operativo para cerrar la implementación VBXE de
-jsA8E. El contrato de hardware sigue siendo [AHRM 12.4, VideoBoard XE](../AHRM/12.%20Internal%20devices/4.%20VideoBoard%20XE.md); Altirra 4.40 se usa como
-referencia diferencial, no como sustituto de AHRM ni como certificación de
-hardware físico.
+This document is the operating plan for completing the jsA8E VBXE
+implementation. The hardware contract remains [AHRM 12.4, VideoBoard XE](../AHRM/12.%20Internal%20devices/4.%20VideoBoard%20XE.md); Altirra 4.40 is used as a
+differential reference, not as a substitute for AHRM or as certification of
+physical hardware.
 
-El estado detallado de registros, VRAM, MEMAC, XDL, mapas de atributos y
-blitter permanece en [`VBXE.md`](VBXE.md). Este documento añade el orden de
-trabajo, los criterios de salida, los diagramas y la ruta de validación.
+The detailed state of registers, VRAM, MEMAC, XDL, attribute maps and the
+blitter stays in [`VBXE.md`](VBXE.md). This document adds the order of work,
+the exit criteria, the diagrams and the validation path.
 
-## Qué significa «VBXE funcional»
+## What "functional VBXE" means
 
-Hay tres niveles distintos y no deben mezclarse:
+There are three distinct levels and they must not be mixed:
 
-La auditoría de limpieza de VBXE mantiene las APIs de diagnóstico y
-compatibilidad porque siguen siendo utilizadas por runtime, snapshots o tests;
-la limpieza se limitó a tablas duplicadas y control redundante del scheduler.
+The VBXE cleanup audit keeps the diagnostic and compatibility APIs because
+they are still used by the runtime, snapshots or tests; the cleanup was
+limited to duplicated tables and redundant scheduler control.
 
-| Nivel | Definición | Estado |
+| Level | Definition | State |
 | --- | --- | --- |
-| Compatibilidad práctica | Software VBXE real arranca y ejecuta XDL, mapas, MEMAC, blitter e IRQ en el runtime principal. | **Alcanzado** |
-| Fidelidad raster | Los cambios GTIA/VBXE dentro de una scanline se componen por spans y coinciden con Altirra en las escenas cubiertas. | **En progreso** |
-| Producto completo | La ruta worker presenta el plano RGB, la suite visual es reproducible y las diferencias con hardware están documentadas. | **Pendiente de validación** |
+| Practical compatibility | Real VBXE software boots and runs XDL, maps, MEMAC, blitter and IRQ in the main runtime. | **Reached** |
+| Raster fidelity | GTIA/VBXE changes inside a scanline are composed per span and match Altirra in the covered scenes. | **In progress** |
+| Complete product | The worker path presents the RGB plane, the visual suite is reproducible and the differences from hardware are documented. | **Pending validation** |
 
-La compatibilidad práctica no requiere esperar a la arbitraje exacta de cada
-slot local ni a la ruta worker. El selector VBXE sigue desactivado por defecto
-y, cuando está activo, selecciona deliberadamente el runtime principal.
+Practical compatibility does not require waiting for the exact arbitration of
+every local slot or for the worker path. The VBXE selector stays disabled by
+default and, when enabled, deliberately selects the main runtime.
 
-## Arquitectura y flujo de datos
+## Architecture and data flow
 
 ```text
                    CPU / ANTIC / GTIA
                            |
-                 registros, VRAM, MEMAC, IRQ
+                 registers, VRAM, MEMAC, IRQ
                            v
                     +-------------+
                     | vbxe.js     |
-                    | estado FX   |
+                    | FX state    |
                     +------+------+ 
                            |
-             VSync latch  |  XDL + mapa por línea
+             VSync latch  |  XDL + per-line map
                            v
         +------------------+------------------+
         |                                     |
         v                                     v
   GTIA event queue                    VBXE line state
-  colores + PRIOR                     overlay + atributos
+  colors + PRIOR                      overlay + attributes
         |                                     |
         +------------------+------------------+
                            v
-                  compositor por spans
-          prioridad / transparencia / colisiones
+                  span compositor
+          priority / transparency / collisions
                            |
               +------------+------------+
               |                         |
               v                         v
-       plano Atari indexado       plano VBXE RGB
+       indexed Atari plane       VBXE RGB plane
               |                         |
               +------------+------------+
                            v
-                 renderer main-thread
-                    (WebGL o Canvas 2D)
+                 main-thread renderer
+                    (WebGL or Canvas 2D)
 
-       worker: OffscreenCanvas compone el plano VBXE; falta la regresión comparativa
+       worker: OffscreenCanvas composes the VBXE plane; the comparative regression is missing
 ```
 
-La regla importante es que VBXE no reemplaza ANTIC ni GTIA. El compositor
-debe conservar los identificadores de capa —background, PF0–PF3/P5 y P0–P3—
-y no intentar reconstruir prioridad únicamente desde colores RGB finales.
+The important rule is that VBXE does not replace ANTIC or GTIA. The
+compositor must keep the layer identifiers — background, PF0–PF3/P5 and
+P0–P3 — and must not try to rebuild priority from final RGB colors alone.
 
-## Orden de ejecución de una scanline
+## Scanline execution order
 
 ```text
-inicio de línea
+line start
       |
-      +--> ANTIC/GTIA generan píxeles y metadatos de prioridad
+      +--> ANTIC/GTIA generate pixels and priority metadata
       |
-      +--> CPU puede escribir GTIA/VBXE
-      |       `-> se encolan eventos con ciclo horizontal
+      +--> CPU may write GTIA/VBXE
+      |       `-> events are queued with their horizontal cycle
       |
-      +--> VBXE avanza XDL, repeat, scroll, mapa y fetches
+      +--> VBXE advances XDL, repeat, scroll, map and fetches
       |
-      +--> se cierra la línea
+      +--> the line is closed
               |
-              +--> dividir en [x0,x1) según eventos
-              +--> seleccionar PF/background por estado GTIA del span
-              +--> aplicar overlay, mapa, transparencia y prioridad
-              +--> actualizar COLDETECT
-              `--> publicar planos de presentación
+              +--> split into [x0,x1) according to events
+              +--> select PF/background from the GTIA state of the span
+              +--> apply overlay, map, transparency and priority
+              +--> update COLDETECT
+              `--> publish presentation planes
 ```
 
-La agenda local ya existe y conserva una salida agregada compatible para el
-blitter. No se debe cambiar el orden MEMAC ni añadir excepciones sólo por una
-hipótesis visual: hace falta un diagnóstico que muestre una diferencia
-horizontal reproducible.
+The local schedule already exists and keeps a compatible aggregate output for
+the blitter. The MEMAC order must not be changed, and no exceptions should be
+added on a visual hypothesis alone: a diagnostic that shows a reproducible
+horizontal difference is required.
 
-## Etapas de trabajo
+## Work stages
 
-### Etapa 0 — baseline y contrato
+### Stage 0 — baseline and contract
 
-**Estado: completada, mantenerla como puerta de entrada.**
+**State: completed, keep it as the entry gate.**
 
-- Ejecutar `npm run test:vbxe:full` desde `jsA8E/`.
-- Confirmar que la suite cubre registros, XDL, mapas, MEMAC, blitter, IRQ y
-  software real.
-- Revisar que `VBXE.md`, los README, los tests y `implementation/NOTES.md`
-  describan el mismo comportamiento.
+- Run `npm run test:vbxe:full` from `jsA8E/`.
+- Confirm that the suite covers registers, XDL, maps, MEMAC, blitter, IRQ and
+  real software.
+- Check that `VBXE.md`, the READMEs, the tests and `implementation/NOTES.md`
+  describe the same behavior.
 
-**Salida:** baseline reproducible y documentación sin contradicciones.
+**Exit:** reproducible baseline and documentation without contradictions.
 
-### Etapa 1 — compositor GTIA por spans
+### Stage 1 — GTIA span compositor
 
-**Estado: parcialmente completada.**
+**State: partially completed.**
 
-- Mantener la cola temporal de `COLPF0–3`, `COLBK` y `PRIOR`.
-- Aplicar cambios de color y prioridad a cada intervalo horizontal.
-- Conservar los ganadores P/M y excluir objetos ocultos por `PRIOR`.
-- Añadir regresiones para eventos en el primer, último y mismo ciclo.
+- Keep the timed queue of `COLPF0–3`, `COLBK` and `PRIOR`.
+- Apply color and priority changes to each horizontal interval.
+- Keep the P/M winners and exclude objects hidden by `PRIOR`.
+- Add regressions for events on the first, last and same cycle.
 
-**Salida:** cambios GTIA mid-line visibles y deterministas sin VBXE overlay.
+**Exit:** mid-line GTIA changes are visible and deterministic without the
+VBXE overlay.
 
-### Etapa 2 — overlay XDL por spans
+### Stage 2 — XDL overlay per span
 
-**Estado: parcialmente completada.**
+**State: partially completed.**
 
-- Reproducir standard, lores, hires y texto por intervalos, respetando los
-  límites narrow/normal/wide ya validados.
-- Aplicar transparencia de color 0/`$F`, paleta y prioridad en cada span.
-- Cubrir cambios de `VIDEO_CONTROL`, paleta, scroll y XDL durante una línea.
-- Verificar transiciones entre anchos y entre planos Atari/VBXE.
+- Replay standard, lores, hires and text per interval, respecting the
+  narrow/normal/wide limits already validated.
+- Apply color 0/`$F` transparency, palette and priority in each span.
+- Cover changes of `VIDEO_CONTROL`, palette, scroll and XDL during a line.
+- Verify transitions between widths and between Atari/VBXE planes.
 
-La ruta `applyGtiaSpans()` ya reconstruye overlay y playfield por intervalo,
-incluyendo standard, lores, hires y texto en los planos de presentación
-correspondientes. Los límites narrow/normal/wide, la transparencia y la
-prioridad cubierta tienen regresiones. Siguen pendientes los cambios de
-registros VBXE dentro de la línea y el cruce completo de todas las
-combinaciones de overlay con modos GTIA especiales.
+The `applyGtiaSpans()` path already rebuilds overlay and playfield per
+interval, including standard, lores, hires and text in the corresponding
+presentation planes. The narrow/normal/wide limits, transparency and the
+covered priority have regressions. Still pending are VBXE register changes
+inside the line and the full crossing of all overlay combinations with special
+GTIA modes.
 
-**Salida:** overlay correcto cuando el estado GTIA cambia dentro de la línea.
+**Exit:** correct overlay when the GTIA state changes inside the line.
 
-La persistencia del estado XDL ya está resuelta: AHRM reinicia parámetros
-visuales en VSync, pero conserva las direcciones y strides de overlay y
-attribute map; `verticalSync()` mantiene ahora esos latches y reinicia sólo
-los parámetros visuales. La regresión multi-frame está en
-`vbxe_device_state`.
+XDL state persistence is already resolved: AHRM resets visual parameters at
+VSync but keeps the overlay and attribute map addresses and strides;
+`verticalSync()` now keeps those latches and resets only the visual
+parameters. The multi-frame regression is in `vbxe_device_state`.
 
-### Etapa 3 — mapas de atributos por spans
+### Stage 3 — attribute maps per span
 
-**Estado: parcialmente completada; replay GTIA/PF3 inicial implementado.**
+**State: partially completed; initial GTIA/PF3 replay implemented.**
 
-- Reutilizar el estado real de fila, contador de scroll, overscroll, tamaño de
-  celda y avance de dirección.
-- Aplicar paleta, P0–P3, PF0–PF3/P5, reverse y transparencia por celda/span.
-- Cubrir `AtMapOn`, `AtMapOff`, cambio de dirección, reload y límite de 43 celdas.
-- Recargar también el buffer al cambiar de fila dentro de una entrada repetida;
-  este borde ya tiene regresión en `vbxe_device_state`.
-- Añadir escenas que cambien GTIA y mapa durante la misma línea; ya existe una
-  regresión de PF3/GTIA para los planos legacy y hires.
+- Reuse the real row state, scroll counter, overscroll, cell size and address
+  advance.
+- Apply palette, P0–P3, PF0–PF3/P5, reverse and transparency per cell/span.
+- Cover `AtMapOn`, `AtMapOff`, address change, reload and the 43-cell limit.
+- Also reload the buffer when the row changes inside a repeated entry; this
+  edge already has a regression in `vbxe_device_state`.
+- Add scenes that change GTIA and the map during the same line; a PF3/GTIA
+  regression already exists for the legacy and hires planes.
 
-**Salida:** mapas correctos en líneas normales y en cambios mid-line.
+**Exit:** correct maps on normal lines and on mid-line changes.
 
-La geometría ya sigue `OvMisc` en narrow, normal y wide, incluso sin overlay
-activo, tanto en el plano legacy como en el plano hires. El compositor ahora
-reproduce por spans el PF3 y el modo GTIA observado en la cola de eventos; la
-salida de esta etapa aún no se considera alcanzada mientras no reproduzca
-cambios de registros VBXE del mapa ni el cruce completo con overlay hires/texto
-y timing por fase.
+The geometry already follows `OvMisc` in narrow, normal and wide, even with no
+active overlay, in both the legacy plane and the hires plane. The compositor
+now replays per span the PF3 and the GTIA mode observed in the event queue;
+the output of this stage is not yet considered reached until it reproduces
+VBXE map register changes, the full crossing with hires/text overlay, and
+per-phase timing.
 
-### Etapa 4 — modos GTIA, prioridad y colisiones
+### Stage 4 — GTIA modes, priority and collisions
 
-**Estado: matriz base implementada y regresada; diferenciales de escenas aún
-pendientes.**
+**State: base matrix implemented and regressed; scene differentials still
+pending.**
 
-- Completar la matriz GTIA 9/10/11 con modos ANTIC 2–F y fuentes bitmap/carácter.
-- Validar PF2/PF3, máscaras, inversión, transparencia y prioridad FX 1.20,
-  1.24 y 1.26.
-- Completar las combinaciones restantes de `COLMASK`/`COLDETECT`, P0+P1/P5 y
-  mapas de atributos.
-- Convertir cada diferencial estable en una regresión determinista.
+- Complete the GTIA 9/10/11 matrix with ANTIC modes 2–F and bitmap/character
+  sources.
+- Validate PF2/PF3, masks, inversion, transparency and priority for FX 1.20,
+  1.24 and 1.26.
+- Complete the remaining `COLMASK`/`COLDETECT` combinations, P0+P1/P5 and
+  attribute maps.
+- Turn every stable differential into a deterministic regression.
 
-La matriz de grupos PF/P5/P/M y las tablas de prioridad legacy/full ya tienen
-una regresión determinista en `vbxe_priority_collision_matrix`; los probes XEX
-existentes cubren además `COLMASK`/`COLDETECT`, P0+P1 y P5. La salida completa
-de esta etapa aún requiere ampliar escenas reales con transparencia, mapas y
-los perfiles/modos que todavía no tienen diferencial visual.
+The matrix of PF/P5/P/M groups and the legacy/full priority tables already
+have a deterministic regression in `vbxe_priority_collision_matrix`; the
+existing XEX probes also cover `COLMASK`/`COLDETECT`, P0+P1 and P5. Completing
+this stage still requires widening real scenes with transparency, maps and the
+profiles/modes that do not yet have a visual differential.
 
-**Salida:** cada combinación soportada tiene regla AHRM, prueba y resultado
-  diferencial documentado.
+**Exit:** every supported combination has an AHRM rule, a test and a
+documented differential result.
 
-### Etapa 5 — registros, MEMAC, reset y snapshots
+### Stage 5 — registers, MEMAC, reset and snapshots
 
-**Estado: funcional y con auditoría determinista de bordes completada.**
+**State: functional, with the deterministic edge audit completed.**
 
-- Revisar bits ignorados, valores de lectura y latches de todos los registros.
-- Probar ambos bancos `$D640`/`$D740`, warm reset, power cycle y VSync latch.
-- Cubrir MEMAC A/B con CPU, ANTIC, solapamiento, Ultimate1MB y blitter activo.
-- Restaurar snapshots durante XDL activo, mapa activo y blitter en progreso.
+- Review ignored bits, read values and latches of all registers.
+- Test both banks `$D640`/`$D740`, warm reset, power cycle and the VSync latch.
+- Cover MEMAC A/B with CPU, ANTIC, overlap, Ultimate1MB and an active blitter.
+- Restore snapshots during an active XDL, active map and blitter in progress.
 
-La regresión `vbxe_register_snapshot` cubre los dos bancos de registros,
-readback, bits ignorados, VSync, MEMAC A y restauración de XDL/blitter activo;
-`vbxe_device_state` cubre además warm reset, power cycle, configuración y
-persistencia de VRAM. Continúan como límites de fidelidad el arbitraje por
-fase y la interacción con expansiones externas durante una ejecución real.
+The `vbxe_register_snapshot` regression covers both register banks, readback,
+ignored bits, VSync, MEMAC A and restoring an active XDL/blitter;
+`vbxe_device_state` additionally covers warm reset, power cycle, configuration
+and VRAM persistence. Per-phase arbitration and the interaction with external
+expansions during a real run remain fidelity limits.
 
-**Salida:** ningún camino cubierto depende sólo de una suposición o de un
-  test indirecto.
+**Exit:** no covered path depends only on an assumption or an indirect test.
 
-### Etapa 6 — temporización del blitter
+### Stage 6 — blitter timing
 
-**Estado: agenda local implementada; validación diferencial y coordenadas
-del orden físico y la validación horizontal de MEMAC pendientes.**
+**State: local schedule implemented; differential validation and the
+coordinates of the physical order and the horizontal validation of MEMAC are
+pending.**
 
-- Ejecutar los diagnósticos continuous/restart de attribute-map en Altirra.
-- Comparar el borde azul/rojo y el campo de finalización persistente.
-- Si aparece una diferencia, aislarla entre XDL, reload del mapa, MEMAC e IRQ.
-- La agenda ya reserva 912 slots locales por scanline: overlay en fases pares,
-  con los inicios narrow/normal/wide alineados a la tabla de Altirra,
-  lecturas MEMAC en fase 1, escrituras CPU en fase 3, XDL y mapa después del
-  área activa, y blitter en el residuo. Falta validar el orden físico y el
-  consumo ciclo a ciclo del residuo de MEMAC/blitter.
+- Run the continuous/restart attribute-map diagnostics in Altirra.
+- Compare the blue/red border and the persistent completion field.
+- If a difference appears, isolate it among XDL, map reload, MEMAC and IRQ.
+- The schedule already reserves 912 local slots per scanline: overlay in even
+  phases, with the narrow/normal/wide starts aligned to Altirra's table, MEMAC
+  reads in phase 1, CPU writes in phase 3, XDL and map after the active area,
+  and the blitter in the remainder. The physical order and the cycle-by-cycle
+  consumption of the MEMAC/blitter remainder still need to be validated.
 
-**Salida:** acuerdo reproducible de timing de baseline, overlay, mapa continuo y
-mapa reiniciado; la precisión por slot se declara sólo si existe marcador
-horizontal suficiente.
+**Exit:** reproducible timing agreement for baseline, overlay, continuous map
+and restarted map; per-slot precision is declared only if there is a
+sufficient horizontal marker.
 
-La implementación ya aplica la actualización XDL fija de 22 ciclos de AHRM,
-independientemente de los bytes decodificados; las líneas repetidas no generan
-una segunda actualización. La excepción restante es el orden físico de cada
-acceso MEMAC, el consumo ciclo a ciclo del residuo por el blitter y su
-comparación con Altirra.
+The implementation already applies AHRM's fixed 22-cycle XDL update,
+regardless of the decoded bytes; repeated lines do not generate a second
+update. The remaining exception is the physical order of each MEMAC access,
+the blitter's cycle-by-cycle consumption of the remainder, and its comparison
+with Altirra.
 
-### Etapa 7 — software real y comparación visual
+### Stage 7 — real software and visual comparison
 
-**Estado: en progreso; el corpus headless ya tiene un gate visual de progreso,
-pero la comparación diferencial con Altirra sigue pendiente.**
+**State: in progress; the headless corpus already has a visual progress gate,
+but the differential comparison with Altirra is still pending.**
 
-**Actualización 2026-11-04.** Con los arreglos de MEMAC (remapeo de ventanas y
-captura de instrucciones desde una ventana), la polaridad de transparencia de
-`VIDEO_CONTROL` D2 (la de Altirra: con D2 = 0 el color 0 del overlay es
-transparente) y el DLI espurio en el vblank, el corpus se comporta así: Popeye
-es jugable (título, menú, tabla de puntuaciones, partida), D600 se ve como en
-Altirra (fondo arcoíris + sprites del blitter; requiere BASIC apagado o
-ENTER + tecla), Phoenix y Celeste muestran su título y Galaga, Crysis y Falcon
-funcionan. Popeye y D600 se compararon visualmente con Altirra en wine. Falta
-convertir esto en gates reproducibles: los checkpoints de 480 frames de
-`vbxe_real_software_scene` solo ven el cargador de los XEX grandes (Phoenix
-~4200 frames, Popeye ~4800, Galaga ~19000), así que deben esperar al fin de la
-carga, pulsar teclas en los menús y exigir VBXE activa. Detalle en
+**Update 2026-11-04.** With the MEMAC fixes (window remapping and instruction
+fetch from a window), the polarity of `VIDEO_CONTROL` D2 transparency (the
+Altirra one: with D2 = 0 overlay color 0 is transparent) and the spurious DLI
+in vblank, the corpus behaves as follows: Popeye is playable (title, menu,
+score table, game), D600 looks like Altirra (rainbow background + blitter
+sprites; requires BASIC off or ENTER + a key), Phoenix and Celeste show their
+title and Galaga, Crysis and Falcon work. Popeye and D600 were compared
+visually with Altirra under wine. What is missing is turning this into
+reproducible gates: the 480-frame checkpoints of `vbxe_real_software_scene`
+only see the loader of the large XEXs (Phoenix ~4200 frames, Popeye ~4800,
+Galaga ~19000), so they must wait for the end of loading, press keys in the
+menus and require VBXE to be active. Details in
 [`VBXE.md`](VBXE.md#real-software-status--2026-11-04).
 
-- Mantener las puertas de Popeye, Galaga, DACTest, Textmode Test, Crysis,
-  Celeste, D600, Falcon y Phoenix.
-- Reforzar el harness XEX: `runXex({ awaitEntry: false })` y el avance de
-  `cycleCounter` no prueban por sí solos que el programa haya alcanzado su
-  escena.
-- La primera puerta fuerte ya está implementada en
-  `vbxe_xex_scene_marker.test.js`: un XEX mínimo escribe dos marcadores RAM y
-  el harness espera esos valores. El breakpoint durante el boot no es fiable
-  en headless, por lo que la regresión usa memoria observable; los programas
-  reales todavía necesitan marcadores equivalentes.
-- La regresión `vbxe_real_software_scene.test.js` comprueba los puntos de 120,
-  240, 360 y 480 frames, captura cada programa y exige un frame no negro cuyo
-  digest RGBA no coincida con ningún frame de reset para los cinco casos
-  cubiertos. Galaga queda explícitamente boot-only porque su captura headless
-  queda negra; Celeste, D600 y Phoenix también quedan boot-only porque sus
-  capturas coinciden con el conjunto de reset. Esto evita aceptar tanto las
-  variantes temporales de la pantalla inicial común como un frame negro
-  transitorio; se mantiene además la puerta de marcador RAM del XEX mínimo. El
-  gate también exige que la huella SHA-256 de los 64 KiB de RAM difiera del
-  conjunto de reset en los cuatro casos boot-only. Esto prueba ejecución
-  observable, pero no sustituye una marca específica de escena ni una golden
-  image de Altirra.
-- Usar la instancia Chromium/CDP como ruta de captura provisional: el corpus
-  FX1.26 avanza 120 frames en WebGL2 y Textmode Test cambia de digest al
-  seleccionar el modo 4. Esta evidencia aún debe convertirse en comparación
-  Altirra reproducible.
-- Seleccionar escenas estables de software real que usen overlay, texto, mapas
-  y blitter enlazado.
-- Capturar el mismo número de frames en jsA8E y Altirra con PAL/NTSC, perfil,
-  página y paleta fijados.
-- Comparar RGB, capas, colisiones y geometría; registrar diferencias
-  intencionales en `VBXE.md`.
+- Keep the gates for Popeye, Galaga, DACTest, Textmode Test, Crysis, Celeste,
+  D600, Falcon and Phoenix.
+- Strengthen the XEX harness: `runXex({ awaitEntry: false })` and the
+  advance of `cycleCounter` do not by themselves prove that the program
+  reached its scene.
+- The first strong gate is already implemented in
+  `vbxe_xex_scene_marker.test.js`: a minimal XEX writes two RAM markers and
+  the harness waits for those values. A breakpoint during boot is not reliable
+  in headless, so the regression uses observable memory; real programs still
+  need equivalent markers.
+- The `vbxe_real_software_scene.test.js` regression checks the 120, 240, 360
+  and 480 frame points, captures each program and requires a non-black frame
+  whose RGBA digest does not match any reset frame for the five covered cases.
+  Galaga is explicitly boot-only because its headless capture is black;
+  Celeste, D600 and Phoenix are also boot-only because their captures match
+  the reset set. This avoids accepting both the temporal variants of the
+  common initial screen and a transient black frame; the minimal XEX RAM
+  marker gate is kept as well. The gate also requires the SHA-256 fingerprint
+  of the 64 KiB of RAM to differ from the reset set in the four boot-only
+  cases. This proves observable execution, but it does not replace a
+  scene-specific mark or an Altirra golden image.
+- Use the Chromium/CDP instance as the provisional capture path: the FX1.26
+  corpus advances 120 frames in WebGL2 and Textmode Test changes digest when
+  mode 4 is selected. This evidence still has to be turned into a reproducible
+  Altirra comparison.
+- Select stable real-software scenes that use overlay, text, maps and linked
+  blitter.
+- Capture the same number of frames in jsA8E and Altirra with PAL/NTSC,
+  profile, page and palette fixed.
+- Compare RGB, layers, collisions and geometry; record intentional differences
+  in `VBXE.md`.
 
-**Salida:** evidencia visual automatizable de progreso para todas las rutas
-declaradas; la equivalencia requiere además la comparación Altirra pendiente.
+**Exit:** automatable visual evidence of progress for all declared paths;
+equivalence additionally requires the pending Altirra comparison.
 
-### Etapa 8 — worker y cierre de producto
+### Stage 8 — worker and product closure
 
-**Estado: integración y gate browser implementados; ejecución depende de CDP.**
+**State: integration and browser gate implemented; execution depends on CDP.**
 
-- Mantener el plano RGB VBXE dentro del render de `OffscreenCanvas` del worker;
-  ya no se fuerza el fallback main-thread cuando VBXE está activo.
-- Mantener equivalencia con WebGL, Canvas 2D, snapshots y automation API.
-- Ejecutar `npm run test:vbxe:browser` con Chromium en CDP; el gate valida
-  worker/fallback WebGL2 y Canvas2D, capturas no vacías y hash PNG equivalente,
-  y restaura la URL.
-- Validar selector, reset, `$D600/$D700` y PAL/NTSC; la variante Canvas2D ya
-  tiene cobertura automatizada y la baseline provisional queda persistida en
-  `jsA8E/tests/fixtures/vbxe_browser_golden.json`.
-- Para una referencia independiente, `A8E_VBXE_REFERENCE` permite comparar
-  capturas JSON de Altirra con el mismo esquema sin modificar el gate interno.
-- Ejecutar la suite completa y actualizar la matriz de soporte.
+- Keep the VBXE RGB plane inside the worker's `OffscreenCanvas` render; the
+  main-thread fallback is no longer forced when VBXE is active.
+- Keep equivalence with WebGL, Canvas 2D, snapshots and the automation API.
+- Run `npm run test:vbxe:browser` with Chromium over CDP; the gate validates
+  worker/fallback WebGL2 and Canvas2D, non-empty captures and an equivalent
+  PNG hash, and restores the URL.
+- Validate the selector, reset, `$D600/$D700` and PAL/NTSC; the Canvas2D
+  variant already has automated coverage and the provisional baseline is
+  persisted in `jsA8E/tests/fixtures/vbxe_browser_golden.json`.
+- For an independent reference, `A8E_VBXE_REFERENCE` allows comparing Altirra
+  JSON captures with the same schema without modifying the internal gate.
+- Run the full suite and update the support matrix.
 
-**Salida:** VBXE habilitable desde la aplicación normal sin seleccionar
-  explícitamente el runtime principal.
+**Exit:** VBXE can be enabled from the normal application without explicitly
+selecting the main runtime.
 
-## Dependencias entre etapas
+## Dependencies between stages
 
 ```text
-baseline/contrato
+baseline/contract
         |
         v
 GTIA spans -----------+
         |              |
         v              v
-overlay spans ---> mapas por spans ---> modos/colisiones
+overlay spans ---> maps per span ---> modes/collisions
         |                    |              |
         +--------------------+--------------+
                              v
-                  registros/MEMAC/snapshots
+                  registers/MEMAC/snapshots
                              |
                              v
                     blitter phase timing
                              |
                              v
-                 software + comparación visual
+                 software + visual comparison
                              |
                              v
                          worker/UI
 ```
 
-Las etapas 4 y 5 pueden avanzar en paralelo después de la base. La etapa 6
-debe consumir diagnósticos de las etapas 2 y 3; no conviene ajustar su
-scheduler antes de que el compositor pueda mostrar el marcador correcto.
+Stages 4 and 5 can advance in parallel after the base. Stage 6 must consume
+diagnostics from stages 2 and 3; its scheduler should not be adjusted before
+the compositor can show the correct marker.
 
-## Puertas de validación
+## Validation gates
 
-### Regresión rápida
+### Quick regression
 
 ```sh
 cd jsA8E
@@ -346,44 +346,44 @@ node tests/vbxe_blitter_state.test.js
 node tests/vbxe_rambo_bus.test.js
 ```
 
-### Suite VBXE completa
+### Full VBXE suite
 
 ```sh
 cd jsA8E
 npm run test:vbxe:full
 ```
 
-### Evidencia diferencial
+### Differential evidence
 
-Cada cambio que afecte a imagen o timing debe incluir:
+Every change that affects image or timing must include:
 
-1. diagnóstico XEX reproducible;
-2. captura o lectura equivalente en Altirra 4.40;
-3. resultado jsA8E con el mismo perfil y página;
-4. regresión automatizada o explicación explícita de por qué aún no es
-   automatizable;
-5. entrada nueva en `implementation/NOTES.md`.
+1. a reproducible XEX diagnostic;
+2. an equivalent capture or reading in Altirra 4.40;
+3. the jsA8E result with the same profile and page;
+4. an automated regression, or an explicit explanation of why it cannot yet be
+   automated;
+5. a new entry in `implementation/NOTES.md`.
 
-## Criterio de cierre
+## Closure criterion
 
-El objetivo de **VBXE funcional** se considera cerrado cuando:
+The **functional VBXE** goal is considered closed when:
 
-- `npm run test:vbxe:full` termina sin fallos;
-- el corpus de software real sigue arrancando y ejecutando;
-- standard, lores, hires, texto, mapas, MEMAC, blitter, IRQ, reset y snapshots
-  tienen contrato y cobertura;
-- los cambios mid-line cubiertos usan spans y tienen comparación diferencial;
-- las limitaciones de fase exacta, hardware físico y worker están separadas de
-  las capacidades funcionales y documentadas.
+- `npm run test:vbxe:full` finishes without failures;
+- the real-software corpus still boots and runs;
+- standard, lores, hires, text, maps, MEMAC, blitter, IRQ, reset and snapshots
+  have a contract and coverage;
+- the covered mid-line changes use spans and have a differential comparison;
+- the limitations of exact phase, physical hardware and worker are separated
+  from the functional capabilities and documented.
 
-El objetivo de **fidelidad completa** requiere además cerrar las etapas 6–8 y
-no debe declararse sólo porque el software arranque.
+The **complete fidelity** goal additionally requires closing stages 6–8 and
+must not be declared merely because the software boots.
 
-## Referencias del repositorio
+## Repository references
 
-- [`VBXE.md`](VBXE.md): diseño, registros, estado y matriz de soporte.
-- [`../jsA8E/README.md`](../jsA8E/README.md): uso del navegador y selector VBXE.
-- [`jsA8E/CORE.md`](jsA8E/CORE.md): integración del dispositivo en el core.
-- [`jsA8E/RENDER.md`](jsA8E/RENDER.md): planos RGB y presentación.
-- [`jsA8E/WORKER.md`](jsA8E/WORKER.md): frontera worker y limitación actual.
-- [`NOTES.md`](NOTES.md): bitácora de cada mejora y diferencial.
+- [`VBXE.md`](VBXE.md): design, registers, state and support matrix.
+- [`../jsA8E/README.md`](../jsA8E/README.md): browser usage and the VBXE selector.
+- [`jsA8E/CORE.md`](jsA8E/CORE.md): device integration into the core.
+- [`jsA8E/RENDER.md`](jsA8E/RENDER.md): RGB planes and presentation.
+- [`jsA8E/WORKER.md`](jsA8E/WORKER.md): worker boundary and current limitation.
+- [`NOTES.md`](NOTES.md): log of every improvement and differential.

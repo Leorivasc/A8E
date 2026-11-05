@@ -1,527 +1,548 @@
 # NOTES.md
 
-- 2026-11-04 (Firefox interactivo y blitter por filas): sesión interactiva con
-  Firefox gráfico (instancia propia con puerto BiDi, grabador de teclas y de
-  capturas, canal de órdenes por fichero) con el usuario jugando Popeye en modo
-  worker: el worker llegó a no contestar `getCounters`/`captureScreenshot` en
-  4-15 s, con el hilo `DOM Worker` al ~92 % de un núcleo, a partir de que el
-  juego pasó de la carga a la pantalla de título (antes de cualquier tecla del
-  usuario). Sin intervención humana, la misma secuencia dio una velocidad de
-  emulación del 83-92 % en esa fase, es decir: el worker está al límite de un
-  núcleo y cualquier carga añadida (mis consultas de captura, el Chromium del
-  usuario con jsA8E abierto a ~35 %) lo deja atrás. En Chromium la misma fase
-  usaba el 72 % del hilo principal. Perfil de V8 de Popeye en juego:
-  `advanceBlitter` 12,2 % (el primero), `clockAction` 8 %, modo 4/5 5 %,
-  composición de atributos 4,5 %. Cambio: `advanceBlitter` procesa las filas
-  sin zoom en X con un bucle apretado (misma tarifa por byte y mismos slots
-  libres consumidos en el mismo orden; el último byte de la fila queda en la
-  ruta por byte, que gestiona el cambio de fila y de bloque). Equivalencia
-  comprobada: Mr. Proper y Popeye dan el mismo hash de VRAM, el mismo
-  contador de ciclos, el mismo código de colisión y el mismo estado del blitter
-  antes y después. Resultado en Chromium: `advanceBlitter` 12,2 % a 3,3 % y
-  ocupación del hilo 72 % a 63 %. El perfilador nativo de Firefox
-  (`MOZ_PROFILER_STARTUP`) solo entregó el proceso padre, así que no hay perfil
-  de SpiderMonkey. Suite completa: 120 de 122; fallan las dos conocidas
-  (`vbxe_fx124_priority_probe_boot` y la inestable `vbxe_blitter_attrmap_phase_boot`).
+- 2026-11-04 (Native A8E: VBXE stage 1 and parity check): compared the branch
+  against `main`; everything jsA8E changed outside VBXE is already in the
+  native core (GTIA `$D01B-$D01E` reads, no DLI in vblank, player/missile early
+  return). The remaining gap is the VBXE device, so it is being ported in
+  stages. Stage 1 is `A8E/Vbxe.c`/`Vbxe.h` (a port of the relevant parts of
+  `vbxe.js`): register bank with revisions `$10`/`$20|$24|$26`, 512 KiB VRAM,
+  palette latches with the D7 to D0 expansion, configuration latch, MEMAC A/B
+  for CPU, ANTIC and instruction fetch, blitter (BCB load, modes 0-6, zoom,
+  pattern, signed steps, byte and nibble collisions with the AHRM `value>>5`
+  groups, linked blocks, stop), completion IRQ as a level source placed at its
+  cycle inside the line, `BLITTER_START` running the rest of the scanline's
+  budget (Altirra behavior that Mr. Proper depends on), and the
+  `$D080-$D0FF` reset strobe. Native specifics: MEMAC windows are installed as
+  access handlers only over RAM-mapped addresses (ROM and `$D000-$D7FF` keep
+  priority) and are rebuilt only when the routing bits change or when `Pia.c`
+  changes the OS/BASIC/Self-test mapping; `6502.c` got `pfnFetchStage`/
+  `pfnFetchRestore` hooks to run code from a window; `Pia_IrqAsserted` ORs the
+  VBXE line; `AtariIo_ReadAnticMemory` (and the display-list reads) go through
+  MEMAC. Not done yet: XDL parser, overlay, attribute map, priority/collision
+  composition, XDL/overlay local-bus slots (the blitter budget is 912 minus
+  MEMAC accesses), FX 1.26r RAMBO, snapshots, UI selector. CLI:
+  `--vbxe[=fx1.20|fx1.24|fx1.26]`, `--vbxe-d7`. Test: `tests/vbxe_probe.c`
+  (11 cases; a mutation of the mid-line budget makes it fail). `ctest`: 15 of
+  17 pass; `antic_graphics_modes_probe` and `pokey_sio_contract_probe` were
+  already failing. Also updated `implementation/DIAGRAM.mermaid` (VBXE in both
+  cores, Tauri shell, ROM library, headless/MCP, Firefox main-thread default,
+  test counts).
+- 2026-11-04 (Evaluation of moving work to the GPU, no code changes):
+  `render/gl.js` already uploads the 8-bit indexed framebuffer and applies the
+  palette, VBXE and CRT in shaders; the CRT has no measurable CPU cost in
+  Firefox (emulator thread 92-100 % with or without it). What remains in JS
+  cannot be moved without losing accuracy: CPU/ANTIC/GTIA/POKEY and the
+  blitter are sequential and the program reads their results (collisions);
+  `applyPlayfieldAttributes` alters the colors/priorities that GTIA collisions
+  use. The only movable piece would be `renderXdlLine` (overlay, ~5-7 % of the
+  active CPU), which would require uploading the 512 KB VRAM with change
+  tracking and per-line XDL/palette state, and keeping two bit-for-bit
+  equivalent paths (GL and software/headless). Small gain versus the
+  maintenance cost: discarded.
+- 2026-11-04 (Interactive Firefox and per-row blitter): interactive session
+  with a graphical Firefox (own instance with a BiDi port, key and screenshot
+  recorder, file-based command channel) with the user playing Popeye in worker
+  mode: the worker stopped answering `getCounters`/`captureScreenshot` for
+  4-15 s, with the `DOM Worker` thread at ~92 % of a core, from the moment the
+  game went from loading to the title screen (before any user key). Without
+  human intervention, the same sequence gave an emulation speed of 83-92 % in
+  that phase, that is: the worker is at the limit of one core and any added
+  load (my screenshot queries, the user's Chromium with jsA8E open at ~35 %)
+  leaves it behind. In Chromium the same phase used 72 % of the main thread.
+  V8 profile of Popeye during play: `advanceBlitter` 12.2 % (the top),
+  `clockAction` 8 %, mode 4/5 5 %, attribute composition 4.5 %. Change:
+  `advanceBlitter` processes rows without X zoom with a tight loop (same
+  per-byte rate and the same free slots consumed in the same order; the last
+  byte of the row stays in the per-byte path, which handles row and block
+  rollover). Equivalence checked: Mr. Proper and Popeye give the same VRAM
+  hash, the same cycle counter, the same collision code and the same blitter
+  state before and after. Result in Chromium: `advanceBlitter` 12.2 % to 3.3 %
+  and thread occupancy 72 % to 63 %. Firefox's native profiler
+  (`MOZ_PROFILER_STARTUP`) only delivered the parent process, so there is no
+  SpiderMonkey profile. Full suite: 120 of 122; the two known ones fail
+  (`vbxe_fx124_priority_probe_boot` and the unstable
+  `vbxe_blitter_attrmap_phase_boot`).
 
-- 2026-11-04 (Firefox: modo worker): en el Firefox de escritorio del usuario el
-  modo worker (el predeterminado) tenía varios segundos de input lag; una
-  petición mínima al worker (`getCounters`) agotó los 4 s de tiempo de espera,
-  y con la emulación en el hilo principal (`?a8e_no_worker=1`, ventana privada)
-  el juego era jugable. En el Firefox 158 sin ventana de la máquina de
-  desarrollo (WebGL por software) el worker iba a 58-60 fps con ida y vuelta
-  de 14-25 ms, de modo que no se reprodujo y la causa dentro de Firefox
-  (presentación de `OffscreenCanvas` o la planificación de rAF del worker) no
-  está identificada. Medida paliativa: `supportsWorker()` devuelve falso en
-  Firefox salvo `?a8e_worker=1`, igual que ya hacía con el WebView de Tauri.
-  Pendiente: probar en Firefox con `a8e_renderer=2d` en modo worker y sin
-  efecto CRT para ver si es el WebGL del worker, y retirar la excepción si se
-  corrige.
+- 2026-11-04 (Firefox: worker mode): on the user's desktop Firefox the worker
+  mode (the default) had several seconds of input lag; a minimal request to
+  the worker (`getCounters`) hit the 4 s timeout, and with the emulation on
+  the main thread (`?a8e_no_worker=1`, private window) the game was playable.
+  On the development machine's windowless Firefox 158 (software WebGL) the
+  worker ran at 58-60 fps with a 14-25 ms round trip, so it was not reproduced
+  and the cause inside Firefox (`OffscreenCanvas` presentation or the worker's
+  rAF scheduling) is not identified. Palliative measure: `supportsWorker()`
+  returns false on Firefox unless `?a8e_worker=1`, as it already did for the
+  Tauri WebView. Pending: test on Firefox with `a8e_renderer=2d` in worker
+  mode and without the CRT effect to see whether it is the worker's WebGL, and
+  remove the exception if it is fixed.
 
-- 2026-11-04 (revisión AHRM y generalidad): revisados los cambios de esta
-  sesión contra el AHRM. Corregido: la máscara de colisión de bytes del
-  blitter usaba `(valor-1)>>5`; el AHRM 12.4 dice bit 0 = `$01-1F`, bit 1 =
-  `$20-3F`, es decir `valor>>5` (también lo hace Altirra). Corregido: el
-  arranque a mitad de línea del blitter ahora resta el DMA de pantalla de esa
-  línea (overlay, XDL, recarga del mapa de atributos) en vez de usar todo el
-  tiempo restante. Documentadas como desviaciones deliberadas del texto del
-  AHRM, ambas por Altirra y por software real: polaridad de `VIDEO_CONTROL` D2
-  y bits de `MEMAC_B_CONTROL` (D7 CPU, D6 ANTIC; el AHRM los da al revés). Ningún
-  cambio depende de un título: todos son reglas del dispositivo o optimizaciones
-  que conservan la salida (verificado píxel a píxel en Mr. Proper). El marcador
-  `vbxe_blitter_short_overlay_timing_boot` pasó de VCOUNT 56 a 57 por el
-  descuento del DMA; la prueba no fija el valor y la dispersión documentada
-  frente a Altirra ya era de una muestra.
+- 2026-11-04 (AHRM review and generality): reviewed this session's changes
+  against the AHRM. Fixed: the blitter's byte collision mask used
+  `(value-1)>>5`; AHRM 12.4 says bit 0 = `$01-1F`, bit 1 = `$20-3F`, that is
+  `value>>5` (Altirra does the same). Fixed: the blitter's mid-line start now
+  subtracts that line's screen DMA (overlay, XDL, attribute-map reload)
+  instead of using all the remaining time. Documented as deliberate deviations
+  from the AHRM text, both because of Altirra and real software: polarity of
+  `VIDEO_CONTROL` D2 and the bits of `MEMAC_B_CONTROL` (D7 CPU, D6 ANTIC; the
+  AHRM gives them the other way round). No change depends on a title: all are
+  device rules or optimizations that preserve the output (verified pixel by
+  pixel on Mr. Proper). The `vbxe_blitter_short_overlay_timing_boot` marker
+  went from VCOUNT 56 to 57 because of the DMA discount; the test does not fix
+  the value and the documented spread versus Altirra was already one sample.
 
-- 2026-11-04 (Mr. Proper: frutas que no se comen, y rendimiento con MEMAC B):
-  `mrproper_vbxe.xex` arranca y dibuja, pero el usuario veía frutas que no
-  podían comerse y bloques repetidos. Causa: el juego lee `BLT_COLLISION_CODE`
-  (`$D650`) a los pocos ciclos de escribir `BLITTER_START` (`$25da`-`$25e2`,
-  sin esperar a que termine el blit) y guarda el resultado en el objeto. En
-  Altirra (`vbxe.cpp`, caso `0x53` de `WriteControl`) el arranque carga el BCB
-  y ejecuta de inmediato lo que quede de la línea de exploración
-  (`maxBlitTime = (mBlitterEndScanTime - ahora) * 8`), así que las primeras
-  filas del sprite ya han detectado colisión cuando el juego lee el registro.
-  Nosotros dábamos el presupuesto de la línea completa al final de la línea,
-  por lo que `$D650` valía casi siempre 0 (1823 de ~1900 lecturas) y la
-  detección nunca disparaba. Ahora `io.js` llama a `startBlitterMidLine` al
-  escribir `BLITTER_START` con el blitter parado: se ejecutan
-  `(114 - ciclo de línea) * 8` slots sin calendario de bus, se marca
-  `blitterEarlyRun` para que el presupuesto de esa línea no se gaste dos veces
-  (`antic.js`) y, si el blit termina, la IRQ de fin se coloca en su ciclo.
-  Con el cambio, 1021 de ~2000 lecturas son distintas de 0. Prueba nueva:
-  `vbxe_blitter_midline_start.test.js` (en `test:vbxe`). Las demás pruebas de
-  temporización del blitter siguen pasando (la inestable
-  `vbxe_blitter_attrmap_phase_boot` falla igual con y sin el cambio, 3 de 4
-  ejecuciones bajo carga).
-  Los fotogramas con manchas verdes y banda cian que aparecen en Mr. Proper
-  también salen en Altirra (comprobado capturando ambos), no son un artefacto.
-  Rendimiento: el juego escribe `$D65D` (MEMAC B) dos veces por blit, unas 21
-  llamadas a `installIoHandlers` por fotograma, y cada una recorría 16 K
-  direcciones llamando a `vbxeMemacAddress` (11,6 % del perfil de Node).
-  `installIoHandlers` ahora decide por rango con los bits de habilitación de
-  CPU, rellena el rango entero con `fill` cuando todo era RAM y no se
-  reconstruye si el conjunto de ventanas no ha cambiado (`onlyIfChanged`, solo
-  desde `syncVbxeWindows`; la reconstrucción del mapa de memoria sigue
-  recorriendo dirección a dirección para no pisar ROM). `applyPlayfieldAttributes`
-  consulta la celda del mapa de atributos una vez por tramo de celda y tiene
-  camino rápido para celdas sin Rev (la cadena de Rev solo se evalúa en celdas
-  Rev); las celdas decodificadas se guardan en el propio búfer de la fila.
-  Mr. Proper en Node: 42 a 51 fps; la salida es idéntica píxel a píxel antes y
-  después. Firefox 158 sin ventana, hilo principal, 60 fps con callbacks de
-  media 10 ms pero p95 de 29 ms y máximo de 58 ms (tirones); en modo worker
-  60 fps con el hilo principal casi libre. Sigue habiendo unas 45 recogidas de
-  basura por 300 fotogramas en Mr. Proper (frente a 1 en BASIC y 6-16 en otros
-  juegos VBXE), repartidas entre `renderXdlLine`, el mapa de atributos y el
-  blitter; no se localizó la fuente exacta de la asignación. El A8E nativo no
-  implementa VBXE, así que no hay nada que portar.
+- 2026-11-04 (Mr. Proper: fruits that cannot be eaten, and performance with
+  MEMAC B): `mrproper_vbxe.xex` boots and draws, but the user saw fruits that
+  could not be eaten and repeated blocks. Cause: the game reads
+  `BLT_COLLISION_CODE` (`$D650`) a few cycles after writing `BLITTER_START`
+  (`$25da`-`$25e2`, without waiting for the blit to finish) and stores the
+  result in the object. In Altirra (`vbxe.cpp`, case `0x53` of `WriteControl`)
+  the start loads the BCB and immediately runs whatever is left of the
+  scanline (`maxBlitTime = (mBlitterEndScanTime - now) * 8`), so the first rows
+  of the sprite have already detected collision when the game reads the
+  register. We gave the full line budget at the end of the line, so `$D650`
+  was almost always 0 (1823 of ~1900 reads) and detection never fired. Now
+  `io.js` calls `startBlitterMidLine` when `BLITTER_START` is written with the
+  blitter stopped: `(114 - line cycle) * 8` slots are run without a bus
+  schedule, `blitterEarlyRun` is set so that that line's budget is not spent
+  twice (`antic.js`) and, if the blit finishes, the end IRQ is placed at its
+  cycle. With the change, 1021 of ~2000 reads are non-zero. New test:
+  `vbxe_blitter_midline_start.test.js` (in `test:vbxe`). The other blitter
+  timing tests still pass (the unstable `vbxe_blitter_attrmap_phase_boot`
+  fails the same with and without the change, 3 of 4 runs under load).
+  The frames with green smudges and a cyan band that appear in Mr. Proper also
+  appear in Altirra (checked by capturing both); they are not an artifact.
+  Performance: the game writes `$D65D` (MEMAC B) twice per blit, about 21
+  `installIoHandlers` calls per frame, and each one walked 16 K addresses
+  calling `vbxeMemacAddress` (11.6 % of the Node profile).
+  `installIoHandlers` now decides per range using the CPU enable bits, fills
+  the whole range with `fill` when everything was RAM and is not rebuilt if
+  the window set has not changed (`onlyIfChanged`, only from
+  `syncVbxeWindows`; the memory-map rebuild still walks address by address so
+  as not to overwrite ROM). `applyPlayfieldAttributes` looks up the attribute
+  map cell once per cell run and has a fast path for cells without Rev (the
+  Rev chain is only evaluated on Rev cells); decoded cells are stored on the
+  row buffer itself. Mr. Proper in Node: 42 to 51 fps; the output is
+  identical pixel by pixel before and after. Windowless Firefox 158, main
+  thread, 60 fps with callbacks averaging 10 ms but p95 of 29 ms and a maximum
+  of 58 ms (stutter); in worker mode 60 fps with the main thread almost free.
+  There are still about 45 garbage collections per 300 frames in Mr. Proper
+  (versus 1 in BASIC and 6-16 in other VBXE games), spread across
+  `renderXdlLine`, the attribute map and the blitter; the exact source of the
+  allocation was not located. Native A8E does not implement VBXE, so there is
+  nothing to port.
 
-- 2026-11-04 (rendimiento, segunda ronda): el perfil de CPU tomado dentro de
-  Chromium (CDP `Profiler`, no el de Node) mostró que lo más caro no era VBXE
-  sino `drawPlayerMissilesClock` de GTIA (36 %): se ejecuta en cada color
-  clock de cada línea aunque no haya jugadores ni misiles. Ahora sale al
-  principio cuando ningún registro de desplazamiento tiene bits, nada puede
-  cargarse en el tramo (`pmgMayReloadInSpan`) y no hay puesta al día de
-  tramos anteriores pendiente; el bucle por píxel y la mezcla de colisiones
-  no cambiaban nada en ese caso. El mismo arreglo está en el A8E nativo
-  (`AtariIo_PmgMayReloadInSpan`). Otros cambios en VBXE: `attributeMapPf3MaskBit`
-  sale al instante con máscara vacía (era el 32 % del perfil de Node en D600)
-  y sin `Math.floor`; `installIoHandlers` solo recorre las direcciones que
-  MEMAC puede cubrir y reutiliza la máscara de captura (D600 reescribe un
-  registro MEMAC cada frame); `buildLocalBusSchedule` reutiliza su búfer;
-  `loadAttributeMapBuffer` copia con `set`; y `applyPlayfieldAttributes` hace
-  una sola pasada por píxel (las dos cadenas de decisión eran idénticas) y
-  escribe el mismo RGB en el plano nativo y en el legacy con las mismas guardas
-  que tenía cada pasada. Resultados (la máquina estaba saturada por otras
-  pestañas del usuario, carga 8-12, así que son cotas bajas): D600 en el
-  arnés Node 28 a 49 fps, Firefox 158 sin ventana 34 a 49 fps. La ocupación
-  del hilo en Chromium no es comparable entre ejecuciones con esa carga.
-  Lecciones: dejar procesos de medida vivos (un Firefox sin ventana siguió
-  ejecutando el demo) falsea todo lo que se mida después; hay que cerrar la
-  instancia y las pestañas CDP al terminar. El A8E nativo no se midió en
-  tiempo; su sonda `antic_graphics_modes_probe` ya fallaba antes con el mismo
-  mensaje (`TestPmgModeZeroPlayfieldMix`).
+- 2026-11-04 (performance, second round): the CPU profile taken inside
+  Chromium (CDP `Profiler`, not Node's) showed that the most expensive thing
+  was not VBXE but GTIA's `drawPlayerMissilesClock` (36 %): it runs on every
+  color clock of every line even when there are no players or missiles. It now
+  returns early when no shift register has bits, nothing can load in the span
+  (`pmgMayReloadInSpan`) and there is no pending catch-up of earlier spans;
+  the per-pixel loop and collision mixing changed nothing in that case. The
+  same fix is in native A8E (`AtariIo_PmgMayReloadInSpan`). Other VBXE changes:
+  `attributeMapPf3MaskBit` exits immediately with an empty mask (it was 32 %
+  of the Node profile on D600) and without `Math.floor`; `installIoHandlers`
+  only walks the addresses MEMAC can cover and reuses the capture mask (D600
+  rewrites a MEMAC register every frame); `buildLocalBusSchedule` reuses its
+  buffer; `loadAttributeMapBuffer` copies with `set`; and
+  `applyPlayfieldAttributes` makes a single pass per pixel (the two decision
+  chains were identical) and writes the same RGB to the native plane and the
+  legacy one with the same guards each pass had. Results (the machine was
+  saturated by other user tabs, load 8-12, so these are lower bounds): D600 in
+  the Node harness 28 to 49 fps, windowless Firefox 158 34 to 49 fps. Thread
+  occupancy in Chromium is not comparable between runs under that load.
+  Lessons: leaving measurement processes alive (a windowless Firefox kept
+  running the demo) corrupts everything measured afterwards; the instance and
+  the CDP tabs must be closed when done. Native A8E was not timed; its
+  `antic_graphics_modes_probe` probe was already failing before with the same
+  message (`TestPmgModeZeroPlayfieldMix`).
 
-- 2026-11-04 — Resumen de la sesión «VBXE con software real» (el detalle está
-  en las entradas siguientes, de la más nueva a la más antigua). Punto de
-  partida: casi todo el software VBXE real se quedaba en el cargador y D600,
-  Popeye y compañía iban lentos o no dibujaban. Resultado: Popeye jugable,
-  D600 correcto y a 60 fps en Chromium, Phoenix/Celeste/Galaga/Crysis/Falcon
-  funcionando. Causas, en el orden en que aparecieron:
-  1. Remapeo de ventanas MEMAC (RAM que no volvía a RAM al desactivar la
-     ventana; reconstrucción completa del mapa que borraba la RAM bajo el ROM).
-  2. Rendimiento: búsquedas `window.A8EVbxe` por byte de DMA, reescaneo de
-     912 slots por byte de blitter, `Math.*` en rutas calientes.
-  3. Lecturas de GTIA `$D01B-$D01E` (`$FF` en vez de `$0F`).
-  4. Polaridad de `VIDEO_CONTROL` D2 (transparencia) invertida respecto a
-     Altirra; el AHRM lo describe al revés.
-  5. Captura de instrucciones desde ventanas MEMAC (el CPU leía la RAM).
-  6. DLI espurio en el vblank (decisión de salida de región con VSCROL sin
-     comprobar línea visible). Portado también al A8E nativo, junto con (3).
-  Metodología que funcionó: (a) comparar con Altirra 4.40 en wine (`/run`,
-  depurador con F8, `ba w <dir>` para ver quién escribe una dirección,
-  `.writemem` para volcar 64 KiB, `.vbxe_xdl`, `.antic`, `.restart`) y con la
-  RAM de jsA8E; (b) pcHooks en jsA8E para contar y ordenar el flujo; (c) leer
-  del XEX la estructura del cargador (Popeye: 623 segmentos con descompresor
-  LZ en `$8E6A`); (d) la pila al entrar el VBI revela qué interrumpió; (e)
-  `Object.defineProperty` sobre una propiedad de `ioData` para ver quién la
-  escribe; (f) medir fps en el arnés Node, en una pestaña nueva de Chromium
-  por CDP (puerto 9222, `Page.bringToFront`, `Performance.getMetrics`) y en
-  Firefox por WebDriver BiDi (puerto 9223).
-  Trampas: en el arnés headless cada acceso a un global (`window.X`, `Math`)
-  es una búsqueda lenta del contexto `vm`, así que sobrestima ese coste frente
-  al navegador; varios archivos mezclan saltos de línea CRLF y LF (editar por
-  bytes y revisar `git diff --stat`); `pkill -f`/`pgrep -f` con un patrón
-  presente en la propia orden mata la shell; un script propio llamado `dis.py`
-  sombrea el módulo `dis` de Python; las pruebas `phase_boot` y similares
-  usan timeouts de reloj y fallan de forma intermitente con la máquina
-  cargada; `vbxe_fx124_priority_probe_boot` ya fallaba antes de esta sesión.
-  Pendiente: gates `vbxe_real_software_scene` que esperen al fin de la carga,
-  Firefox (≈2x más lento que Chromium), y comparar Galaga/Crysis/Falcon/
-  Phoenix/Celeste con Altirra.
+- 2026-11-04 — Summary of the "VBXE with real software" session (the detail is
+  in the following entries, from newest to oldest). Starting point: almost all
+  real VBXE software stayed in the loader, and D600, Popeye and company were
+  slow or did not draw. Result: Popeye playable, D600 correct and at 60 fps in
+  Chromium, Phoenix/Celeste/Galaga/Crysis/Falcon working. Causes, in the order
+  they appeared:
+  1. MEMAC window remapping (RAM that did not return to RAM when the window
+     was disabled; a full map rebuild that erased the RAM under the ROM).
+  2. Performance: per-DMA-byte `window.A8EVbxe` lookups, a 912-slot rescan per
+     blitter byte, `Math.*` in hot paths.
+  3. GTIA reads `$D01B-$D01E` (`$FF` instead of `$0F`).
+  4. Polarity of `VIDEO_CONTROL` D2 (transparency) inverted with respect to
+     Altirra; the AHRM describes it the other way round.
+  5. Instruction fetch from MEMAC windows (the CPU read the RAM).
+  6. Spurious DLI in vblank (region-exit decision with VSCROL without checking
+     for a visible line). Also ported to native A8E, together with (3).
+  Methodology that worked: (a) compare with Altirra 4.40 under wine (`/run`,
+  debugger with F8, `ba w <addr>` to see who writes an address, `.writemem`
+  to dump 64 KiB, `.vbxe_xdl`, `.antic`, `.restart`) and with jsA8E's RAM;
+  (b) pcHooks in jsA8E to count and order the flow; (c) read the loader
+  structure from the XEX (Popeye: 623 segments with an LZ decompressor at
+  `$8E6A`); (d) the stack on VBI entry reveals what was interrupted; (e)
+  `Object.defineProperty` on an `ioData` property to see who writes it; (f)
+  measure fps in the Node harness, in a fresh Chromium tab over CDP (port 9222,
+  `Page.bringToFront`, `Performance.getMetrics`) and in Firefox over WebDriver
+  BiDi (port 9223).
+  Pitfalls: in the headless harness every access to a global (`window.X`,
+  `Math`) is a slow lookup in the `vm` context, so it overestimates that cost
+  compared with the browser; several files mix CRLF and LF line endings (edit
+  by bytes and check `git diff --stat`); `pkill -f`/`pgrep -f` with a pattern
+  that is present in the command itself kills the shell; a script of mine
+  named `dis.py` shadows Python's `dis` module; the `phase_boot` tests and
+  similar use wall-clock timeouts and fail intermittently when the machine is
+  loaded; `vbxe_fx124_priority_probe_boot` was already failing before this
+  session. Pending: `vbxe_real_software_scene` gates that wait for the end of
+  loading, Firefox (≈2x slower than Chromium), and comparing
+  Galaga/Crysis/Falcon/Phoenix/Celeste with Altirra.
 
-- 2026-11-04: A8E nativo: portados los dos arreglos de núcleo hechos en
-  jsA8E; los de VBXE no aplican porque el nativo no implementa VBXE.
-  (1) `AtariIo.c`: la decisión de DLI de salida de región con VSCROL (ciclo
-  6) solo se evalúa en las líneas 8-247; sin esa guarda un último comando de
-  lista `$94` tras `$B4` dejaba `bModeLineExitDli` activo y ANTIC levantaba
-  un DLI en cada línea 249-261 (en Popeye bloqueaba el juego). (2) Tabla de
-  registros de GTIA: `PRIOR`, `VDELAY`, `GRACTL` y `HITCLR` leen `$0F`, no
-  `$FF` (AHRM 6.1). Pruebas: `TestExitDliIsNotArmedInVerticalBlank` en
-  `antic_timing_probe.c` y `TestUnassignedReadsReturnF` en
-  `gtia_consol_probe.c` (fallan sin los arreglos). La sonda existente
-  `TestVscrolExitDliDeadlineCycle5` ahora fija una línea visible (100) antes
-  de armar el DLI. CTest ejecuta con la raíz del repositorio como directorio
-  de trabajo y necesita los ROM allí; se comprobó con enlaces temporales.
-  Líneas base ya rotas en el nativo, no relacionadas:
-  `antic_graphics_modes_probe` y `pokey_sio_contract_probe`.
+- 2026-11-04: Native A8E: ported the two core fixes made in jsA8E; the VBXE
+  ones do not apply because the native core does not implement VBXE.
+  (1) `AtariIo.c`: the region-exit DLI decision with VSCROL (cycle 6) is only
+  evaluated on lines 8-247; without that guard a last display-list command
+  `$94` after `$B4` left `bModeLineExitDli` active and ANTIC raised a DLI on
+  every line 249-261 (in Popeye it blocked the game). (2) GTIA register table:
+  `PRIOR`, `VDELAY`, `GRACTL` and `HITCLR` read `$0F`, not `$FF` (AHRM 6.1).
+  Tests: `TestExitDliIsNotArmedInVerticalBlank` in `antic_timing_probe.c` and
+  `TestUnassignedReadsReturnF` in `gtia_consol_probe.c` (they fail without the
+  fixes). The existing probe `TestVscrolExitDliDeadlineCycle5` now fixes a
+  visible line (100) before arming the DLI. CTest runs with the repository
+  root as the working directory and needs the ROMs there; checked with
+  temporary links. Baselines already broken in the native build, unrelated:
+  `antic_graphics_modes_probe` and `pokey_sio_contract_probe`.
 
-- 2026-11-04: Popeye ya avanza y se puede usar: tras el título y la tabla de
-  puntuaciones llega a la pantalla de juego con todos los colores. El
-  bloqueo era un DLI espurio en el vblank. `clockAction`
-  (`playfield/renderer_base.js`) arma `io.dliCycle` en el ciclo 6 de cada
-  línea cuando `modeLineExitDli` está activo y el contador de filas coincide
-  con VSCROL, pero no comprobaba que la línea fuera visible. Si la última
-  instrucción de la lista de display es una salida de región con scroll y
-  DLI (`$94` tras `$B4`), `modeLineExitDli` quedaba activo, el contador de
-  filas dejaba de avanzar en el vblank y seguía igualando a VSCROL: ANTIC
-  generaba un DLI en cada línea 249-261. Los manejadores de DLI de Popeye son
-  rutinas de varias líneas con WSYNC (núcleo de colores), así que uno de
-  ellos se ejecutaba durante todo el vblank, el manejador del VBI entraba en
-  su bucle `$21A1` (espera `VCOUNT=$7E`) en la línea 44 del frame siguiente y
-  el VBI siguiente lo interrumpía antes de la línea 252, para siempre: el
-  hilo principal (espera de 30 s en `$A7C1` con igualdad exacta de RTCLOK)
-  no volvía a ejecutarse. Ahora la decisión solo se evalúa en líneas
-  8-247. Cómo se encontró: el PC interrumpido que apila el VBI (siempre
-  `$21A3`), la pila (marco de VBI sobre marco de VBI) y un acceso con
-  Object.defineProperty sobre `io.dliCycle` para ver quién lo armaba.
+- 2026-11-04: Popeye now advances and is usable: after the title and the
+  score table it reaches the game screen with all colors. The blocker was a
+  spurious DLI in vblank. `clockAction` (`playfield/renderer_base.js`) arms
+  `io.dliCycle` at cycle 6 of each line when `modeLineExitDli` is active and
+  the row counter matches VSCROL, but did not check that the line was visible.
+  If the last display-list instruction is a region exit with scroll and DLI
+  (`$94` after `$B4`), `modeLineExitDli` stayed active, the row counter
+  stopped advancing in vblank and kept matching VSCROL: ANTIC generated a DLI
+  on every line 249-261. Popeye's DLI handlers are multi-line routines with
+  WSYNC (color kernel), so one of them ran for the whole vblank, the VBI
+  handler entered its `$21A1` loop (wait for `VCOUNT=$7E`) on line 44 of the
+  next frame and the next VBI interrupted it before line 252, forever: the
+  main thread (30 s wait at `$A7C1` with exact RTCLOK equality) never ran
+  again. Now the decision is only evaluated on lines 8-247. How it was found:
+  the interrupted PC pushed by the VBI (always `$21A3`), the stack (VBI frame
+  over VBI frame) and an Object.defineProperty access on `io.dliCycle` to see
+  who armed it.
 
-- 2026-11-04: Popeye ya funciona (title, "TOP FIVE CHART", escenario con los
-  colores del mapa de atributos). Causa: la CPU captura opcode y operandos
-  directamente de `ctx.ram[pc]`, así que el código que el juego ejecuta desde
-  una ventana MEMAC (configura `$D65E=$99`, `$D65F=$80`: ventana de 8 KB en
-  `$9000-$AFFF` sobre VRAM, descomprime allí sus juegos de caracteres y su
-  código, y salta a `$A516`) se leía de la RAM subyacente (datos de
-  gráficos) en lugar de VRAM. `installIoHandlers` construye ahora
-  `ctx.vbxeFetchMask` con las direcciones que MEMAC enruta a VRAM, y
-  `run`/`executeOne` preparan en `ctx.ram` los 3 bytes de la instrucción
-  (`stageWindowFetch`) y los restauran al terminar (`restoreWindowFetch`).
-  Sin ventana activa el coste es una comparación con `null` por instrucción.
-  Prueba nueva `tests/vbxe_memac_code_fetch.test.js` (en `test:vbxe`).
-  Cómo se llegó: Altirra en wine con el depurador (puntos de vigilancia y
-  `.writemem`) mostró que el código de `$A516` existía en su RAM; el XEX no
-  lo trae (623 segmentos con un descompresor LZ en `$8E6A`) y las trazas de
-  jsA8E mostraron los destinos de la descompresión dentro de la ventana MEMAC.
+- 2026-11-04: Popeye now works (title, "TOP FIVE CHART", scenery with the
+  attribute-map colors). Cause: the CPU fetches opcode and operands directly
+  from `ctx.ram[pc]`, so the code the game executes from a MEMAC window (it
+  configures `$D65E=$99`, `$D65F=$80`: an 8 KB window at `$9000-$AFFF` over
+  VRAM, decompresses its character sets and its code there, and jumps to
+  `$A516`) was read from the underlying RAM (graphics data) instead of VRAM.
+  `installIoHandlers` now builds `ctx.vbxeFetchMask` with the addresses that
+  MEMAC routes to VRAM, and `run`/`executeOne` stage the 3 instruction bytes
+  in `ctx.ram` (`stageWindowFetch`) and restore them when done
+  (`restoreWindowFetch`). With no active window the cost is one comparison
+  with `null` per instruction. New test `tests/vbxe_memac_code_fetch.test.js`
+  (in `test:vbxe`). How it was reached: Altirra under wine with the debugger
+  (watchpoints and `.writemem`) showed that the code at `$A516` existed in its
+  RAM; the XEX does not contain it (623 segments with an LZ decompressor at
+  `$8E6A`) and jsA8E traces showed the decompression destinations inside the
+  MEMAC window.
 
-- 2026-11-04: D600 (demo del blitter) ya se ve como en Altirra: bitmap hires
-  de ANTIC coloreado por el mapa de atributos (un color por línea) con las
-  esferas del blitter encima. La causa era la polaridad del bit 2 de
-  VIDEO_CONTROL. Altirra (`WriteControl`: `mbOvTrans = (value & 4) == 0`, y
-  `RenderOverlay` salta el color 0 solo en esa rama) hace transparente el
-  color 0 del overlay con D2 = 0 (valor de reset) y opaco con D2 = 1; D3
-  añade el color `$F` solo en el caso transparente. jsA8E lo tenía al revés,
-  siguiendo la prosa del AHRM, y con `VIDEO_CONTROL=3` (el valor que usan D600
-  y Popeye) el overlay a ceros se pintaba como negro opaco tapando el fondo.
-  Nuevo helper `overlayTransparency` en `vbxe.js`. Como la inversión es
-  exacta, las pruebas conservan su intención invirtiendo D2: valores de
-  `videoControlActive` en `vbxe_device_state.test.js` y las escrituras a
-  `$D640` de las fuentes `.asm` de `implementation/AHRM Validation` (29
-  archivos), con todos los `.XEX` regenerados con el ensamblador del proyecto
-  (incluidos los alias `_V2_`, `12`, etc. que declaran las pruebas).
-  Rendimiento (medido en el arnés headless de Node, no en el navegador):
-  D600 pasó de 8 a unos 27-45 fps. `advanceBlitter` recorría las 912
-  posiciones del bus local por cada byte copiado (ahora cuenta una vez y
-  descuenta), `attributeMapCell` cachea la celda por línea y quita un cierre
-  por llamada, y `blitByteCycles`/la división de columna evitan `Math.*` en la
-  ruta por píxel/byte (en el contexto `vm` cada global es una búsqueda lenta).
-  D600 con BASIC activo se queda esperando una línea de `E:` (necesita ENTER
-  y luego una tecla): igual que en Altirra con BASIC. Popeye sigue sin dibujar
-  el playfield (la memoria de pantalla de ANTIC queda a cero); es otro
-  problema. `vbxe_fx124_priority_probe_boot` ya fallaba en el commit
-  anterior ("legacy bit 6 must win over PF2"), no es regresión de este cambio.
+- 2026-11-04: D600 (blitter demo) now looks like Altirra: ANTIC hires bitmap
+  colored by the attribute map (one color per line) with the blitter spheres
+  on top. The cause was the polarity of bit 2 of VIDEO_CONTROL. Altirra
+  (`WriteControl`: `mbOvTrans = (value & 4) == 0`, and `RenderOverlay` skips
+  color 0 only in that branch) makes overlay color 0 transparent with D2 = 0
+  (reset value) and opaque with D2 = 1; D3 adds color `$F` only in the
+  transparent case. jsA8E had it the other way round, following the AHRM
+  prose, and with `VIDEO_CONTROL=3` (the value D600 and Popeye use) the
+  zero-filled overlay was painted as opaque black covering the background.
+  New helper `overlayTransparency` in `vbxe.js`. Since the inversion is exact,
+  the tests keep their intent by inverting D2: `videoControlActive` values in
+  `vbxe_device_state.test.js` and the writes to `$D640` in the `.asm` sources
+  of `implementation/AHRM Validation` (29 files), with all the `.XEX` files
+  regenerated with the project assembler (including the `_V2_`, `12`, etc.
+  aliases that the tests declare).
+  Performance (measured in the headless Node harness, not in the browser):
+  D600 went from 8 to about 27-45 fps. `advanceBlitter` walked the 912 local
+  bus positions for every copied byte (it now counts once and subtracts),
+  `attributeMapCell` caches the cell per line and drops one closure per call,
+  and `blitByteCycles`/the column division avoid `Math.*` on the per-pixel/
+  per-byte path (in the `vm` context every global is a slow lookup).
+  D600 with BASIC active stays waiting for a line from `E:` (it needs ENTER and
+  then a key): same as Altirra with BASIC. Popeye still does not draw the
+  playfield (ANTIC's screen memory stays at zero); that is another problem.
+  `vbxe_fx124_priority_probe_boot` was already failing in the previous commit
+  ("legacy bit 6 must win over PF2"); it is not a regression of this change.
 
-- 2026-11-03: las lecturas de GTIA `$D01B-$D01E` (PRIOR, VDELAY, GRACTL,
-  HITCLR) devolvían `$FF`; el AHRM 6.1 y Altirra devuelven `$0F` en todo
-  `$D015-$D01E` (sin bits flotantes). Popeye lee `$D01C` y bifurca según el
-  bit 7. Corregido en la tabla de `hw.js` y cubierto por
-  `tests/gtia_unassigned_reads.test.js` (en `test:gtia-spans`). Esto no basta
-  para que Popeye dibuje su pantalla. Comparado con Altirra (VBXE FX 1.26 vía
-  wine): el XDL es idéntico, DMACTL efectivo `$21` en ambos y los colores de
-  GTIA valen 0 en ambos; la diferencia es que en jsA8E la memoria de pantalla
-  de ANTIC (`$B029-$BFFF`) queda en ceros salvo la línea de estado, o sea que
-  el juego no llega a dibujar el playfield.
+- 2026-11-03: GTIA reads of `$D01B-$D01E` (PRIOR, VDELAY, GRACTL, HITCLR)
+  returned `$FF`; AHRM 6.1 and Altirra return `$0F` across `$D015-$D01E`
+  (no floating bits). Popeye reads `$D01C` and branches on bit 7. Fixed in
+  the `hw.js` table and covered by `tests/gtia_unassigned_reads.test.js` (in
+  `test:gtia-spans`). This is not enough for Popeye to draw its screen.
+  Compared with Altirra (VBXE FX 1.26 via wine): the XDL is identical,
+  effective DMACTL is `$21` in both and the GTIA colors are 0 in both; the
+  difference is that in jsA8E ANTIC's screen memory (`$B029-$BFFF`) stays at
+  zeros except for the status line, i.e. the game does not get to draw the
+  playfield.
 
-- 2026-11-03: con VBXE el emulador iba 2,7 veces más lento (31 fps frente a
-  83 sin VBXE, medido con Celeste en headless). El perfil mostró dos costes
-  fijos por scanline/byte de DMA: (1) `readExpansionMemoryByte` (llamada por
-  cada byte de DMA de ANTIC) consultaba `window.A8EVbxe` entre 4 y 8 veces
-  por llamada, y en un contexto `vm` cada acceso al global es lento; ahora la
-  API se resuelve una vez (`getVbxeApi`) y solo si la VBXE está habilitada.
-  (2) `buildLocalBusSchedule` recorría las 912 posiciones del bus local en
-  cada scanline para contar las libres; ahora `reserveLocalSlot` lleva el
-  contador. Resultado: 77 fps con VBXE (83 sin ella). `test:vbxe` pasa.
-  Observación pendiente (Popeye): su bucle principal en `$21A3` espera
-  `VCOUNT=$7E` y luego conmuta DMACTL entre 3 y 0 con temporización por ciclo
-  dentro de la línea; el playfield no aparece, y el overlay de `$0-$1E000`
-  queda vacío con el blitter sin arrancar.
+- 2026-11-03: with VBXE the emulator ran 2.7 times slower (31 fps versus 83
+  without VBXE, measured with Celeste headless). The profile showed two fixed
+  costs per scanline/DMA byte: (1) `readExpansionMemoryByte` (called for every
+  ANTIC DMA byte) consulted `window.A8EVbxe` 4 to 8 times per call, and in a
+  `vm` context every access to the global is slow; now the API is resolved
+  once (`getVbxeApi`) and only if VBXE is enabled. (2) `buildLocalBusSchedule`
+  walked the 912 local bus positions on every scanline to count the free
+  ones; now `reserveLocalSlot` keeps the counter. Result: 77 fps with VBXE
+  (83 without it). `test:vbxe` passes. Pending observation (Popeye): its main
+  loop at `$21A3` waits for `VCOUNT=$7E` and then toggles DMACTL between 3 and
+  0 with cycle timing inside the line; the playfield does not appear, and the
+  overlay at `$0-$1E000` stays empty with the blitter not started.
 
-- 2026-11-03: corregidos dos fallos del remapeo de ventanas MEMAC que
-  perdían escrituras de la CPU y explicaban que la mayoría del software VBXE
-  real no pasara del cargador. (1) `installIoHandlers` enruta a `ioAccess` las
-  direcciones RAM bajo una ventana MEMAC activa, pero nunca las devolvía a RAM
-  al desactivarla; fuera de la ventana `ioAccess` trata la dirección como
-  registro de solo escritura (`sram[addr] = v`) y la RAM no cambiaba. Ahora se
-  restauran a RAM antes de reinstalar las ventanas activas. (2) `vbxeMapSync`
-  apuntaba a `setupMemoryMap`, que con el OS ROM apagado recargaba
-  `$C000-$FFFF` desde `sram` (obsoleto mientras esa RAM está visible) al
-  escribir `MEMAC_CONTROL`/`BANK_SEL`, borrando la imagen que el programa
-  acababa de copiar. Ahora usa `syncVbxeWindows`, que solo reinstala las
-  ventanas. Phoenix copia su imagen de VRAM a `$0400-$FFFF` con un stub en
-  `$4000` y salta a `$D800`; antes ejecutaba BRK (RAM a cero), caía en
-  PC=0 y la VBXE no llegaba a activarse; ahora ejecuta su código propio con
-  `VIDEO_CONTROL=1` y XDL en `$49000`. `vbxe_memac_window_sync` cubre ambos
-  casos y falla si cualquiera de los dos arreglos se desactiva. Diagnóstico
-  asociado: los XEX se montan como disco y cargan a velocidad SIO normal
-  (~5 frames por sector), así que los gates de 480 frames de
-  `vbxe_real_software_scene` solo veían el cargador; Phoenix necesita ~4200
-  frames, Falcon/Crysis ~9000 y Galaga ~19000. Esos gates siguen sin probar
-  el software real y deben esperar el fin de la carga antes de aceptar una
-  escena.
+- 2026-11-03: fixed two MEMAC window remapping bugs that lost CPU writes and
+  explained why most real VBXE software did not get past the loader. (1)
+  `installIoHandlers` routes RAM addresses under an active MEMAC window to
+  `ioAccess`, but never returned them to RAM when it was disabled; outside the
+  window `ioAccess` treats the address as a write-only register (`sram[addr] =
+  v`) and the RAM did not change. Now they are restored to RAM before the
+  active windows are reinstalled. (2) `vbxeMapSync` pointed at
+  `setupMemoryMap`, which, with the OS ROM off, reloaded `$C000-$FFFF` from
+  `sram` (stale while that RAM is visible) when writing
+  `MEMAC_CONTROL`/`BANK_SEL`, erasing the image the program had just copied.
+  Now it uses `syncVbxeWindows`, which only reinstalls the windows. Phoenix
+  copies its image from VRAM to `$0400-$FFFF` with a stub at `$4000` and jumps
+  to `$D800`; before, it executed BRK (zeroed RAM), fell into PC=0 and VBXE
+  never got activated; now it runs its own code with `VIDEO_CONTROL=1` and XDL
+  at `$49000`. `vbxe_memac_window_sync` covers both cases and fails if either
+  fix is disabled. Associated diagnosis: the XEXs are mounted as a disk and
+  load at normal SIO speed (~5 frames per sector), so the 480-frame gates of
+  `vbxe_real_software_scene` only saw the loader; Phoenix needs ~4200 frames,
+  Falcon/Crysis ~9000 and Galaga ~19000. Those gates still do not test the
+  real software and must wait for the end of loading before accepting a scene.
 
-- 2026-11-03: auditoría de limpieza de VBXE: no se encontraron funciones
-  muertas ni exports retirables; las APIs del blitter, snapshots y traza MEMAC
-  tienen consumidores en runtime o regresiones. Se centralizaron las tablas
-  repetidas de geometría y DMA del overlay y se eliminó una rama redundante del
-  scheduler que devolvía exactamente el mismo resultado que el camino común.
+- 2026-11-03: VBXE cleanup audit: no dead functions or retirable exports were
+  found; the blitter, snapshot and MEMAC trace APIs have consumers in the
+  runtime or in regressions. The repeated overlay geometry and DMA tables were
+  centralized and a redundant scheduler branch that returned exactly the same
+  result as the common path was removed.
 
-- 2026-11-03: corregido el inicio DMA del overlay en la agenda local. La tabla
-  ahora usa los índices de Altirra `Narrow=0`, `Normal=1`, `Wide=2` y reserva
-  los primeros slots en `10/18/26`, respectivamente; antes narrow y wide
-  estaban intercambiados. `vbxe_blitter_state` cubre las tres anchuras. El
-  consumo ciclo a ciclo del residuo por el blitter y el orden físico MEMAC
-  siguen requiriendo una comparación diferencial independiente.
+- 2026-11-03: fixed the overlay DMA start in the local schedule. The table now
+  uses Altirra's indices `Narrow=0`, `Normal=1`, `Wide=2` and reserves the
+  first slots at `10/18/26`, respectively; before, narrow and wide were
+  swapped. `vbxe_blitter_state` covers the three widths. The blitter's
+  cycle-by-cycle consumption of the remainder and the physical MEMAC order
+  still require an independent differential comparison.
 
-- 2026-11-03: los accesos MEMAC conservan ahora una traza temporal con tipo,
-  fase AHRM, ciclo CPU, ciclo relativo de scanline y slot local candidato.
-  `localBusBudget()` usa ese slot cuando el caller dispone de timestamp y
-  mantiene el camino agregado para accesos antiguos. La traza se conserva en
-  snapshots y `getMemacTrace()` la expone para diagnósticos diferenciales.
+- 2026-11-03: MEMAC accesses now keep a temporal trace with type, AHRM phase,
+  CPU cycle, relative scanline cycle and candidate local slot.
+  `localBusBudget()` uses that slot when the caller has a timestamp and keeps
+  the aggregate path for older accesses. The trace is kept in snapshots and
+  `getMemacTrace()` exposes it for differential diagnostics.
 
-- 2026-11-03: `vbxe_browser_backend` compara las cuatro rutas contra la
-  baseline persistida `tests/fixtures/vbxe_browser_golden.json`. También acepta
-  `A8E_VBXE_REFERENCE` para comparar un JSON externo de Altirra con el mismo
-  esquema, sin introducir dependencias.
+- 2026-11-03: `vbxe_browser_backend` compares the four paths against the
+  persisted baseline `tests/fixtures/vbxe_browser_golden.json`. It also
+  accepts `A8E_VBXE_REFERENCE` to compare an external Altirra JSON with the
+  same schema, without introducing dependencies.
 
-- 2026-11-03: el gate browser acepta `a8e_renderer=2d` y fuerza Canvas2D
-  tanto en main-thread como en worker. La captura VBXE valida ahora cuatro
-  rutas (WebGL2 main/worker y Canvas2D main/worker), con dimensiones, PNG no
-  vacío y hash idéntico entre los dos backends de cada pareja.
+- 2026-11-03: the browser gate accepts `a8e_renderer=2d` and forces Canvas2D
+  in both main-thread and worker. The VBXE capture now validates four paths
+  (WebGL2 main/worker and Canvas2D main/worker), with dimensions, a non-empty
+  PNG and an identical hash between the two backends of each pair.
 
-- 2026-11-03: el scheduler local ahora conserva el tipo de acceso MEMAC:
-  lecturas CPU/ANTIC reservan fase 1 y escrituras CPU reservan fase 3. Se
-  mantiene el contador agregado como compatibilidad para callers antiguos y
-  `vbxe_blitter_state` verifica que ambos tipos no se mezclen.
+- 2026-11-03: the local scheduler now keeps the MEMAC access type: CPU/ANTIC
+  reads reserve phase 1 and CPU writes reserve phase 3. The aggregate counter
+  is kept for compatibility with older callers and `vbxe_blitter_state`
+  verifies that both types are not mixed.
 
-- 2026-11-03: afinado el replay posterior a `COLCLR`: el tramo posterior
-  conserva la composición visual por `PRIOR`, pero la máscara de colisión usa
-  la prioridad de playfield vigente, evitando reinyectar contribuyentes P/M
-  latched del tramo anterior. Esto mantiene los oráculos históricos P5 y
-  GTIA-special mientras deja intacto el replay normal sin `COLCLR`.
+- 2026-11-03: refined the replay after `COLCLR`: the later span keeps the
+  visual composition by `PRIOR`, but the collision mask uses the current
+  playfield priority, avoiding reinjecting latched P/M contributors from the
+  earlier span. This keeps the historical P5 and GTIA-special oracles while
+  leaving the normal replay without `COLCLR` untouched.
 
-- 2026-11-03: completado el manejo raster de `COLCLR` durante el replay
-  GTIA. La línea registra el ciclo horizontal del clear, descarta las
-  contribuciones anteriores y reconstruye solo el tramo posterior; en el
-  camino validado por FX 1.26 el cálculo posterior usa la prioridad de
-  playfield vigente para no reintroducir P/M de un tramo pre-clear. Los
-  probes P5 y GTIA-special vuelven a pasar.
+- 2026-11-03: completed the raster handling of `COLCLR` during the GTIA
+  replay. The line records the horizontal cycle of the clear, discards earlier
+  contributions and rebuilds only the later span; on the path validated by
+  FX 1.26 the later calculation uses the current playfield priority so as not
+  to reintroduce P/M from a pre-clear span. The P5 and GTIA-special probes
+  pass again.
 
-- 2026-11-03: limpiada por scanline la planeación de contribuyentes de
-  `vbxeCollisionPriority` antes de dibujar GTIA. La planeación conserva una
-  marca válida solo para la línea actual; sin esta limpieza el replay de
-  colisiones podía reutilizar P0/P1 de la misma línea del frame anterior y
-  romper el probe P5 cuando esos jugadores se apagaban.
+- 2026-11-03: cleaned up per scanline the contributor planning of
+  `vbxeCollisionPriority` before drawing GTIA. The planning keeps a mark valid
+  only for the current line; without this cleanup the collision replay could
+  reuse P0/P1 of the same line of the previous frame and break the P5 probe
+  when those players were turned off.
 
-- 2026-11-03: añadido `npm run test:vbxe:browser`, un gate CDP sin
-  dependencias externas que selecciona la misma aplicación en main-thread y
-  worker, espera una escena VBXE y compara dimensiones, tamaño y hash de la
-  captura PNG. Restaura la URL original y se puede hacer obligatorio con
-  `A8E_REQUIRE_CDP=1`; sin Chromium/CDP disponible queda como skip explícito.
+- 2026-11-03: added `npm run test:vbxe:browser`, a CDP gate with no external
+  dependencies that selects the same application in main-thread and worker,
+  waits for a VBXE scene and compares dimensions, size and hash of the PNG
+  capture. It restores the original URL and can be made mandatory with
+  `A8E_REQUIRE_CDP=1`; without Chromium/CDP available it is an explicit skip.
 
-- 2026-11-03: sustituido el presupuesto VBXE puramente agregado por una
-  agenda explícita de 912 slots locales por scanline. Overlay usa las fases
-  pares de AHRM, MEMAC las fases impares, XDL reserva sus 22 slots después del
-  área activa y el reload de mapa reserva las 172 celdas siguientes; el
-  blitter consume únicamente slots libres. El contrato agregado se conserva y
-  ahora tiene regresión sobre posiciones concretas. La entrada MEMAC todavía
-  llega al modelo como contador, por lo que la fase exacta CPU-read/write del
-  bus externo queda como siguiente refinamiento.
+- 2026-11-03: replaced the purely aggregate VBXE budget with an explicit
+  schedule of 912 local slots per scanline. Overlay uses AHRM's even phases,
+  MEMAC the odd phases, XDL reserves its 22 slots after the active area and
+  the map reload reserves the next 172 cells; the blitter consumes only free
+  slots. The aggregate contract is kept and now has a regression on concrete
+  positions. The MEMAC access still reaches the model as a counter, so the
+  exact CPU-read/write phase on the external bus remains the next refinement.
 
-- 2026-11-03: el replay GTIA de VBXE ya recalcula también la contribución de
-  `COLDETECT` de la línea. Antes se preservaba para evitar doble conteo, lo que
-  impedía reflejar un cambio mid-line de `PRIOR`/modo GTIA. Ahora se retira la
-  máscara producida por el render inicial, se reconstruye por spans y se
-  conservan los bits históricos de líneas anteriores. El ciclo de `COLCLR`
-  se documenta y cubre en la entrada posterior.
+- 2026-11-03: the VBXE GTIA replay now also recalculates the line's
+  `COLDETECT` contribution. Before, it was preserved to avoid double
+  counting, which prevented reflecting a mid-line change of `PRIOR`/GTIA mode.
+  Now the mask produced by the initial render is removed, rebuilt per span and
+  the historical bits of earlier lines are kept. The `COLCLR` cycle is
+  documented and covered in the later entry.
 
-- 2026-11-03: corregida la recarga del buffer de attribute map al terminar una
-  fila en una entrada XDL repetida. La recarga ya no depende de decodificar una
-  entrada nueva: también ocurre cuando el contador vertical de cinco bits
-  vuelve a cero, después de avanzar la dirección por el stride. La regresión
-  cubre dos filas consecutivas y confirma que la segunda usa sus 43 celdas
-  recién capturadas.
+- 2026-11-03: fixed the attribute-map buffer reload at the end of a row in a
+  repeated XDL entry. The reload no longer depends on decoding a new entry: it
+  also happens when the five-bit vertical counter returns to zero, after
+  advancing the address by the stride. The regression covers two consecutive
+  rows and confirms that the second uses its 43 freshly captured cells.
 
-- 2026-11-03: ajustado el blitter para cobrar el ciclo de lectura inicial de
-  BCB con fuente constante (`AND=$00`), que Altirra descuenta aparte antes
-  de aplicar el coste reducido por byte de salida. La operación sigue siendo
-  funcional y las pruebas de estado/temporización continúan verdes.
+- 2026-11-03: adjusted the blitter to charge the initial BCB read cycle with a
+  constant source (`AND=$00`), which Altirra discounts separately before
+  applying the reduced per-output-byte cost. The operation is still
+  functional and the state/timing tests remain green.
 
-- 2026-11-03: el compositor VBXE ya puede reconstruir overlay y playfield por
-  spans GTIA dentro de una misma línea. `applyGtiaSpans()` vuelve a dibujar
-  cada intervalo con el `PRIOR`/modo GTIA vigente, en lugar de reaplicar solo
-  colores del mapa sobre un overlay compuesto con el primer estado. La
-  colisión se conserva del render primario durante este replay para no contar
-  dos veces el mismo píxel; la colisión dependiente de cambios mid-line queda
-  todavía como diferencial específico pendiente. Los probes P5/multicolor y
-  GTIA-special siguen pasando.
+- 2026-11-03: the VBXE compositor can now rebuild overlay and playfield per
+  GTIA span within a single line. `applyGtiaSpans()` redraws each interval with
+  the current `PRIOR`/GTIA mode, instead of reapplying only map colors over an
+  overlay composed with the first state. The collision is kept from the
+  primary render during this replay so as not to count the same pixel twice;
+  collision dependent on mid-line changes is still a specific pending
+  differential. The P5/multicolor and GTIA-special probes still pass.
 
-- 2026-11-03: separado también el latch de `VIDEO_CONTROL` en el modelo
-  temporal: D1-D3 se aplican al escribir y D0 se consume en VSync, conforme a
-  AHRM 12.4. La regresión de registros se actualizó y permanece verde.
+- 2026-11-03: also separated the `VIDEO_CONTROL` latch in the temporal model:
+  D1-D3 are applied on write and D0 is consumed at VSync, per AHRM 12.4. The
+  register regression was updated and remains green.
 
-- 2026-11-03: el attribute map ahora captura explícitamente las 43 celdas de
-  cuatro bytes durante la carga de fila y cada píxel de esa línea consume el
-  buffer, no la VRAM viva. Esto alinea el modelo con el buffer de línea de
-  AHRM/Altirra y evita que una escritura MEMAC durante el display modifique
-  retrospectivamente la línea. El buffer forma parte de snapshots y la
-  regresión de estado cubre la inmutabilidad de la captura.
+- 2026-11-03: the attribute map now explicitly captures the 43 four-byte cells
+  during row load and every pixel of that line consumes the buffer, not the
+  live VRAM. This aligns the model with AHRM/Altirra's line buffer and keeps a
+  MEMAC write during display from retroactively modifying the line. The buffer
+  is part of snapshots and the state regression covers the immutability of the
+  capture.
 
-- 2026-11-03: corregidos cuatro bordes de la ruta XDL según AHRM 12.4 y
-  `vbxe.cpp` de Altirra 4.40. `VIDEO_CONTROL` aplica de inmediato EXT y los
-  dos bits de transparencia, dejando el bit XDL para VSync; el decodificador
-  desactiva la combinación inválida de modo `c0&3==3`; una nueva entrada de
-  texto comienza en `OvScrollY`; y VSync/warm reset conservan también el
-  `characterBase` y los latches de dirección/stride. Las regresiones de
-  `vbxe_device_state` y `vbxe_register_snapshot` pasan. Quedaban pendientes
-  el compositor raster completo, el buffer temporal del attribute map y el
-  arbitraje DMA por fase; el buffer y el primer replay raster se completaron
-  en las entradas posteriores, pero el arbitraje por fase sigue abierto.
+- 2026-11-03: fixed four edges of the XDL path per AHRM 12.4 and Altirra 4.40's
+  `vbxe.cpp`. `VIDEO_CONTROL` applies EXT and the two transparency bits
+  immediately, leaving the XDL bit for VSync; the decoder disables the invalid
+  mode combination `c0&3==3`; a new text entry starts at `OvScrollY`; and
+  VSync/warm reset also keep `characterBase` and the address/stride latches.
+  The `vbxe_device_state` and `vbxe_register_snapshot` regressions pass. The
+  full raster compositor, the attribute map's temporary buffer and per-phase
+  DMA arbitration remained pending; the buffer and the first raster replay
+  were completed in the later entries, but per-phase arbitration is still
+  open.
 
-- 2026-11-03: completado el primer gate visual del corpus real FX1.26 en
-  `vbxe_real_software_scene.test.js`, integrado en `test:vbxe:full`. Con
-  `turbo=true`, `sioTurbo=true`, 130XE-128K, NTSC y render activo, el gate
-  comprueba el corpus en checkpoints hasta 480 frames. Popeye, DACTest,
-  Textmode Test modo 4, Crysis y Falcon producen un frame no negro distinto
-  de cualquier reset; Galaga, Celeste, D600 y Phoenix conservan por ahora sólo
-  sus puertas de arranque porque la captura headless queda negra o coincide
-  con el conjunto de reset. Los 120 frames iniciales eran insuficientes para
-  Popeye. El gate visual complementa el marcador RAM del XEX mínimo, pero no
-  es todavía una marca específica de cada programa ni una comparación golden
-  contra Altirra.
+- 2026-11-03: completed the first visual gate of the real FX1.26 corpus in
+  `vbxe_real_software_scene.test.js`, integrated into `test:vbxe:full`. With
+  `turbo=true`, `sioTurbo=true`, 130XE-128K, NTSC and active rendering, the
+  gate checks the corpus at checkpoints up to 480 frames. Popeye, DACTest,
+  Textmode Test mode 4, Crysis and Falcon produce a non-black frame different
+  from any reset; Galaga, Celeste, D600 and Phoenix keep only their boot gates
+  for now because the headless capture is black or matches the reset set. The
+  initial 120 frames were insufficient for Popeye. The visual gate complements
+  the minimal XEX's RAM marker, but is not yet a program-specific mark or a
+  golden comparison against Altirra.
 
-- 2026-11-03: endurecido el gate visual del corpus. La prueba ya no acepta
-  cualquier digest distinto: compara checkpoints de 120, 240, 360 y 480
-  frames contra todos los digests de reset y exige al menos un frame no negro.
-  Esto evita que una variante temporal de la pantalla de arranque o un estado
-  negro transitorio (observado en Galaga) se interprete como escena válida;
-  cinco casos pasan y cuatro quedan explícitamente como boot-only.
+- 2026-11-03: hardened the corpus visual gate. The test no longer accepts any
+  different digest: it compares checkpoints of 120, 240, 360 and 480 frames
+  against all reset digests and requires at least one non-black frame. This
+  keeps a temporal variant of the boot screen or a transient black state
+  (observed in Galaga) from being interpreted as a valid scene; five cases
+  pass and four remain explicitly boot-only.
 
-- 2026-11-03: la configuración del corpus visual quedó separada del test
-  sintético RAMBO. Los programas reales usan 130XE-128K/NTSC, coherente con
-  la validación Altirra documentada; el marcador mínimo mantiene RAMBO
-  explícito. Galaga no se fuerza a pasar una captura negra: queda señalado
-  como pendiente de un marcador o escena observable en headless.
+- 2026-11-03: the visual corpus configuration was separated from the
+  synthetic RAMBO test. The real programs use 130XE-128K/NTSC, consistent with
+  the documented Altirra validation; the minimal marker keeps RAMBO explicit.
+  Galaga is not forced to pass a black capture: it is flagged as pending an
+  observable marker or scene in headless.
 
-- 2026-11-03: `npm run test:vbxe:full` quedó verde después de integrar el
-  gate visual endurecido. La salida registra cinco escenas visualmente
-  observables y cuatro casos boot-only explícitos; no se declara equivalencia
-  pixel a pixel con Altirra.
+- 2026-11-03: `npm run test:vbxe:full` went green after integrating the
+  hardened visual gate. The output records five visually observable scenes
+  and four explicit boot-only cases; pixel-by-pixel equivalence with Altirra
+  is not claimed.
 
-- 2026-11-03: el gate real añade ahora una huella SHA-256 de los 64 KiB de
-  memoria en cada checkpoint. Los casos sin escena visual no se relajan a
-  `cycleCounter`: deben cambiar la RAM respecto del conjunto de reset y
-  registran ese marcador como evidencia de ejecución del XEX. Esto sigue sin
-  sustituir un marcador específico de escena ni una comparación Altirra.
+- 2026-11-03: the real gate now adds a SHA-256 fingerprint of the 64 KiB of
+  memory at each checkpoint. Cases without a visual scene are not relaxed to
+  `cycleCounter`: they must change the RAM with respect to the reset set and
+  record that marker as evidence of XEX execution. This still does not
+  replace a scene-specific marker or an Altirra comparison.
 
-- 2026-11-03: habilitada la ruta worker también para perfiles VBXE. La UI ya
-  no fuerza el runtime principal cuando VBXE está activo: el worker recibe la
-  configuración FX y compone `vbxeRgb`/hires dentro de su `OffscreenCanvas`.
-  Queda pendiente una regresión browser dedicada que compare worker, fallback
-  main-thread y Canvas 2D; la validación funcional headless no cubre
+- 2026-11-03: enabled the worker path for VBXE profiles as well. The UI no
+  longer forces the main runtime when VBXE is active: the worker receives the
+  FX configuration and composes `vbxeRgb`/hires inside its `OffscreenCanvas`.
+  A dedicated browser regression comparing worker, main-thread fallback and
+  Canvas 2D is still pending; headless functional validation does not cover
   `OffscreenCanvas`.
 
-- 2026-11-03: smoke test manual por CDP confirmó ambos backends con VBXE
-  FX1.26 activo: worker `true`/WebGL2 y fallback main-thread `false`/WebGL2
-  arrancaron con captura PNG 336x240 no negra (`40795` píxeles no negros en
-  ambos casos). La equivalencia automatizada de contenido y Canvas 2D sigue
-  pendiente; este resultado sólo valida que la ruta worker no queda negra ni
-  bloquea la automatización.
+- 2026-11-03: manual CDP smoke test confirmed both backends with VBXE
+  FX1.26 active: worker `true`/WebGL2 and main-thread fallback `false`/WebGL2
+  started with a non-black 336x240 PNG capture (`40795` non-black pixels in
+  both cases). Automated content equivalence and Canvas 2D remain pending;
+  this result only validates that the worker path does not stay black or block
+  automation.
 
-- 2026-11-03: se repitió la comprobación de etapa 7 en la instancia real de
-  Chromium (`localhost:8090/jsA8E`, CDP `9222`) porque el harness headless
-  capturaba una pantalla inicial común. `A8EAutomation.runXexFromUrl()` cargó
-  el corpus FX1.26 y avanzó 120 frames con `rendererBackend=webgl2` y
-  `worker=false`; los PCs observados dejaron de ser el bucle inicial del OS.
-  La captura Chromium produjo un frame no negro. En Textmode Test, el digest
-  del menú fue `8288d135...` y el del modo 4 seleccionado `8c5f3da9...`, por
-  lo que el cambio visual es observable en el navegador. Esto valida el
-  protocolo de captura browser, no todavía la equivalencia con Altirra ni una
-  línea base headless; la comparación externa sigue pendiente.
+- 2026-11-03: the stage 7 check was repeated on the real Chromium instance
+  (`localhost:8090/jsA8E`, CDP `9222`) because the headless harness captured a
+  common initial screen. `A8EAutomation.runXexFromUrl()` loaded the FX1.26
+  corpus and advanced 120 frames with `rendererBackend=webgl2` and
+  `worker=false`; the observed PCs left the OS's initial loop. The Chromium
+  capture produced a non-black frame. In Textmode Test, the menu digest was
+  `8288d135...` and the one with mode 4 selected `8c5f3da9...`, so the visual
+  change is observable in the browser. This validates the browser capture
+  protocol, not yet equivalence with Altirra or a headless baseline; the
+  external comparison is still pending.
 
-- 2026-11-03: se cerró la primera parte del refuerzo del harness XEX. El
-  headless hereda ahora una configuración comparable a Chromium (`sioTurbo`
-  explícito y RAMBO en el diagnóstico), y
-  `vbxe_xex_scene_marker.test.js` ensambla un XEX mínimo, lo arranca y espera
-  los marcadores RAM `$0600=$A5`/`$0601=$5A`; la prueba pasa y está en
-  `test:vbxe:full`. El breakpoint durante el boot no resultó fiable en
-  headless, por lo que la puerta usa memoria observable. Las puertas del
-  corpus real aún necesitan sus propios marcadores de escena antes de aceptar
-  líneas base visuales.
+- 2026-11-03: closed the first part of the XEX harness hardening. The
+  headless run now inherits a configuration comparable to Chromium (explicit
+  `sioTurbo` and RAMBO in the diagnostic), and
+  `vbxe_xex_scene_marker.test.js` assembles a minimal XEX, boots it and waits
+  for the RAM markers `$0600=$A5`/`$0601=$5A`; the test passes and is in
+  `test:vbxe:full`. A breakpoint during boot proved unreliable in headless, so
+  the gate uses observable memory. The real corpus gates still need their own
+  scene markers before accepting visual baselines.
 
-- 2026-11-03: se intentó avanzar la etapa 7 con una línea base visual de
-  Popeye, Galaga, DACTest, Textmode Test, Crysis, Celeste, D600, Falcon y
-  Phoenix. El experimento no es evidencia válida: las capturas headless
-  devolvieron el mismo frame y la VRAM VBXE permaneció en cero; las puertas
-  existentes usan `runXex({ awaitEntry: false })` y sólo comprueban que avance
-  `cycleCounter`. Una variante que esperaba la entrada XEX no llegó al punto
-  de entrada dentro del límite del harness. Se retiró la línea base inválida.
-  Antes de comparar imágenes con Altirra hay que hacer que el harness pruebe
-  ejecución real (entrada XEX o marcador de escena) y capture una VRAM/frame no
-  vacío; la etapa 7 queda en progreso y esta conclusión evita declarar
-  equivalencia visual por una pantalla inicial común.
+- 2026-11-03: an attempt was made to advance stage 7 with a visual baseline of
+  Popeye, Galaga, DACTest, Textmode Test, Crysis, Celeste, D600, Falcon and
+  Phoenix. The experiment is not valid evidence: the headless captures
+  returned the same frame and the VBXE VRAM stayed at zero; the existing gates
+  use `runXex({ awaitEntry: false })` and only check that `cycleCounter`
+  advances. A variant that waited for the XEX entry did not reach the entry
+  point within the harness limit. The invalid baseline was withdrawn. Before
+  comparing images with Altirra the harness must be made to prove real
+  execution (XEX entry or scene marker) and capture a non-empty VRAM/frame;
+  stage 7 stays in progress and this conclusion avoids declaring visual
+  equivalence from a common initial screen.
 
-- 2026-11-03: avanzado el paso 6 de temporización del blitter. Las nuevas
-  entradas XDL reservan ahora los 22 ciclos locales fijos de actualización que
-  define AHRM 12.4, mientras las líneas repetidas no pagan una actualización
-  adicional. Se ajustaron las regresiones de presupuesto y el par
-  continuous/restart sigue verde; el scheduler continúa agregado por
-  scanline porque no existe todavía un marcador horizontal que justifique un
-  arbitraje por fase.
+- 2026-11-03: advanced step 6 of blitter timing. New XDL entries now reserve
+  the 22 fixed local update cycles defined by AHRM 12.4, while repeated lines
+  do not pay an additional update. The budget regressions were adjusted and
+  the continuous/restart pair is still green; the scheduler stays aggregated
+  per scanline because there is no horizontal marker yet that would justify
+  per-phase arbitration.
 
-- 2026-11-03: completado el paso 5 de registros, MEMAC, reset y snapshots.
-  `vbxe_register_snapshot` comprueba ambos bancos `$D640`/`$D740`, readback
-  read-only/write-only, máscaras de bits, VSync, MEMAC A y el latch de
-  configuración. También restaura un XDL activo y un blitter durante la carga
-  de su BCB; `restoreState()` ahora sanea los bits imposibles de ese latch en
-  snapshots antiguos o editados. La cobertura de reset caliente/frío ya
-  estaba en `vbxe_device_state`; la suite VBXE completa permanece verde.
+- 2026-11-03: completed step 5 of registers, MEMAC, reset and snapshots.
+  `vbxe_register_snapshot` checks both banks `$D640`/`$D740`, read-only/
+  write-only readback, bit masks, VSync, MEMAC A and the configuration latch.
+  It also restores an active XDL and a blitter during the load of its BCB;
+  `restoreState()` now sanitizes the impossible bits of that latch in old or
+  edited snapshots. Warm/cold reset coverage was already in
+  `vbxe_device_state`; the full VBXE suite remains green.
 
-- 2026-11-02: cerrada la primera matriz determinista de prioridad y colisión
-  VBXE. La regresión `vbxe_priority_collision_matrix` fija los grupos
-  PF0--PF3/P5 y P0--P3 en GTIA normal/9/11, la máscara `$7F` medida para
-  entradas visibles en GTIA 10, y las tablas de prioridad legacy/full de FX
-  1.20, 1.24, 1.26 y 1.26r. Se mantiene además la cobertura XEX de
-  `COLMASK`/`COLDETECT`, P0+P1 y P5. Queda pendiente ampliar los diferenciales
-  de escenas reales y combinaciones de transparencia/mapa todavía no medidas.
+- 2026-11-02: closed the first deterministic VBXE priority and collision
+  matrix. The `vbxe_priority_collision_matrix` regression pins the PF0--PF3/P5
+  and P0--P3 groups in normal GTIA/9/11, the `$7F` mask measured for visible
+  inputs in GTIA 10, and the legacy/full priority tables of FX 1.20, 1.24,
+  1.26 and 1.26r. The XEX coverage of `COLMASK`/`COLDETECT`, P0+P1 and P5 is
+  also kept. Still pending: widening the differentials of real scenes and the
+  transparency/map combinations not yet measured.
 
-- 2026-11-02: implementado el primer replay visible de mapas de atributos por
-  spans. Al cerrar una línea, la cola de escrituras GTIA reconstruye el mapa
-  por intervalos usando los registros iniciales y los valores de `COLPF3` y
-  `PRIOR`/modo GTIA vigentes en cada evento; el PF3 de ANTIC hires se verifica
-  en las salidas legacy y hires. La ruta conserva los píxeles de overlay y
-  refresca sólo las regiones de mapa necesarias. La cobertura sigue siendo
-  parcial: cambios de registros VBXE del mapa y el cruce completo con
-  overlay hires/texto y timing por fase siguen pendientes. `vbxe_device_state`
-  y `npm run test:vbxe:full` pasan.
+- 2026-11-02: implemented the first visible span replay of attribute maps.
+  When a line closes, the GTIA write queue rebuilds the map per interval using
+  the initial registers and the values of `COLPF3` and `PRIOR`/GTIA mode in
+  effect at each event; ANTIC hires PF3 is verified on the legacy and hires
+  outputs. The path keeps the overlay pixels and refreshes only the necessary
+  map regions. Coverage is still partial: VBXE map register changes and the
+  full crossing with hires/text overlay and per-phase timing remain pending.
+  `vbxe_device_state` and `npm run test:vbxe:full` pass.
 
 - 2026-11-02: completed the VBXE attribute-map geometry slice. The map now
   shares `OvMisc`'s narrow/normal/wide start and width in both the legacy
@@ -538,22 +559,22 @@
   defaults still reset. The XDL start address remains restarted from
   `XDL_ADR0-2` each frame.
 
-- 2026-11-02: auditó la rama `VBXE` contra AHRM 12.4, incluyendo los cambios
-  locales sin commit. `npm run test:vbxe:full` y `npm run test:automation`
-  pasan; dos pruebas generales se omiten por falta de ROMs y `npm run lint`
-  no puede ejecutarse porque el entorno expone ESLint 6.4 sin configuración
-  compatible. La conclusión es compatibilidad práctica, pero no AHRM-compliance
-  completa: en el estado que se auditó, `verticalSync()` reiniciaba direcciones
-  XDL/mapa que AHRM indica conservar; ese primer punto ya fue corregido y
-  regresado en la misma rama. La geometría normal fija del compositor de
-  attribute map también fue corregida después de esa auditoría. Siguen
-  abiertas el presupuesto XDL que reserva bytes decodificados en vez de los
-  22 ciclos AHRM y la arbitraje local agregada por scanline. La
-  polaridad MEMAC-B usa D7=CPU/D6=ANTIC por compatibilidad con Altirra y el
-  software, aunque la tabla AHRM los rotula al revés; el scroll MAPPAR sigue
-  siendo una discrepancia AHRM/Altirra sin diferencial físico concluyente.
-  Estas conclusiones y prioridades quedan detalladas en `VBXE.md` y
-  `VBXE_ROADMAP.md`; no se modificó código durante la auditoría.
+- 2026-11-02: audited the `VBXE` branch against AHRM 12.4, including the local
+  uncommitted changes. `npm run test:vbxe:full` and `npm run test:automation`
+  pass; two general tests are skipped for lack of ROMs and `npm run lint`
+  cannot run because the environment exposes ESLint 6.4 without a compatible
+  configuration. The conclusion is practical compatibility, but not complete
+  AHRM compliance: in the audited state, `verticalSync()` reset XDL/map
+  addresses that AHRM says to keep; that first point has already been fixed
+  and regressed on the same branch. The compositor's fixed normal geometry for
+  the attribute map was also fixed after that audit. Still open are the XDL
+  budget that reserves decoded bytes instead of the 22 AHRM cycles and the
+  aggregate local arbitration per scanline. The MEMAC-B polarity uses
+  D7=CPU/D6=ANTIC for compatibility with Altirra and software, even though
+  the AHRM table labels them the other way round; the MAPPAR scroll remains an
+  AHRM/Altirra discrepancy without a conclusive physical differential. These
+  conclusions and priorities are detailed in `VBXE.md` and `VBXE_ROADMAP.md`;
+  no code was modified during the audit.
 
 - 2026-11-02: documented the VBXE completion plan in `VBXE_ROADMAP.md` with
   separate definitions for practical compatibility, raster fidelity, and

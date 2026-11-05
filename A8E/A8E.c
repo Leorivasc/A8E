@@ -98,6 +98,9 @@ static void A8E_PrintHelp(void)
 		"  -576C                   Enable the 576K COMPY memory expansion.\n"
 		"  -1088R                  Enable the 1088K RAMBO memory expansion.\n"
 		"  -U1MB                   Enable the Ultimate1MB memory model.\n"
+		"  --vbxe[=PROFILE]        Add a VBXE device (fx1.20, fx1.24 or fx1.26; default fx1.26).\n"
+		"                            Stage 1: registers, VRAM, MEMAC and blitter; no video output yet.\n"
+		"  --vbxe-d7               Place the VBXE registers at $D740 instead of $D640.\n"
 		"\n"
 		"Function and system keys:\n"
 		"  F1                      Atari HELP key.\n"
@@ -155,6 +158,8 @@ int main(int argc, char *argv[])
 	u32 lMode = 0;
 	AtariVideoStandard_t eVideoStandard = ATARI_VIDEO_PAL;
 	AtariMemoryExpansion_t eMemoryExpansion = ATARI_MEMORY_NONE;
+	VbxeProfile_t eVbxeProfile = VBXE_PROFILE_OFF;
+	u16 sVbxePage = VBXE_PAGE_D6;
 	char *pDiskFileName = "d1.atr";
 	u32 lAtariScreenWidth = 336;
 	u32 lAtariScreenHeight = 240;
@@ -190,6 +195,19 @@ int main(int argc, char *argv[])
 			if(strcmp(argv[lIndex], "--option-on-start") == 0)
 			{
 				lMode |= ATARI_MODE_OPTION_ON_START;
+				continue;
+			}
+			if(strncmp(argv[lIndex], "--vbxe", 6) == 0 && strcmp(argv[lIndex], "--vbxe-d7") != 0 &&
+			   (argv[lIndex][6] == '\0' || argv[lIndex][6] == '='))
+			{
+				eVbxeProfile = Vbxe_ParseProfile(argv[lIndex][6] == '=' ? &argv[lIndex][7] : NULL);
+				if(eVbxeProfile == VBXE_PROFILE_OFF)
+					fprintf(stderr, "A8E: unknown VBXE profile '%s'; VBXE stays off.\n", &argv[lIndex][7]);
+				continue;
+			}
+			if(strcmp(argv[lIndex], "--vbxe-d7") == 0)
+			{
+				sVbxePage = VBXE_PAGE_D7;
 				continue;
 			}
 			if(strcmp(argv[lIndex], "-128K") == 0 || strcmp(argv[lIndex], "-128k") == 0)
@@ -337,6 +355,11 @@ int main(int argc, char *argv[])
 
 	pAtariContext = _6502_Open();
 	AtariIoOpenWithMemory(pAtariContext, lMode, pDiskFileName, eVideoStandard, eMemoryExpansion);
+	if(eVbxeProfile != VBXE_PROFILE_OFF)
+	{
+		AtariIoEnableVbxe(pAtariContext, eVbxeProfile, sVbxePage);
+		printf("A8E VBXE: enabled at $%04X (no video output yet)\n", (unsigned)sVbxePage);
+	}
 	{
 		FILE *pLibraryManifest = fopen("library/library.json", "rb");
 		if(pLibraryManifest)

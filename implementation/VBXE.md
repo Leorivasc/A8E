@@ -131,53 +131,55 @@ tested; `startBlitterMidLine` reproduces that, and the line-end budget of that
 line is then not spent a second time. The green/cyan garbage frames that show
 up in this game also appear in Altirra.
 
-## Audit de cobertura — 2026-11-03
+## Coverage audit — 2026-11-03
 
-La auditoría de limpieza de esta revisión no detectó funciones VBXE muertas ni
-exports retirables. Las rutinas expuestas de blitter, snapshots y diagnóstico
-MEMAC siguen siendo consumidas por el runtime o por regresiones; se eliminaron
-únicamente tablas literales duplicadas y una rama redundante del scheduler.
+The cleanup audit of this revision found no dead VBXE functions or retirable
+exports. The exposed blitter, snapshot and MEMAC diagnostic routines are still
+consumed by the runtime or by regressions; only duplicated literal tables and
+one redundant scheduler branch were removed.
 
-Esta auditoría compara AHRM 12.4 con `vbxe.cpp` de Altirra 4.40 y con las
-rutas efectivas de jsA8E. No equivale a que los actuales gates de arranque
-sean verdes: varios ejercitan sólo un subconjunto y algunos codifican el
-comportamiento actual en vez del comportamiento de referencia.
+This audit compares AHRM 12.4 with Altirra 4.40's `vbxe.cpp` and with the
+effective jsA8E paths. It does not mean the current boot gates are green: several
+exercise only a subset and some encode the current behavior instead of the
+reference behavior.
 
-| Área | Resultado | Diferencia comprobada |
+| Area | Result | Verified difference |
 | --- | --- | --- |
-| VRAM, registros básicos, páginas, MEMAC A/B, paleta, IRQ y bloques del blitter | Parcialmente replicada | Las rutas y los casos normales existen y los bordes de registro/readback están cubiertos por `vbxe_register_snapshot`. MEMAC-B usa bit 7 para CPU y bit 6 para ANTIC, como Altirra y el software real, aun cuando AHRM los rotula al revés. CR/CG/CB ya replican la expansión D7→D0 de Altirra; la reserva local se modela en 912 slots por scanline, separa lecturas MEMAC de escrituras CPU y conserva el slot horizontal cuando el caller proporciona timestamp. El camino agregado sigue siendo necesario para accesos antiguos. |
-| XDL: descriptor y estado de línea | Parcial | La progresión de fila, scroll/overscroll MAPPAR, `END` y la persistencia entre frames de las direcciones/strides de overlay/mapa siguen Altirra. AHRM documenta los scrolls MAPPAR como valores menos uno mientras Altirra conserva el valor literal; hace falta un diferencial visual que cierre esa discrepancia documental. |
-| XDL: `OvMisc` | Implementada en la ruta cubierta | El compositor consume ancho, paleta de overlay y la paleta de playfield por defecto; faltan sólo cruces de mapa de atributos aún no diferenciados visualmente. |
-| Presentación de overlay y texto | Parcial | Standard/lores usan los límites reales narrow/normal/wide y hires/texto sus señales nativas 512/640/672. Faltan diferenciales completos para todas las transiciones con attribute map. |
-| Mapa de atributos | Parcial | Hay PF, Rev, paletas por celda, límite de 43 celdas, contador de scroll de cinco bits, overscroll, avance de filas y geometría narrow/normal/wide de Altirra. El replay por spans ya reconstruye PF3/GTIA en los intervalos de la línea, pero faltan cambios de registros VBXE del mapa, combinaciones GTIA especiales y diferenciales visuales completos. |
-| Blitter | Parcial | Están los modos 0--6, lista, zoom y colisiones; una entrada enlazada reinicia el código de colisión. El inicio se difiere al siguiente scanline y consume sólo slots libres de la agenda local; falta validar el orden físico de MEMAC y el consumo ciclo a ciclo del residuo. |
-| Reset y escrituras GTIA | Parcial | El estrobo `$D080-$D0FF` está conectado; warm reset conserva las direcciones XDL, prioridades y `COLDETECT` que conserva Altirra, y limpia `BLT_COLLISION_CODE`. Warm/cold reset y snapshots XDL/blitter están regresados; faltan bordes de temporización. |
-| RAMBO y puerto de configuración | Implementada en la ruta cubierta | El latch de configuración Altirra en `$DxC0+` persiste correctamente. El perfil FX 1.26r devuelve `MINOR_REVISION=$A6` y, con PORTB-D4 bajo, comparte `$4000-$7FFF` entre CPU/ANTIC y el banco VBXE superior documentado; `vbxe_rambo_bus` cubre ambos buses, desactivación y aislamiento de bancos. |
-| Cambios dentro del scanline | Parcial | La cola GTIA conserva colores y `PRIOR` con su ciclo horizontal; al cerrar una línea XDL, overlay, paleta por defecto, attribute map y `COLDETECT` reproducen los spans cubiertos, incluido PF3/mode GTIA y `COLCLR` rasterizado. Aún faltan cambios de registros VBXE dentro de línea y diferenciales visuales completos. |
+| VRAM, basic registers, pages, MEMAC A/B, palette, IRQ and blitter blocks | Partially replicated | The paths and normal cases exist and the register/readback edges are covered by `vbxe_register_snapshot`. MEMAC-B uses bit 7 for the CPU and bit 6 for ANTIC, like Altirra and real software, even though AHRM labels them the other way round. CR/CG/CB already replicate Altirra's D7→D0 expansion; the local reservation is modeled as 912 slots per scanline, separates MEMAC reads from CPU writes and keeps the horizontal slot when the caller provides a timestamp. The aggregate path is still needed for older accesses. |
+| XDL: descriptor and line state | Partial | Row progression, MAPPAR scroll/overscroll, `END` and the cross-frame persistence of the overlay/map addresses and strides follow Altirra. AHRM documents the MAPPAR scrolls as minus-one values while Altirra keeps the literal value; a visual differential is needed to close that documentation discrepancy. |
+| XDL: `OvMisc` | Implemented on the covered path | The compositor consumes width, overlay palette and the default playfield palette; only crossings with the attribute map that are not yet visually differentiated are missing. |
+| Overlay and text presentation | Partial | Standard/lores use the real narrow/normal/wide limits and hires/text their native 512/640/672 signals. Complete differentials for all transitions with the attribute map are missing. |
+| Attribute map | Partial | PF, Rev, per-cell palettes, the 43-cell limit, the five-bit scroll counter, overscroll, row advance and Altirra's narrow/normal/wide geometry are present. The span replay already rebuilds PF3/GTIA over the line intervals, but VBXE map register changes, special GTIA combinations and complete visual differentials are missing. |
+| Blitter | Partial | Modes 0--6, list, zoom and collisions are present; a linked entry resets the collision code. The start is deferred to the next scanline and only consumes free slots of the local schedule; the physical order of MEMAC and the cycle-by-cycle consumption of the remainder still need to be validated. |
+| Reset and GTIA writes | Partial | The `$D080-$D0FF` strobe is wired; warm reset keeps the XDL addresses, priorities and `COLDETECT` that Altirra keeps, and clears `BLT_COLLISION_CODE`. Warm/cold reset and XDL/blitter snapshots are regressed; timing edges are missing. |
+| RAMBO and configuration port | Implemented on the covered path | Altirra's configuration latch at `$DxC0+` persists correctly. The FX 1.26r profile returns `MINOR_REVISION=$A6` and, with PORTB-D4 low, shares `$4000-$7FFF` between CPU/ANTIC and the documented upper VBXE bank; `vbxe_rambo_bus` covers both buses, disabling and bank isolation. |
+| Changes inside the scanline | Partial | The GTIA queue keeps colors and `PRIOR` with their horizontal cycle; when an XDL line closes, overlay, default palette, attribute map and `COLDETECT` replay the covered spans, including PF3/GTIA mode and rasterized `COLCLR`. VBXE register changes inside a line and complete visual differentials are still missing. |
 
-### Auditoría AHRM de la rama `VBXE` — 2026-11-02
+### AHRM audit of the `VBXE` branch — 2026-11-02
 
-La suite funcional está verde, pero la conformidad AHRM debe declararse como
-parcial. Las brechas comprobadas son:
+The functional suite is green, but AHRM conformance must be declared as
+partial. The verified gaps are:
 
-| Prioridad | Brecha | Evidencia | Próxima acción |
+| Priority | Gap | Evidence | Next action |
 | --- | --- | --- | --- |
-| Alta | `verticalSync()` reemplazaba todo el estado XDL y perdía direcciones/strides de overlay/mapa que AHRM conserva entre frames. | Corregido en `jsA8E/js/core/vbxe.js`; regresión multi-frame en `vbxe_device_state`. | Mantener cobertura al ampliar los casos de XDL y validar también snapshots durante un reinicio. |
-| Alta | El attribute map se componía siempre en geometría normal; no usaba el ancho/posición narrow/wide de `OvMisc`. | Corregido en `jsA8E/js/core/vbxe.js`; cobertura narrow/normal/wide en `vbxe_device_state` y boot oracles. | Mantener la geometría compartida al extender el replay temporal y validar cruces con overlay activo. |
-| Alta | El coste XDL debía usar el número de bytes decodificados, mientras AHRM fija 22 ciclos de actualización. | Corregido en `jsA8E/js/core/vbxe.js`; regresión en `vbxe_device_state` y `vbxe_blitter_state`. | Mantener el contrato fijo y resolver sólo la secuencia por fase si aparece un diferencial horizontal reproducible. |
-| Media | La reserva MEMAC/overlay/XDL/mapa/blitter ya usa la secuencia de ocho fases y separa lecturas de escrituras CPU; cuando el caller proporciona timestamp también conserva el slot horizontal del acceso. El orden físico y el consumo ciclo a ciclo del residuo siguen sin validación diferencial. | `jsA8E/js/core/vbxe.js`, `vbxe_blitter_state`, `io.js`, `memory.js`. | Comparar marcadores horizontales CPU-read/CPU-write/ANTIC con Altirra antes de ajustar el orden. |
-| Media | MEMAC-B usa D7=CPU y D6=ANTIC, contrario a la tabla textual AHRM, aunque coincide con Altirra y el corpus probado. | `jsA8E/js/core/vbxe.js:1058-1063`; `vbxe_memac_b_xex`. | Mantener como excepción explícita hasta resolver la errata o conseguir evidencia física. |
-| Media | `MAPPAR`/attribute-map scroll conserva valores literales, frente al “minus one” descrito por AHRM. | `jsA8E/js/core/vbxe.js:421-429`. | Obtener diferencial físico o visual concluyente antes de cambiarlo. |
+| High | `verticalSync()` replaced the whole XDL state and lost the overlay/map addresses and strides that AHRM keeps across frames. | Fixed in `jsA8E/js/core/vbxe.js`; multi-frame regression in `vbxe_device_state`. | Keep coverage when widening the XDL cases and also validate snapshots during a reset. |
+| High | The attribute map was always composed in normal geometry; it did not use the narrow/wide width/position of `OvMisc`. | Fixed in `jsA8E/js/core/vbxe.js`; narrow/normal/wide coverage in `vbxe_device_state` and boot oracles. | Keep the shared geometry when extending the temporal replay and validate crossings with an active overlay. |
+| High | The XDL cost had to use the number of decoded bytes, while AHRM fixes 22 update cycles. | Fixed in `jsA8E/js/core/vbxe.js`; regression in `vbxe_device_state` and `vbxe_blitter_state`. | Keep the fixed contract and resolve only the per-phase sequence if a reproducible horizontal differential appears. |
+| Medium | The MEMAC/overlay/XDL/map/blitter reservation already uses the eight-phase sequence and separates reads from CPU writes; when the caller provides a timestamp it also keeps the horizontal slot of the access. The physical order and the cycle-by-cycle consumption of the remainder still lack a differential validation. | `jsA8E/js/core/vbxe.js`, `vbxe_blitter_state`, `io.js`, `memory.js`. | Compare CPU-read/CPU-write/ANTIC horizontal markers with Altirra before adjusting the order. |
+| Medium | MEMAC-B uses D7=CPU and D6=ANTIC, contrary to the AHRM text table, although it matches Altirra and the tested corpus. | `jsA8E/js/core/vbxe.js:1058-1063`; `vbxe_memac_b_xex`. | Keep as an explicit exception until the erratum is resolved or physical evidence is obtained. |
+| Medium | `MAPPAR`/attribute-map scroll keeps literal values, versus the "minus one" described by AHRM. | `jsA8E/js/core/vbxe.js:421-429`. | Obtain a conclusive physical or visual differential before changing it. |
 
-Por tanto, el estado oficial es **compatibilidad práctica sí, AHRM-compliance
-completa no**. El native core tampoco implementa VBXE; esta auditoría de
-dispositivo corresponde al core JavaScript.
+Therefore the official state is **practical compatibility yes, complete
+AHRM compliance no**. The native core only implements stage 1 of the device
+(registers, VRAM, MEMAC and blitter, no video); this device audit applies to
+the JavaScript core.
 
-Conclusión: jsA8E tiene una base funcional y diagnósticos relevantes, pero no
-replica todavía todos los elementos del dispositivo. Los pendientes activos
-son cerrar el cruce completo de modos/transparencia/mapa, validar el orden
-físico y el consumo ciclo a ciclo de MEMAC/blitter, completar el diferencial
-browser/Altirra y decidir la implementación separada del native core.
+Conclusion: jsA8E has a functional base and relevant diagnostics, but does not
+yet replicate every element of the device. The active pending items are to
+close the full crossing of modes/transparency/map, validate the physical order
+and the cycle-by-cycle consumption of MEMAC/blitter, complete the
+browser/Altirra differential and decide the separate implementation for the
+native core.
 
 ## Support matrix
 
@@ -517,10 +519,10 @@ whole-line displacement, matching jsA8E's aggregate scheduler. A distinct
 horizontal marker would be needed before changing the model for a sub-line
 claim.
 
-Los accesos MEMAC ya dejan una traza con tipo, fase AHRM, ciclo CPU y slot
-local candidato. `localBusBudget()` conserva esos slots cuando el caller
-proporciona el inicio de la scanline; la traza sirve para alimentar un
-diferencial horizontal, pero no constituye por sí sola una medición Altirra.
+MEMAC accesses now leave a trace with type, AHRM phase, CPU cycle and
+candidate local slot. `localBusBudget()` keeps those slots when the caller
+provides the start of the scanline; the trace is meant to feed a horizontal
+differential, but it is not by itself an Altirra measurement.
 
 ## Implementation status and next steps
 
@@ -650,9 +652,14 @@ Still pending:
    read/write MEMAC phase assignment is implemented; the horizontal ordering
    differential remains open.
 5. Native A8E VBXE implementation. The functional device audited here is the
-   JavaScript core; `implementation/A8E` still documents the native boundary
-   without providing a native VBXE device. JavaScript FX 1.26r RAMBO behavior
-   is already covered by `vbxe_rambo_bus`.
+   JavaScript core. The native core has stage 1 (`A8E/Vbxe.c`: registers, VRAM,
+   palette latches, MEMAC A/B for CPU/ANTIC/instruction fetch, blitter and its
+   IRQ, covered by `A8E/tests/vbxe_probe.c`). Still missing natively: the XDL
+   parser, overlay and attribute-map rendering, the priority/collision
+   composition with GTIA/ANTIC, local-bus slot scheduling for XDL/overlay DMA
+   (the blitter budget is 912 slots minus MEMAC accesses), the FX 1.26r RAMBO
+   profile, snapshots and a UI selector. JavaScript FX 1.26r RAMBO behavior is
+   already covered by `vbxe_rambo_bus`.
 
 Every later step needs a shared behavioral contract and automated coverage;
 visual behavior additionally needs an Altirra differential diagnostic.

@@ -10,5 +10,16 @@
 - Issues: disassembly mode (F12, when enabled) is one-way until emulator
   restart. U1MB firmware-dependent BIOS/flash/RTC/PBI features are not
   emulated.
+- VBXE (stage 1): `A8E/Vbxe.c`/`Vbxe.h`, enabled with `--vbxe[=PROFILE]` and
+  attached through `AtariIoEnableVbxe()`. It owns the `$D640`/`$D740` register
+  bank, 512 KiB VRAM, MEMAC A/B windows (installed as access handlers over
+  RAM-mapped addresses only, rebuilt by `Pia.c` when the OS/BASIC/Self-test
+  mapping changes), the blitter and its IRQ. Integration points: `6502.c`
+  (`pfnFetchStage`/`pfnFetchRestore` stage instruction bytes from VRAM for code
+  that runs inside a window), `AtariIo.c` (ANTIC reads through MEMAC, the
+  end-of-line blitter budget after `AtariIoDrawLine`, `llVbxeIrqCycle` for a
+  completion inside the line, vertical sync at frame wrap) and `Pia.c`
+  (`Pia_IrqAsserted` includes the VBXE line). There is no XDL, overlay or video
+  output yet; see `implementation/VBXE.md`.
 - Todo: update notes when loop/timing ownership moves between modules.
 
