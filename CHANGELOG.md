@@ -9,8 +9,12 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Native A8E: first stage of the VBXE device (`--vbxe[=fx1.20|fx1.24|fx1.26]`,
   `--vbxe-d7`): registers, 512 KiB VRAM, MEMAC A/B for CPU, ANTIC and
-  instruction fetch, blitter with collision code and completion IRQ. No XDL,
-  overlay or video output yet. Probe `A8E/tests/vbxe_probe.c`.
+  instruction fetch, blitter with collision code and completion IRQ.
+  Probe `A8E/tests/vbxe_probe.c`.
+- Native A8E: second VBXE stage (`A8E/VbxeVideo.c`): XDL parser, standard,
+  lores, hires and text overlay with priority and collisions, playfield
+  palettes, attribute map and XDL/overlay local-bus slots, shown through
+  `AtariIoDrawScreen` at the native 336-pixel width.
 - Browser regression tests for MEMAC windows (`vbxe_memac_window_sync`,
   `vbxe_memac_code_fetch`), GTIA unassigned reads
   (`gtia_unassigned_reads`), and a vertical-blank exit-line DLI case in

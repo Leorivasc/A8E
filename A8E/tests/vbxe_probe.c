@@ -381,6 +381,237 @@ static int TestSoftResetStrobe(void)
 	return 1;
 }
 
+
+/* --- Stage 2: XDL, overlay, attribute map ------------------------------ */
+
+static u8 m_aPixels[VBXE_LINE_PIXELS];
+static u16 m_aPriority[VBXE_LINE_PIXELS];
+
+static uint32_t PaletteArgb(u8 cR, u8 cG, u8 cB)
+{
+	return 0xff000000u | ((uint32_t)cR << 16) | ((uint32_t)cG << 8) | cB;
+}
+
+static void SetPalette(Vbxe_t *pVbxe, u32 lPalette, u32 lColor, u8 cR, u8 cG, u8 cB)
+{
+	u8 *pRgb = &pVbxe->aPalette[(lPalette * 256u + lColor) * 3u];
+
+	pRgb[0] = cR;
+	pRgb[1] = cG;
+	pRgb[2] = cB;
+}
+
+static void StartXdl(Vbxe_t *pVbxe, u32 lXdlAddress)
+{
+	pVbxe->cVideoControlPending = 0x01;
+	pVbxe->lXdlAddressPending = lXdlAddress;
+	Vbxe_VerticalSync(pVbxe);
+	memset(m_aPixels, 0, sizeof(m_aPixels));
+	memset(m_aPriority, 0, sizeof(m_aPriority));
+}
+
+static const uint32_t *Compose(Vbxe_t *pVbxe, u32 lScanline)
+{
+	Vbxe_ComposeLine(pVbxe, lScanline, m_aPixels, m_aPriority, 0x0f, 0, 0);
+	return Vbxe_OverlayLine(pVbxe, lScanline);
+}
+
+static int TestXdlStandardOverlay(void)
+{
+	_6502_Context_t *pContext = OpenMachine(VBXE_PROFILE_FX126, VBXE_PAGE_D6);
+	Vbxe_t *pVbxe;
+	static const u8 aXdl[] = {
+		0x62, 0x88,             /* graphics, repeat, OVADR | END, MISC */
+		0x01,                   /* repeat: one more line */
+		0x00, 0x20, 0x00,       /* overlay address $002000 */
+		0x10, 0x00,             /* stride 16 */
+		0x11,                   /* normal width, overlay palette 1 */
+		0xff};                  /* priority: overlay everywhere */
+	const uint32_t *pRow;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+	pVbxe = ((IoData_t *)pContext->pIoData)->pVbxe;
+	memcpy(&pVbxe->pVram[0x100], aXdl, sizeof(aXdl));
+	pVbxe->pVram[0x2000] = 5;
+	pVbxe->pVram[0x2001] = 0;
+	pVbxe->pVram[0x2010] = 6;
+	SetPalette(pVbxe, 1, 5, 0x10, 0x20, 0x30);
+	SetPalette(pVbxe, 1, 6, 0x40, 0x50, 0x60);
+	StartXdl(pVbxe, 0x100);
+
+	REQUIRE(Compose(pVbxe, 7) == NULL || Vbxe_OverlayLine(pVbxe, 7) == NULL ||
+			Vbxe_OverlayLine(pVbxe, 7)[96] == 0, "overlay drawn above the first visible line");
+	pRow = Compose(pVbxe, 8);
+	REQUIRE(pRow != NULL, "no overlay row");
+	REQUIRE(pRow[96] == PaletteArgb(0x10, 0x20, 0x30), "pixel 0 is %08X", pRow[96]);
+	REQUIRE(pRow[97] == 0, "color 0 is not transparent");
+	REQUIRE(pVbxe->lDmaSlots == 22u + 80u * 4u, "DMA slots %lu, expected 342", (unsigned long)pVbxe->lDmaSlots);
+	pVbxe->lDmaSlots = 0;
+	pRow = Compose(pVbxe, 9);
+	REQUIRE(pRow[96] == PaletteArgb(0x40, 0x50, 0x60), "repeated line did not advance by the stride");
+	REQUIRE(pVbxe->lDmaSlots == 80u * 4u, "repeated line paid an XDL update (%lu)", (unsigned long)pVbxe->lDmaSlots);
+	pRow = Compose(pVbxe, 10);
+	REQUIRE(pRow[96] == 0, "overlay survived the END entry");
+
+	/* Priority: PF0 beats an overlay whose mask lacks the PF0 bit. */
+	pVbxe->pVram[0x101] = 0x88;
+	pVbxe->pVram[0x109] = 0xef;
+	StartXdl(pVbxe, 0x100);
+	m_aPriority[96] = 0x01;
+	pRow = Compose(pVbxe, 8);
+	REQUIRE(pRow[96] == 0, "overlay won against PF0 despite the mask");
+	m_aPriority[96] = 0x02;
+	pRow = Compose(pVbxe, 9);
+	REQUIRE(pRow[96] != 0, "overlay lost against PF1 though the mask allows it");
+
+	/* Collisions: COLMASK selects the source-byte range, PF1 maps to $20. */
+	pVbxe->cCollisionDetect = 0;
+	pVbxe->cCollisionMask = 0x01;
+	StartXdl(pVbxe, 0x100);
+	m_aPriority[96] = 0x02;
+	Compose(pVbxe, 8);
+	REQUIRE(pVbxe->cCollisionDetect == 0x20, "COLDETECT is %02X, expected 20", pVbxe->cCollisionDetect);
+	CloseMachine(pContext);
+	return 1;
+}
+
+static int TestXdlTextOverlay(void)
+{
+	_6502_Context_t *pContext = OpenMachine(VBXE_PROFILE_FX126, VBXE_PAGE_D6);
+	Vbxe_t *pVbxe;
+	static const u8 aXdl[] = {
+		0x41, 0x89,             /* text, OVADR | END, CHBASE | MISC */
+		0x00, 0x30, 0x00,       /* overlay address $003000 */
+		0x20, 0x00,             /* stride 32 */
+		0x04,                   /* character base $2000 */
+		0x11,                   /* normal width, overlay palette 1 */
+		0xff};
+	const uint32_t *pRow;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+	pVbxe = ((IoData_t *)pContext->pIoData)->pVbxe;
+	memcpy(&pVbxe->pVram[0x100], aXdl, sizeof(aXdl));
+	pVbxe->pVram[0x3000] = 1;      /* character */
+	pVbxe->pVram[0x3001] = 0x05;   /* foreground color 5 */
+	pVbxe->pVram[0x2008] = 0x80;   /* glyph 1, row 0: leftmost pixel */
+	SetPalette(pVbxe, 1, 5, 0x11, 0x22, 0x33);
+	StartXdl(pVbxe, 0x100);
+
+	pRow = Compose(pVbxe, 8);
+	REQUIRE(pRow != NULL && pRow[96] == PaletteArgb(0x11, 0x22, 0x33), "glyph pixel missing");
+	REQUIRE(pRow[97] == 0, "background of a text cell is not transparent");
+	REQUIRE(pVbxe->lDmaSlots == 22u + 243u, "text DMA slots %lu", (unsigned long)pVbxe->lDmaSlots);
+	CloseMachine(pContext);
+	return 1;
+}
+
+static int TestAttributeMapAndPlayfieldPalette(void)
+{
+	_6502_Context_t *pContext = OpenMachine(VBXE_PROFILE_FX126, VBXE_PAGE_D6);
+	Vbxe_t *pVbxe;
+	static const u8 aMapXdl[] = {
+		0x08, 0x82,             /* map on, ATT address + END */
+		0x00, 0x40, 0x00,       /* map address $004000 */
+		0x00, 0x00};            /* stride 0 */
+	static const u8 aPaletteXdl[] = {
+		0x02, 0x88,             /* transparent overlay, MISC + END */
+		0x01 | (2u << 6),       /* normal width, playfield palette 2 */
+		0xff};
+	const uint32_t *pRow;
+	u32 lCell;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+	pVbxe = ((IoData_t *)pContext->pIoData)->pVbxe;
+	memcpy(&pVbxe->pVram[0x100], aMapXdl, sizeof(aMapXdl));
+	for(lCell = 0; lCell < 43; lCell++)
+	{
+		u8 *pCell = &pVbxe->pVram[0x4000 + lCell * 4];
+
+		pCell[0] = 0x10; pCell[1] = 0x22; pCell[2] = 0x33; pCell[3] = 0x40; /* palette 1 */
+	}
+	SetPalette(pVbxe, 1, 0x22, 1, 2, 3);
+	SetPalette(pVbxe, 1, 0x10, 4, 5, 6);
+	StartXdl(pVbxe, 0x100);
+	m_aPriority[96] = 0x02;  /* PF1 */
+	m_aPriority[97] = 0x01;  /* PF0 */
+	m_aPriority[98] = 0x00;  /* background keeps the GTIA color */
+	pRow = Compose(pVbxe, 8);
+	REQUIRE(pRow != NULL && pRow[96] == PaletteArgb(1, 2, 3), "PF1 cell color is %08X", pRow[96]);
+	REQUIRE(pRow[97] == PaletteArgb(4, 5, 6), "PF0 cell color is %08X", pRow[97]);
+	REQUIRE(pRow[98] == 0, "background was recolored by the map");
+	REQUIRE(pVbxe->lDmaSlots == 22u + 172u, "map DMA slots %lu", (unsigned long)pVbxe->lDmaSlots);
+
+	/* Without a map, XDL MISC selects the playfield palette; players keep
+	 * their GTIA color and the low bit is dropped without extended color. */
+	memcpy(&pVbxe->pVram[0x100], aPaletteXdl, sizeof(aPaletteXdl));
+	SetPalette(pVbxe, 2, 0x34, 9, 8, 7);
+	StartXdl(pVbxe, 0x100);
+	m_aPixels[96] = 0x35; m_aPriority[96] = 0x01;
+	m_aPixels[97] = 0x35; m_aPriority[97] = 0x10;
+	pRow = Compose(pVbxe, 8);
+	REQUIRE(pRow != NULL && pRow[96] == PaletteArgb(9, 8, 7), "playfield not recolored (%08X)", pRow[96]);
+	REQUIRE(pRow[97] == 0, "a player was recolored");
+	CloseMachine(pContext);
+	return 1;
+}
+
+static int TestHiresPairIsAveraged(void)
+{
+	_6502_Context_t *pContext = OpenMachine(VBXE_PROFILE_FX126, VBXE_PAGE_D6);
+	Vbxe_t *pVbxe;
+	static const u8 aXdl[] = {
+		0x42, 0x98, 0x00, 0x20, 0x00, 0x10, 0x00, 0x11, 0xff};
+	const uint32_t *pRow;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+	pVbxe = ((IoData_t *)pContext->pIoData)->pVbxe;
+	memcpy(&pVbxe->pVram[0x100], aXdl, sizeof(aXdl));
+	pVbxe->pVram[0x2000] = 0x12;   /* two hires pixels: colors 1 and 2 */
+	pVbxe->pVram[0x2001] = 0x03;   /* color 0 is transparent: only 3 shows */
+	SetPalette(pVbxe, 1, 1, 100, 0, 200);
+	SetPalette(pVbxe, 1, 2, 50, 100, 0);
+	SetPalette(pVbxe, 1, 3, 9, 8, 7);
+	StartXdl(pVbxe, 0x100);
+	pRow = Compose(pVbxe, 8);
+	REQUIRE(pRow != NULL && pRow[96] == PaletteArgb(75, 50, 100), "pair not averaged (%08X)", pRow[96]);
+	REQUIRE(pRow[97] == PaletteArgb(9, 8, 7), "half-transparent pair is %08X", pRow[97]);
+	CloseMachine(pContext);
+	return 1;
+}
+
+static int TestOverlayReachesScreen(void)
+{
+	_6502_Context_t *pContext = OpenMachine(VBXE_PROFILE_FX126, VBXE_PAGE_D6);
+	Vbxe_t *pVbxe;
+	SDL_Surface *pScreen;
+	static const u8 aXdl[] = {
+		0x42, 0x88, 0x00, 0x20, 0x00, 0x10, 0x00, 0x11, 0xff};
+
+	REQUIRE(pContext != NULL, "machine open failed");
+	pVbxe = ((IoData_t *)pContext->pIoData)->pVbxe;
+	memcpy(&pVbxe->pVram[0x100], aXdl, sizeof(aXdl));
+	pVbxe->pVram[0x2000] = 5;
+	pVbxe->pVram[0x2001] = 6;
+	pVbxe->pVram[0x2002] = 5;
+	SetPalette(pVbxe, 1, 5, 0x10, 0x20, 0x30);
+	SetPalette(pVbxe, 1, 6, 0x40, 0x50, 0x60);
+	StartXdl(pVbxe, 0x100);
+	Compose(pVbxe, 8);
+	pScreen = SDL_CreateRGBSurface(0, 336, 240, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
+	REQUIRE(pScreen != NULL, "surface failed");
+	AtariIoDrawScreen(pContext, pScreen, 336, 240);
+	/* The normal playfield starts at pixel 96 of the line; the view at 88. */
+	REQUIRE(((uint32_t *)pScreen->pixels)[8] == PaletteArgb(0x10, 0x20, 0x30),
+			"screen pixel is %08X", ((uint32_t *)pScreen->pixels)[8]);
+	REQUIRE(((uint32_t *)pScreen->pixels)[9] == PaletteArgb(0x40, 0x50, 0x60),
+			"neighbor pixel is %08X", ((uint32_t *)pScreen->pixels)[9]);
+	REQUIRE(((uint32_t *)pScreen->pixels)[10] == PaletteArgb(0x10, 0x20, 0x30),
+			"third pixel is %08X", ((uint32_t *)pScreen->pixels)[10]);
+	SDL_FreeSurface(pScreen);
+	CloseMachine(pContext);
+	return 1;
+}
+
 static int TestAbsentDeviceIsInert(void)
 {
 	_6502_Context_t *pContext = _6502_Open();
@@ -407,6 +638,11 @@ int main(void)
 		TestBlitterCollisionGroups,
 		TestBlitterStartMidLine,
 		TestSoftResetStrobe,
+		TestXdlStandardOverlay,
+		TestXdlTextOverlay,
+		TestAttributeMapAndPlayfieldPalette,
+		TestHiresPairIsAveraged,
+		TestOverlayReachesScreen,
 		TestAbsentDeviceIsInert,
 	};
 	u32 lIndex;

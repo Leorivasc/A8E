@@ -45,8 +45,8 @@ implement VBXE.
 This is functional compatibility, not a claim of complete hardware or
 pixel-perfect equivalence. Mid-scanline overlay/map composition, exact local
 bus phase timing, broader GTIA-special combinations, visual Altirra capture
-comparison, automated worker/fallback regression, and native VBXE video output (XDL, overlay,
-compositor; the native device currently covers registers, MEMAC and the blitter) remain separate
+comparison, automated worker/fallback regression, and the native 640-wide VBXE output plane (the native
+core already composes XDL, overlay and attribute map at 336 pixels) remain separate
 milestones. See the [VBXE technical contract](implementation/VBXE.md) and the
 [VBXE roadmap](implementation/VBXE_ROADMAP.md).
 

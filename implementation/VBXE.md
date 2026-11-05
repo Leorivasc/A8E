@@ -170,9 +170,9 @@ partial. The verified gaps are:
 | Medium | `MAPPAR`/attribute-map scroll keeps literal values, versus the "minus one" described by AHRM. | `jsA8E/js/core/vbxe.js:421-429`. | Obtain a conclusive physical or visual differential before changing it. |
 
 Therefore the official state is **practical compatibility yes, complete
-AHRM compliance no**. The native core only implements stage 1 of the device
-(registers, VRAM, MEMAC and blitter, no video); this device audit applies to
-the JavaScript core.
+AHRM compliance no**. The native core implements stages 1 and 2 of the device
+(registers, VRAM, MEMAC, blitter, XDL, overlay, attribute map, no hires output
+plane); this device audit applies to the JavaScript core.
 
 Conclusion: jsA8E has a functional base and relevant diagnostics, but does not
 yet replicate every element of the device. The active pending items are to
@@ -652,12 +652,13 @@ Still pending:
    read/write MEMAC phase assignment is implemented; the horizontal ordering
    differential remains open.
 5. Native A8E VBXE implementation. The functional device audited here is the
-   JavaScript core. The native core has stage 1 (`A8E/Vbxe.c`: registers, VRAM,
+   JavaScript core. The native core has stages 1 and 2 (`A8E/Vbxe.c`: registers, VRAM,
    palette latches, MEMAC A/B for CPU/ANTIC/instruction fetch, blitter and its
-   IRQ, covered by `A8E/tests/vbxe_probe.c`). Still missing natively: the XDL
-   parser, overlay and attribute-map rendering, the priority/collision
-   composition with GTIA/ANTIC, local-bus slot scheduling for XDL/overlay DMA
-   (the blitter budget is 912 slots minus MEMAC accesses), the FX 1.26r RAMBO
+   IRQ; `A8E/VbxeVideo.c`: XDL, overlay, priority/collisions, playfield
+   palettes, attribute map, aggregate XDL/overlay/map slot accounting; covered
+   by `A8E/tests/vbxe_probe.c`). Still missing natively: a 640-wide output
+   plane (hires/text overlays average each pixel pair into one standard pixel), mid-line
+   GTIA replay, the reverse attribute-map combinations with GTIA special modes, per-slot (not aggregate) local-bus scheduling, the FX 1.26r RAMBO
    profile, snapshots and a UI selector. JavaScript FX 1.26r RAMBO behavior is
    already covered by `vbxe_rambo_bus`.
 

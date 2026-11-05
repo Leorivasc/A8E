@@ -1,6 +1,6 @@
 /********************************************************************
 *
-* VBXE (VideoBoard XE) device - native core, stage 1.
+* VBXE (VideoBoard XE) device - native core, stages 1 and 2 (video: VbxeVideo.c).
 * See Vbxe.h for the scope and implementation/VBXE_ROADMAP.md.
 *
 * The blitter, MEMAC and register rules are a direct port of
@@ -8,6 +8,7 @@
 *
 ********************************************************************/
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -45,7 +46,8 @@ Vbxe_t *Vbxe_Create(VbxeProfile_t eProfile, u16 sPage)
 	pVbxe->pVram = (u8 *)calloc(1, VBXE_VRAM_SIZE);
 	pVbxe->pWindowInstalled = (u8 *)calloc(1, 0x10000);
 	pVbxe->pFetchWindow = (u8 *)calloc(1, 0x10000);
-	if(!pVbxe->pVram || !pVbxe->pWindowInstalled || !pVbxe->pFetchWindow)
+	pVbxe->pOverlay = (uint32_t *)calloc((size_t)VBXE_LINE_PIXELS * VBXE_LINES, sizeof(uint32_t));
+	if(!pVbxe->pVram || !pVbxe->pWindowInstalled || !pVbxe->pFetchWindow || !pVbxe->pOverlay)
 	{
 		Vbxe_Free(pVbxe);
 		return NULL;
@@ -62,6 +64,7 @@ void Vbxe_Free(Vbxe_t *pVbxe)
 	free(pVbxe->pVram);
 	free(pVbxe->pWindowInstalled);
 	free(pVbxe->pFetchWindow);
+	free(pVbxe->pOverlay);
 	free(pVbxe);
 }
 
@@ -77,6 +80,8 @@ void Vbxe_SoftReset(Vbxe_t *pVbxe)
 	 * the XDL address latch. */
 	pVbxe->cVideoControlPending = 0;
 	pVbxe->cVideoControlActive = 0;
+	Vbxe_XdlReset(pVbxe, 0);
+	pVbxe->lDmaSlots = 0;
 	pVbxe->cBlitCollisionCode = 0;
 	pVbxe->cBlitterBusy = 0;
 	pVbxe->cIrqStatus = 0;
@@ -98,6 +103,8 @@ void Vbxe_VerticalSync(Vbxe_t *pVbxe)
 	pVbxe->cVideoControlActive =
 		(u8)((pVbxe->cVideoControlActive & 0x0e) | (pVbxe->cVideoControlPending & 0x01));
 	pVbxe->lXdlAddressActive = pVbxe->lXdlAddressPending & 0x7ffffu;
+	/* The overlay and attribute-map address/stride latches survive VSync. */
+	Vbxe_XdlReset(pVbxe, 1);
 }
 
 /********************************************************************
@@ -478,10 +485,12 @@ s32 Vbxe_EndOfLine(Vbxe_t *pVbxe)
 	u32 lBudget;
 
 	if(pVbxe == NULL || !pVbxe->bEnabled) return -1;
-	/* The blitter only gets what MEMAC leaves free on the local bus. XDL and
-	 * overlay DMA are not modeled yet (stage 1). */
-	lBudget = VBXE_LOCAL_BUS_SLOTS - pVbxe->lMemacSlots;
+	/* The blitter only gets what MEMAC and the display DMA (XDL entry,
+	 * overlay fetch, attribute row) leave free on the local bus. */
+	lBudget = pVbxe->lMemacSlots + pVbxe->lDmaSlots < VBXE_LOCAL_BUS_SLOTS ?
+		VBXE_LOCAL_BUS_SLOTS - pVbxe->lMemacSlots - pVbxe->lDmaSlots : 0;
 	pVbxe->lMemacSlots = 0;
+	pVbxe->lDmaSlots = 0;
 	/* A blit started earlier in this line already ran its share. */
 	if(pVbxe->bBlitterEarlyRun) pVbxe->bBlitterEarlyRun = 0;
 	else Vbxe_Advance(pVbxe, lBudget, 1);

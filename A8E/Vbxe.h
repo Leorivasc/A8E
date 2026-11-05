@@ -1,13 +1,13 @@
 /********************************************************************
 *
-* VBXE (VideoBoard XE) device - native core, stage 1
+* VBXE (VideoBoard XE) device - native core, stages 1 and 2
 *
-* Implements the register bank, 512 KiB VRAM, palette latches, MEMAC A/B
-* windows (CPU, ANTIC and instruction fetch), the blitter with its
-* completion IRQ and the per-scanline local-bus budget. The XDL, overlay,
-* attribute map and the video compositor are not implemented yet; the
-* device therefore never changes the picture. See
-* implementation/VBXE_ROADMAP.md and AHRM 12.4.
+* Stage 1: register bank, 512 KiB VRAM, palette latches, MEMAC A/B windows
+* (CPU, ANTIC and instruction fetch), the blitter with its completion IRQ
+* and the per-scanline local-bus budget (Vbxe.c).
+* Stage 2: XDL parser, standard/lores/hires/text overlay, overlay priority
+* and collisions, playfield palettes, attribute map and XDL/overlay local-bus
+* slots (VbxeVideo.c). See implementation/VBXE_ROADMAP.md and AHRM 12.4.
 *
 * The behavior follows jsA8E (jsA8E/js/core/vbxe.js), which in turn follows
 * AHRM 12.4 and Altirra 4.40 where the AHRM prose and real software differ.
@@ -17,12 +17,17 @@
 #ifndef _VBXE_H_
 #define _VBXE_H_
 
+#include <stdint.h>
+
 #include "6502.h"
 
 #define VBXE_VRAM_SIZE (512u * 1024u)
 #define VBXE_VRAM_MASK (VBXE_VRAM_SIZE - 1u)
 #define VBXE_LOCAL_BUS_SLOTS (114u * 8u)
 #define VBXE_REGISTER_COUNT 0x20u
+#define VBXE_LINE_PIXELS 456u
+#define VBXE_LINES 312u
+#define VBXE_ATTR_BUFFER_SIZE (43u * 4u)
 #define VBXE_PAGE_D6 0xd640u
 #define VBXE_PAGE_D7 0xd740u
 
@@ -62,6 +67,72 @@ typedef struct
 	u8 cRepeatX;
 	u8 cRepeatY;
 } VbxeBlitter_t;
+
+typedef enum
+{
+	VBXE_OVERLAY_OFF = 0,
+	VBXE_OVERLAY_TEXT,
+	VBXE_OVERLAY_STANDARD,
+	VBXE_OVERLAY_LORES,
+	VBXE_OVERLAY_HIRES
+} VbxeOverlayMode_t;
+
+/* XDL state latched between scanlines (AHRM 12.4, Altirra XDL engine). */
+typedef struct
+{
+	u32 lAddress;
+	u32 lOverlayAddress;
+	u32 lOverlayStride;
+	VbxeOverlayMode_t eMode;
+	u8 bEnabled;
+	u8 cRepeat;
+	u8 bEnded;
+	u8 cOverlayWidth;
+	u8 cPlayfieldPalette;
+	u8 cOverlayPalette;
+	u8 cPriority;
+	u8 cTextScrollX;
+	u8 cTextScrollY;
+	u32 lCharacterBase;
+	u8 cTextRow;
+	u8 bAttrEnabled;
+	u32 lAttrAddress;
+	u32 lAttrStride;
+	u8 cAttrScrollX;
+	u8 cAttrScrollY;
+	u8 cAttrCellWidth;
+	u8 cAttrCellHeight;
+	u8 cAttrRow;
+	u8 bAttrBufferValid;
+	u8 aAttrBuffer[VBXE_ATTR_BUFFER_SIZE];
+} VbxeXdl_t;
+
+/* What the compositor needs for one scanline, captured before the XDL
+ * addresses advance. */
+typedef struct
+{
+	VbxeOverlayMode_t eMode;
+	u8 bOverlay;
+	u32 lAddress;
+	u32 lStride;
+	u8 cWidthCode;
+	u8 cPlayfieldPalette;
+	u8 cOverlayPalette;
+	u8 cPriority;
+	u32 lCharacterBase;
+	u8 cTextScrollX;
+	u8 cTextScrollY;
+	u8 cTextRow;
+	u8 bAttrEnabled;
+	u8 cAttrScrollX;
+	u8 cAttrCellWidth;
+	u8 cAttrCellHeight;
+	u8 cAttrRow;
+	u8 bAttrReload;
+	u8 cAnticMode;
+	u8 cPf3;
+	u8 cGtiaMode;
+} VbxeLine_t;
 
 typedef struct
 {
@@ -106,6 +177,13 @@ typedef struct
 	/* Routing state the installed windows were built for (0 = none yet). */
 	u32 lWindowKey;
 	u8 aFetchSave[3];
+	VbxeXdl_t tXdl;
+	/* XDL/overlay/attribute-row local-bus slots of the current scanline. */
+	u32 lDmaSlots;
+	/* ARGB overlay plane (0 = no VBXE pixel), VBXE_LINE_PIXELS x VBXE_LINES.
+	 * Pixels are uint32_t: the project's u32 is 64 bits wide on LP64. */
+	uint32_t *pOverlay;
+	u8 bOverlayDirty;
 } Vbxe_t;
 
 Vbxe_t *Vbxe_Create(VbxeProfile_t eProfile, u16 sPage);
@@ -120,10 +198,20 @@ void Vbxe_SyncWindows(_6502_Context_t *pContext);
 void Vbxe_RebuildWindows(_6502_Context_t *pContext);
 
 void Vbxe_SoftReset(Vbxe_t *pVbxe);
+/* Restarts the XDL engine; bVerticalSync reloads its address from the latch. */
+void Vbxe_XdlReset(Vbxe_t *pVbxe, u8 bVerticalSync);
 void Vbxe_VerticalSync(Vbxe_t *pVbxe);
 
 /* VRAM address for a CPU or ANTIC request, or -1 when MEMAC does not claim it. */
 s32 Vbxe_MemacAddress(const Vbxe_t *pVbxe, u16 sAddress, u8 bAntic);
+
+/* Composes the overlay and attribute map of one visible scanline over the
+ * ANTIC/GTIA line that was just drawn (pPixels: palette indexes, pPriority:
+ * GTIA layer bits, both VBXE_LINE_PIXELS wide). */
+void Vbxe_ComposeLine(Vbxe_t *pVbxe, u32 lScanline, const u8 *pPixels,
+	const u16 *pPriority, u8 cAnticMode, u8 cPf3, u8 cGtiaMode);
+/* ARGB overlay row for a scanline, or NULL when nothing is displayed. */
+const uint32_t *Vbxe_OverlayLine(const Vbxe_t *pVbxe, u32 lScanline);
 
 /* Level-sensitive IRQ line (AHRM 5.7 / 12.4). */
 u8 Vbxe_IrqAsserted(const Vbxe_t *pVbxe);

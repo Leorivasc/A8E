@@ -5600,6 +5600,39 @@ void AtariIoDrawPlayerMissiles(_6502_Context_t *pContext)
 	}
 }
 
+static void AtariIo_ApplyVbxeOverlay(
+	const IoData_t *pIoData,
+	SDL_Surface *pDestination,
+	const SDL_Rect *pRect)
+{
+	const SDL_PixelFormat *pFormat = pDestination->format;
+	u8 bDirect;
+	int y;
+
+	if(pIoData->pVbxe == NULL || pFormat->BytesPerPixel != 4) return;
+	bDirect = pFormat->Rmask == 0x00ff0000u && pFormat->Gmask == 0x0000ff00u &&
+		pFormat->Bmask == 0x000000ffu;
+	for(y = 0; y < pDestination->h; y++)
+	{
+		const uint32_t *pOverlay = Vbxe_OverlayLine(pIoData->pVbxe, (u32)(pRect->y + y));
+		uint32_t *pRow = (uint32_t *)((u8 *)pDestination->pixels + (size_t)y * pDestination->pitch);
+		int x;
+
+		if(pOverlay == NULL) continue;
+		for(x = 0; x < pDestination->w; x++)
+		{
+			int sx = pRect->x + x;
+			uint32_t lArgb;
+
+			if(sx < 0 || sx >= PIXELS_PER_LINE) continue;
+			lArgb = pOverlay[sx];
+			if(lArgb == 0) continue;
+			pRow[x] = bDirect ? lArgb :
+				SDL_MapRGB(pFormat, (u8)(lArgb >> 16), (u8)(lArgb >> 8), (u8)lArgb);
+		}
+	}
+}
+
 void AtariIoDrawScreen(
 	_6502_Context_t *pContext,
 	SDL_Surface *pSdlScreenSurface,
@@ -5619,6 +5652,7 @@ void AtariIoDrawScreen(
 	if(pSdlScreenSurface->w == (int)lScreenWidth && pSdlScreenSurface->h == (int)lScreenHeight)
 	{
 		SDL_BlitSurface(pIoData->tVideoData.pSdlAtariSurface, &tRect, pSdlScreenSurface, NULL);
+		AtariIo_ApplyVbxeOverlay(pIoData, pSdlScreenSurface, &tRect);
 		return;
 	}
 
@@ -5680,6 +5714,7 @@ void AtariIoDrawScreen(
 		}
 
 		SDL_BlitSurface(pIoData->tVideoData.pSdlAtariSurface, &tRect, pViewportSurface, NULL);
+		AtariIo_ApplyVbxeOverlay(pIoData, pViewportSurface, &tRect);
 
 		SDL_BlitScaled(pViewportSurface, NULL, pSdlScreenSurface, NULL);
 	}
@@ -5779,6 +5814,20 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 		AtariIoDrawLine(pContext);
 		if(pIoData->pVbxe)
 		{
+			u32 lLine = pIoData->tVideoData.lCurrentDisplayLine;
+
+			if(lLine >= FIRST_VISIBLE_LINE && lLine <= LAST_VISIBLE_LINE)
+			{
+				/* VBXE overlay, attribute map and playfield palettes are
+				 * composed over the line ANTIC/GTIA just drew. */
+				Vbxe_ComposeLine(pIoData->pVbxe, lLine,
+					(const u8 *)pIoData->tVideoData.pSdlAtariSurface->pixels +
+						lLine * PIXELS_PER_LINE,
+					pIoData->tVideoData.pPriorityData + lLine * PIXELS_PER_LINE,
+					pIoData->cCurrentDisplayListCommand & 0x0f,
+					SRAM[IO_COLPF3],
+					(u8)(SRAM[IO_PRIOR] >> 6));
+			}
 			/* AHRM 12.4: the blitter consumes the local-bus residue of the
 			 * scanline; a completion inside it raises the IRQ at the
 			 * matching CPU cycle. */

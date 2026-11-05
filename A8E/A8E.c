@@ -99,7 +99,7 @@ static void A8E_PrintHelp(void)
 		"  -1088R                  Enable the 1088K RAMBO memory expansion.\n"
 		"  -U1MB                   Enable the Ultimate1MB memory model.\n"
 		"  --vbxe[=PROFILE]        Add a VBXE device (fx1.20, fx1.24 or fx1.26; default fx1.26).\n"
-		"                            Stage 1: registers, VRAM, MEMAC and blitter; no video output yet.\n"
+		"                            Registers, VRAM, MEMAC, blitter, XDL, overlay and attribute map (336 px).\n"
 		"  --vbxe-d7               Place the VBXE registers at $D740 instead of $D640.\n"
 		"\n"
 		"Function and system keys:\n"
@@ -358,7 +358,7 @@ int main(int argc, char *argv[])
 	if(eVbxeProfile != VBXE_PROFILE_OFF)
 	{
 		AtariIoEnableVbxe(pAtariContext, eVbxeProfile, sVbxePage);
-		printf("A8E VBXE: enabled at $%04X (no video output yet)\n", (unsigned)sVbxePage);
+		printf("A8E VBXE: enabled at $%04X\n", (unsigned)sVbxePage);
 	}
 	{
 		FILE *pLibraryManifest = fopen("library/library.json", "rb");

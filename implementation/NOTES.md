@@ -1,5 +1,41 @@
 # NOTES.md
 
+- 2026-11-04 (Native A8E: VBXE stage 2 on a real demo): running `demoD600.xex`
+  (`./A8E -128k -n --vbxe`) showed every other screen column black. Cause: the
+  project's `u32` is `unsigned long`, 8 bytes on LP64, and the ARGB overlay
+  plane and its copy into the 32-bit SDL surface used `u32` as the pixel type.
+  Pixel buffers now use `uint32_t`; keep that in mind for any new pixel code
+  (the existing `u32` is fine for values, wrong for memory layouts). The first
+  suspects (priority bits of ANTIC hires, the blitter) were ruled out by
+  logging the first 400 BCBs and 128 page checksums at blit 300 in both cores:
+  identical. Also added reverse attribute-map cells for plain ANTIC hires and
+  lores (the demo's Fuji logos use them) and averaging of hires/text pixel
+  pairs. Probe: `TestOverlayReachesScreen` now checks three consecutive screen
+  pixels; `TestHiresPairIsAveraged`.
+- 2026-11-04 (Native A8E: VBXE stage 2): `A8E/VbxeVideo.c` ports the video
+  side of `vbxe.js`: the XDL engine (`Vbxe_NextXdlLine`: control bytes,
+  repeat, END after the repeat run, OVADR/OVSCRL/CHBASE/ATT/MAP/MISC fields,
+  latches kept across VSync), the standard, lores, hires and text overlay with
+  Altirra's transparency rule (VIDEO_CONTROL D2 set = opaque), overlay
+  priority tables per profile (FX 1.20/1.24 without the background bit), COLMASK
+  collisions into COLDETECT, playfield palettes from MISC, the attribute map
+  (43-cell line buffer, scroll, cell size, PF3 bitmap) and the DMA slots a line
+  takes (22 per new XDL entry, overlay 64/80/84 machine cycles by width, text
+  195/243/255, 172 for a map reload), subtracted in `Vbxe_EndOfLine`. A line is
+  composed by `Vbxe_ComposeLine` right after `AtariIoDrawLine` into an ARGB
+  plane (`pOverlay`, 456 x 312, 0 = no VBXE pixel); `AtariIoDrawScreen` copies
+  it over the 8-bit frame in the direct and the scaled paths. Native limits,
+  documented in `A8E/README.md`: output is the 336-pixel window, so hires and
+  text overlays average each pair of source pixels into one (a first version took one sample and showed vertical stripes on dithered hires images); each line is composed once
+  when it closes (no GTIA mid-line replay); reverse attribute-map cells rebuild the ANTIC source bits from the GTIA layer
+  of each pixel (hires pairs, lores values) and only the GTIA special-mode
+  combinations fall back to the plain selection; slot
+  accounting is aggregate. As in jsA8E, the playfield palette only applies on
+  lines where the overlay or the map is enabled. Tests: four new cases in
+  `vbxe_probe` (standard overlay with repeat/END/priority/collision, text,
+  attribute map plus playfield palette, overlay reaching the screen surface);
+  a mutation of the XDL update cost makes the probe fail. `ctest` unchanged:
+  the same two older failures.
 - 2026-11-04 (Native A8E: VBXE stage 1 and parity check): compared the branch
   against `main`; everything jsA8E changed outside VBXE is already in the
   native core (GTIA `$D01B-$D01E` reads, no DLI in vblank, player/missile early
