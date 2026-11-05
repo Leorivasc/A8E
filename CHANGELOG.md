@@ -30,6 +30,9 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - VBXE text overlay (both cores): vertical scroll was applied twice, cutting the
   top of characters in Textmode Test 80x30/80x32.
+- VBXE blitter (both cores): `BLITTER_START` latches the first control block
+  immediately, as Altirra does, so programs that rewrite it right after starting
+  a blit no longer leave sprite trails (seen in Gacek).
 - VBXE overlay priority and collisions (both cores): ANTIC hires pixels reach the
   overlay as PF2, as in Altirra, except FX 1.26 with extended color. Fixes
   `vbxe_fx124_priority_probe_boot`.

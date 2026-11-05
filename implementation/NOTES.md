@@ -1,5 +1,28 @@
 # NOTES.md
 
+- 2026-11-05 (Gacek VBXE: BASIC and BCB latch): `Gacek_vbxe_f+.xex` showed two
+  separate problems. (1) Noise instead of bombs/enemies: the game keeps its
+  sprite sheet in RAM `$8000-$B03F` and copies it to VRAM; with BASIC enabled
+  the part from `$A000` reads the BASIC ROM. The 16 rows of the source sprite in
+  VRAM matched `ATARIBAS.ROM` byte for byte (read bottom-up). Not an emulator
+  bug: run with `-o` (A8E) or "Option on start" (jsA8E), as Altirra does for
+  executables. Open question: whether loading an XEX should disable BASIC by
+  default. (2) Trails behind moving sprites with BASIC off, in both cores:
+  Altirra's `BLITTER_START` loads the first BCB immediately (vbxe.cpp ~line
+  1356: "some demos are a bit creative and overwrite the first entry without
+  checking blitter status"); we read it when the 21-cycle load finished, so a
+  program that reuses the block right after START (Gacek queues its next sprite
+  that way) changed the blit in flight and the erase blits were wrong. Fix in
+  both cores: START copies the 21 bytes (`preloadedBlock` in `vbxe.js`,
+  `aPreloaded` in `Vbxe.c`); the load cycles still cost time. Tests:
+  `vbxe_blitter_start_latches_bcb` and `TestBlitterStartLatchesBcb`, both
+  failing without the fix. VBXE suite 57 of 58 (only the unstable
+  `vbxe_blitter_attrmap_phase_boot`), `ctest` 16 of 17 (`pokey_sio_contract_probe`).
+  Still different from Altirra and not changed: `BLITTER_BUSY` bit 1 is set only
+  while processing (not while loading the BCB), and a START written while the
+  BCB loads restarts the blit; both cores ignore a START while loading. Tooling
+  note: native screenshots for such checks came from a debug copy of `A8E.c`
+  built outside the repo, with env-driven frame dumps and key/fire injection.
 - 2026-11-05 (VBXE overlay priority for ANTIC hires): `vbxe_fx124_priority_probe_boot`
   (known failing "legacy bit 6 must win over PF2") traced to Altirra's
   `RenderMode8` (`vbxe.cpp`, lines 2530-2690): in ANTIC hires (modes 2, 3, F
