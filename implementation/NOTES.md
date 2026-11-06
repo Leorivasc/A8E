@@ -1,5 +1,23 @@
 # NOTES.md
 
+- 2026-11-06 (VBXE merge readiness and Altirra source audit): prepared the
+  `VBXE` branch for merging into `main` as an experimental, opt-in feature (the
+  merge itself is done by the maintainer). Results: jsA8E 59 of 59 VBXE tests
+  pass (including `vbxe_blitter_attrmap_phase_boot`, which is intermittent),
+  native `ctest` 16 of 17 (`pokey_sio_contract_probe` fails identically on a
+  clean `main` worktree, so it is not from this branch); the diff has no
+  binaries, ROMs or build output. Read `build/Altirra-4.40-src/src/Altirra/source/vbxe.cpp`
+  (memory maps, `ReadControl`/`WriteControl`, XDL decoder, blitter) against
+  `vbxe.js` and `Vbxe.c`: registers, MEMAC and XDL match; blitter differences
+  D1-D7 were found and recorded, not changed (mode 6 collision nibble order,
+  mode 7 treated as copy by Altirra, mode 4 zero-source cost, `BLITTER_BUSY`,
+  per-row budget, undefined register reads, attribute-map cell). The renderers
+  and priority tables were not audited. All open items now live in
+  [VBXE_ROADMAP.md, Known issues and pending work](VBXE_ROADMAP.md#known-issues-and-pending-work);
+  resume from there. Side effect to remember: `npm run test:vbxe:browser`
+  drove the Chromium on port 9222 that was open with Commando. READMEs and
+  `VBXE.md` now point to the list; the root README no longer says the native
+  core lacks VBXE.
 - 2026-11-05 (jsA8E VBXE: MEMAC A above $D800, Commando terrain): in
   `commando230810.xex` the player walked over palms, rocks and the bridge in
   jsA8E but was blocked in A8E. Disassembling the game showed that its

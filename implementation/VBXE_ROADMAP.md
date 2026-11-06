@@ -379,6 +379,81 @@ The **functional VBXE** goal is considered closed when:
 The **complete fidelity** goal additionally requires closing stages 6–8 and
 must not be declared merely because the software boots.
 
+## Known issues and pending work
+
+This is the single list to resume from when a game or a test shows a new VBXE
+difference. Add a row (or a line to the log in [`NOTES.md`](NOTES.md)) for each
+finding and remove it when fixed. State as of **2026-11-06**, branch `VBXE`,
+prepared for merging into `main` as an **experimental, opt-in feature**.
+
+### Release status (2026-11-06)
+
+| Gate | Result |
+| --- | --- |
+| jsA8E, every VBXE test (`test:vbxe`, `test:vbxe:full`, `test:vbxe:browser`, 59 files) | 59 of 59 pass. `vbxe_blitter_attrmap_phase_boot` is intermittent (see I2) and passed in this run. |
+| Native `ctest` (17 probes, run with the ROMs in the repository root) | 16 of 17 pass. `pokey_sio_contract_probe` fails the same way on `main` (see I1). |
+| Diff against `main` | 16 commits, no binaries, ROMs or `build/` content; the 184 files under `implementation/AHRM Validation` are `.asm` sources and their `.XEX` builds (90 + 94). |
+| Default behavior | VBXE is off by default in both cores; base Atari behavior is unchanged when it is off. |
+
+Support level to communicate: practical compatibility with real software
+(Popeye, Commando, Gacek, Galaga, Crysis, D600, Phoenix, Celeste, Falcon and
+others) in jsA8E, with native A8E at stages 1-2. Not hardware-certified, not
+pixel-exact, not cycle-exact. Rough estimate, not a measurement: most
+mainstream VBXE software should run correctly; exact end-of-blit timing and
+mid-line effects are the highest-risk areas.
+
+### Differences from Altirra 4.40 found by reading `vbxe.cpp` (2026-11-06)
+
+Audit scope: `UpdateMemoryMaps`/`InitMemoryMaps`, `ReadControl`/`WriteControl`,
+the XDL decoder in `BeginScanline`, and the blitter (`RunBlitter`,
+`RunBlitterRow`, `LoadBCB`, `LoadBlitter`). Registers, MEMAC and XDL match
+(window priority below the ROM and the hardware pages, truncation at `$10000`,
+bank alignment to the window size, MEMAC-B bits 7/6, palette write expansion,
+overlay/map/XDL DMA tables, 43x4 map cycles). The items below differ and apply
+to **both cores** unless noted.
+
+| Id | Difference | Altirra reference | Notes / decision needed |
+| --- | --- | --- | --- |
+| D1 | Mode 6 (nibble) collision: when both nibbles of a byte collide we record the high nibble; Altirra records the low one. | `RunBlitterRow<6>` checks `cl` first and then clears the active mask. | Small fix: check the low nibble first in `recordNibbleBlitCollision` calls (`vbxe.js`, `Vbxe.c`). |
+| D2 | Blitter mode 7: Altirra runs it as mode 0 (copy); we write the destination back (no-op). | `RunBlitterRow()` dispatch `default: case 0`. | Its cycle cost uses the modes 2-6 rules. No known software uses it. |
+| D3 | Mode 4 (AND), source byte `$00` with a non-zero AND mask: we charge 2 cycles (AHRM table 113 and Altirra's own comment); Altirra's code charges 1. | `LoadBCB` default case, `mBlitCyclesSavedPerZero`. | Altirra's code and comment disagree. Decide which one to follow; it only moves the end-of-blit time. |
+| D4 | `BLITTER_BUSY`: bit 1 is set only while processing (not while the BCB loads, bits are never both set); a START written while the BCB loads is ignored (Altirra restarts). | `ReadControl` 0x53, `WriteControl` 0x53 (`IsBlitterActive`). | Already known; no real program has shown it. |
+| D5 | Blitter budget granularity: Altirra charges whole rows and can overshoot the line budget; we charge per byte. | `RunBlitter` row loop. | Affects only the instant a blit finishes inside a line. |
+| D6 | Attribute-map cell without extended color: a set pixel should take the cell's PF2 color with only PF1's luminance; we use the full PF1 color. | `RenderMode8`, lines ~2610-2620. | Already known; no real program has shown it. |
+| D7 | Reads of undefined VBXE registers return open bus in Altirra (`-1`); we return `$FF`. | `ReadControl` default. | Cosmetic unless software probes them. |
+
+Not audited yet (next pass over `vbxe.cpp`): `RenderMode8` to `RenderMode11`
+(the GTIA-mode renderers), `RenderOverlay*` and the 80-column text path,
+`InitPriorityTables`/`ConvertPriorityToNative`, the palette corrector, `COLDETECT`
+bit order, savestate fields.
+
+### Behavior and validation gaps
+
+| Id | Item | State |
+| --- | --- | --- |
+| G1 | Commando: the end-of-level bridge/portal was not played after the MEMAC-A fix; only the first screen and the rock plateau were verified. | Pending user test. |
+| G2 | Other programs that open MEMAC A at `$D800` or above (the 2026-11-05 fix) were not tried; only the unit case `$E000` and Commando cover it. | Report any new case here. |
+| G3 | BASIC is enabled by default when an XEX is loaded, so VBXE programs that use RAM at `$A000-$BFFF` show BASIC ROM contents unless Option is held (Gacek). Open question: disable BASIC by default for XEX loads, as Altirra does. | Open, no code change. |
+| G4 | No comparison with a physical VBXE; Altirra is the only external reference and itself deviates from the AHRM in places (see "Deliberate deviations" in `VBXE.md`). | Needs hardware or a user with a board. |
+| G5 | Stage 7: no reproducible Altirra golden images; Galaga, Celeste, D600 and Phoenix are boot-only gates; real programs lack scene markers. | Open (stage 7). |
+| G6 | No automatic native-versus-jsA8E comparison. The Commando bug was an A8E/jsA8E divergence and no roadmap gate would have caught it. | Idea: a differential gate that runs the same XEX in both cores and compares RAM/VRAM at fixed frames. |
+| G7 | Exact local-bus phase order, per-slot arbitration and mid-line overlay/map composition remain fidelity limits (stages 1-3 and 6). | Open. |
+
+### Product limits
+
+| Id | Item | State |
+| --- | --- | --- |
+| P1 | Native A8E implements stages 1-2 only: 336-px output (hires/text overlays averaged), no mid-line GTIA replay, aggregate (not per-slot) bus accounting, no FX 1.26r RAMBO profile, no snapshots, no UI selector. | Documented in `A8E/README.md`. |
+| P2 | The worker/browser gate (`test:vbxe:browser`) needs Chromium over CDP on port 9222 and drives the page it finds there (it restores the URL, but any game loaded in that page is reset). | Run it on a throw-away Chromium. |
+
+### Test infrastructure issues (not VBXE defects)
+
+| Id | Item | State |
+| --- | --- | --- |
+| I1 | `pokey_sio_contract_probe` fails with "RunStatusLatchContract: initial STATUS missing ACK". Verified on a clean `main` worktree: it fails there too. | Pre-existing, unrelated to VBXE. |
+| I2 | `vbxe_blitter_attrmap_phase_boot` is intermittent (failed 2 of 3 runs on an earlier commit, passed in the 2026-11-06 full run). It is timing-sensitive; do not treat a single failure as a regression. | Open. |
+| I3 | `ctest` takes its working directory from the repository root and needs `ATARIBAS.ROM`/`ATARIXL.ROM` there (they are git-ignored); without them 12 probes fail with "ROM file not found". | Copy or link the ROMs before running `ctest`. |
+
 ## Repository references
 
 - [`VBXE.md`](VBXE.md): design, registers, state and support matrix.

@@ -27,6 +27,13 @@ All notable changes to this project will be documented in this file.
 - Browser headless automation and MCP coverage for grouped lifecycle, media,
   debugger, HostFS, assembler, snapshot, artifact, and memory-profile flows.
 
+### Documentation
+- VBXE is documented as experimental and opt-in. The roadmap now holds the list
+  of known differences from Altirra 4.40, unaudited areas, validation gaps and
+  test-infrastructure issues (`implementation/VBXE_ROADMAP.md`, "Known issues
+  and pending work"); the root README no longer states that the native core
+  lacks VBXE.
+
 ### Fixed
 - jsA8E VBXE: MEMAC A windows above $D800 (for example $E000 with the OS ROM
   off) are now routed, so Commando's terrain map is copied and the player is

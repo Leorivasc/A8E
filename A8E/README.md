@@ -67,7 +67,10 @@ playfield selection. The FX 1.26r RAMBO
 profile, snapshots and a UI selector are not available. The complete device
 is the optional JavaScript browser core (`jsA8E/`). The shared target, pending work, and
 validation gates are documented in the [VBXE roadmap](../implementation/VBXE_ROADMAP.md);
-the native probe is `tests/vbxe_probe.c`.
+the native probe is `tests/vbxe_probe.c`. VBXE is experimental and off by
+default; the known differences and pending work are listed in
+[Known issues and pending work](../implementation/VBXE_ROADMAP.md#known-issues-and-pending-work).
+`ctest` must run with `ATARIBAS.ROM` and `ATARIXL.ROM` in the repository root.
 
 The native core includes the current raster-timing pass:
 

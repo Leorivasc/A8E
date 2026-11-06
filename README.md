@@ -39,8 +39,14 @@ OffscreenCanvas when available, with main-thread fallback.
 Real software running in the browser core: the Popeye game (title, menu, and
 gameplay) and the D600 blitter demo, both compared visually with Altirra 4.40
 (D600 needs BASIC off, or ENTER plus a key, exactly as in Altirra), plus
-Phoenix, Celeste, Galaga, Crysis, and Falcon. The native `A8E` does not
-implement VBXE.
+Phoenix, Celeste, Galaga, Crysis, and Falcon, plus games such as Commando and
+Gacek. The native `A8E` implements the first two stages of the device
+(`--vbxe`); see `A8E/README.md` for its limits.
+
+**VBXE is experimental and opt-in.** It is off by default and does not change
+base Atari behavior when off. The list of known differences from Altirra,
+open validation gaps and test-infrastructure issues is kept in
+[Known issues and pending work](implementation/VBXE_ROADMAP.md#known-issues-and-pending-work).
 
 This is functional compatibility, not a claim of complete hardware or
 pixel-perfect equivalence. Mid-scanline overlay/map composition, exact local

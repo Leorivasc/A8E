@@ -9,6 +9,12 @@ are maintained in [`VBXE_ROADMAP.md`](VBXE_ROADMAP.md). This file remains the
 technical contract and support matrix; the roadmap is the canonical source for
 work ordering and completion status.
 
+Open differences from Altirra 4.40 (blitter modes 6/7 and mode-4 timing,
+`BLITTER_BUSY`, attribute-map cells without extended color, undefined register
+reads), unaudited areas, validation gaps and test issues are tracked in
+[Known issues and pending work](VBXE_ROADMAP.md#known-issues-and-pending-work);
+resume from that list when a new difference is found.
+
 The JavaScript core implements optional FX 1.20, 1.24, and 1.26 devices with revision reads,
 `$D640`/`$D740` register decoding, 512 KiB VRAM, palette/write latches,
 vertical-sync latching, soft reset, MEMAC state, and snapshot persistence.

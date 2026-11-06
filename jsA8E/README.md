@@ -30,6 +30,12 @@ GTIA-special and collision differentials, exact blitter phase timing, and
 visual Altirra comparison. Worker/fallback parity has a Chromium smoke test;
 an automated browser regression remains.
 
+VBXE is experimental: the known differences from Altirra, the open validation
+gaps and the test-infrastructure issues are listed in
+[Known issues and pending work](../implementation/VBXE_ROADMAP.md#known-issues-and-pending-work).
+`npm run test:vbxe:browser` needs Chromium over CDP on port 9222 and drives
+the page it finds there, so use a throw-away browser for it.
+
 For the implementation contract, support matrix, diagrams, test commands, and
 stage exit criteria, see [`../implementation/VBXE.md`](../implementation/VBXE.md)
 and [`../implementation/VBXE_ROADMAP.md`](../implementation/VBXE_ROADMAP.md).
