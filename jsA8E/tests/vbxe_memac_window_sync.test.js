@@ -80,6 +80,24 @@ async function main() {
     assert.equal(ctx.ram[0xc000], 0x3c, "RAM under OS ROM survives MEMAC writes");
     assert.equal(ctx.ram[0xffff], 0x99, "RAM under the vectors survives MEMAC writes");
 
+    // 3. MEMAC A may sit above the hardware pages: Commando reads its terrain
+    // map through a 4K window at $E000 with the OS ROM off. The window claims
+    // only RAM-mapped addresses, so it must reach VRAM there, close cleanly
+    // and never replace the I/O range $D000-$D7FF.
+    vbxe.vram[0x50000] = 0xcc;
+    vbxe.vram[0x50fff] = 0xd8;
+    write(MEMAC_CONTROL, 0xe8); // base $E000, 4K, CPU access
+    write(MEMAC_BANK_SEL, 0xd0); // enabled, VRAM $50000
+    assert.equal(read(0xe000), 0xcc, "MEMAC A at $E000 reads VRAM");
+    assert.equal(read(0xefff), 0xd8, "MEMAC A covers the whole 4K window");
+    write(0xe001, 0x42);
+    assert.equal(vbxe.vram[0x50001], 0x42, "MEMAC A at $E000 writes VRAM");
+    write(MEMAC_CONTROL, 0x00);
+    write(MEMAC_BANK_SEL, 0x00);
+    write(0xe000, 0x17);
+    assert.equal(read(0xe000), 0x17, "closing MEMAC A returns $E000 to RAM");
+    assert.equal(ctx.ram[0xe000], 0x17, "closed MEMAC A writes reach RAM");
+
     console.log("vbxe_memac_window_sync: MEMAC remap preserves RAM writes.");
   } finally {
     await runtime.dispose();

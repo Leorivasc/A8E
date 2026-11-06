@@ -280,8 +280,12 @@
         const control = vbxe.memacControl & 0xff;
         if ((vbxe.memacBankSelect & 0x80) !== 0 && (control & 0x0c) !== 0) {
           const base = (control & 0xf0) << 8;
-          windows.push(base, Math.min(0xd000, base + (0x1000 << (control & 0x03))),
-            (control & 0x08) !== 0);
+          const end = Math.min(0x10000, base + (0x1000 << (control & 0x03)));
+          const cpu = (control & 0x08) !== 0;
+          // The hardware pages $D000-$D7FF are never claimed; the RAM above
+          // them ($D800-$FFFF, with the OS ROM off) can be a window.
+          if (base < 0xd000) windows.push(base, Math.min(0xd000, end), cpu);
+          if (end > 0xd800) windows.push(Math.max(base, 0xd800), end, cpu);
         }
         if ((vbxe.memacBControl & 0xc0) !== 0) {
           windows.push(0x4000, 0x8000, (vbxe.memacBControl & 0x80) !== 0);

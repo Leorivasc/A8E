@@ -28,6 +28,9 @@ All notable changes to this project will be documented in this file.
   debugger, HostFS, assembler, snapshot, artifact, and memory-profile flows.
 
 ### Fixed
+- jsA8E VBXE: MEMAC A windows above $D800 (for example $E000 with the OS ROM
+  off) are now routed, so Commando's terrain map is copied and the player is
+  blocked by palms, rocks and the bridge as in A8E.
 - VBXE text overlay (both cores): vertical scroll was applied twice, cutting the
   top of characters in Textmode Test 80x30/80x32.
 - VBXE blitter (both cores): `BLITTER_START` latches the first control block

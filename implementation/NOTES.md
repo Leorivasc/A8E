@@ -1,5 +1,22 @@
 # NOTES.md
 
+- 2026-11-05 (jsA8E VBXE: MEMAC A above $D800, Commando terrain): in
+  `commando230810.xex` the player walked over palms, rocks and the bridge in
+  jsA8E but was blocked in A8E. Disassembling the game showed that its
+  collision routine ($394E/$3872) does not use GTIA or VBXE collision
+  registers (it never writes HITCLR and reads <500 VBXE registers per run); it
+  indexes a tile map in plain RAM at $4000-$5F3F. Level init ($2078/$20F6)
+  fills that map by opening MEMAC A as a 4K window at $E000 (`$D65E=$E8`,
+  `$D65F=$C0|bank`, OS ROM off) and copying it from VRAM. jsA8E's
+  `installIoHandlers` capped every MEMAC A window at `$D000`
+  (`Math.min(0xd000, ...)`), so a window at $E000 was never routed and the copy
+  read RAM zeros: the map stayed empty and nothing blocked the player. Windows
+  are now split around the hardware pages and may cover $D800-$FFFF (RAM only,
+  ROM keeps priority, as in the native `Vbxe_SyncWindows`). After the fix the
+  map is byte-identical to A8E and the player stops at the rock plateau.
+  `vbxe_memac_window_sync` gained a $E000 read/write/close case. Lesson:
+  when a game "works in one core", compare the CPU-visible memory at the same
+  game moment first; here an 8000-byte diff pointed straight at the cause.
 - 2026-11-05 (Gacek VBXE: BASIC and BCB latch): `Gacek_vbxe_f+.xex` showed two
   separate problems. (1) Noise instead of bombs/enemies: the game keeps its
   sprite sheet in RAM `$8000-$B03F` and copies it to VRAM; with BASIC enabled
