@@ -83,6 +83,12 @@ typedef struct _6502_Context
 	u64 llIoBeamTimedEventCycle;
 	void (*IoCycleTimedEventFunction)(struct _6502_Context *);
 
+	/* Optional hooks around each instruction. A device that remaps the
+	 * program counter's bytes (VBXE MEMAC windows) stages them in
+	 * pMemory before the instruction runs and restores them afterwards. */
+	void (*pfnFetchStage)(struct _6502_Context *, u16);
+	void (*pfnFetchRestore)(struct _6502_Context *, u16);
+
 	u8 cNmiPendingFlag;
 	u8 cNmiActiveFlag;
 	u8 cIrqPendingFlag;
@@ -101,6 +107,8 @@ void _6502_Close(_6502_Context_t *pContext);
 void _6502_SetRom(_6502_Context_t *pContext, u16 sStart, u16 sEnd);
 void _6502_SetRam(_6502_Context_t *pContext, u16 sStart, u16 sEnd);
 void _6502_SetIo(_6502_Context_t *pContext, u16 sAddress, u8 *(*IoAccessFunction)(_6502_Context_t *, u8 *));
+u8 *(*_6502_GetAccess(_6502_Context_t *pContext, u16 sAddress))(_6502_Context_t *, u8 *);
+u8 _6502_IsRamAccess(_6502_Context_t *pContext, u16 sAddress);
 
 void _6502_Status(_6502_Context_t *pContext);
 u16 _6502_Disassemble(_6502_Context_t *pContext, u16 sAddress);

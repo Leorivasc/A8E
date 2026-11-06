@@ -44,6 +44,11 @@ function testPriorityBuffersUse16Bits() {
 
   assert.ok(video.priority instanceof Uint16Array);
   assert.ok(video.playfieldScratchPriority instanceof Uint16Array);
+  assert.ok(video.vbxeCollisionPriority instanceof Uint16Array);
+  assert.ok(video.playfieldScratchVbxeCollisionPriority instanceof Uint16Array);
+  assert.equal(video.vbxeHiresWidth, 672);
+  assert.equal(video.vbxeHiresRgb.length, 672 * 240);
+  assert.equal(video.presentVbxeHiresRgb.length, 672 * 240);
 
   api.fillLine(video, 0, 0, 1, 0x12, 0x1234);
 

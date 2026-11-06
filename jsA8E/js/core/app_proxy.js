@@ -84,11 +84,23 @@
     );
   }
 
+  function isFirefox() {
+    return typeof navigator !== "undefined" &&
+      typeof navigator.userAgent === "string" &&
+      /\bFirefox\//.test(navigator.userAgent);
+  }
+
   function supportsWorker() {
     // WebKitGTK can expose OffscreenCanvas but return no 2D context from the
     // worker. Keep the desktop shell on the main-thread backend until the
     // native WebView worker rendering path is reliable across platforms.
     if (isTauriWebView()) return false;
+    // Firefox's OffscreenCanvas/worker path left the worker unresponsive for
+    // seconds on a real desktop session (getCounters timed out after 4 s,
+    // several seconds of input lag), while the same page with the emulator on
+    // the main thread was playable. Default Firefox to the main thread; an
+    // explicit ?a8e_worker=1 still opts in.
+    if (isFirefox() && getQueryWorkerPreference() !== true) return false;
     if (typeof window.Worker === "undefined") return false;
     if (typeof window.OffscreenCanvas === "undefined") return false;
     if (typeof window.MessageChannel === "undefined") return false;
@@ -147,6 +159,23 @@
     if (text === "1088k" || text === "1088kb" || text === "rambo-1088k") return "rambo-1088k";
     if (text === "ultimate1mb" || text === "ultimate-1mb" || text === "1mb" || text === "1088k-u1mb") return "ultimate1mb";
     return null;
+  }
+
+  function normalizeVbxeConfig(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const profileText = String(
+      typeof value === "string" ? value : (source.profile || "off"),
+    ).trim().toLowerCase();
+    const profile = profileText === "fx1.20" || profileText === "fx120" ? "fx1.20" :
+      profileText === "fx1.24" || profileText === "fx124" ? "fx1.24" :
+        profileText === "fx1.26" || profileText === "fx126" ? "fx1.26" :
+          profileText === "fx1.26r" || profileText === "fx126r" || profileText === "r" ? "fx1.26r" : "off";
+    const enabled = source.enabled === false ? false : profile !== "off" || source.enabled === true;
+    return {
+      enabled: enabled,
+      profile: enabled ? (profile !== "off" ? profile : "fx1.26") : "off",
+      page: (source.page | 0) === 0xd740 ? 0xd740 : 0xd640,
+    };
   }
 
   function getQueryWorkerPreference() {
@@ -1236,6 +1265,7 @@
       optionOnStart: false,
       videoStandard: videoStandard,
       memoryExpansion: normalizeMemoryExpansion(opts && opts.memoryExpansion) || "130xe-128k",
+      vbxe: normalizeVbxeConfig(opts && opts.vbxe),
     };
 
     function applyWorkerStateSnapshot(snapshot) {
@@ -1268,6 +1298,8 @@
           {state.videoStandard = normalizeVideoStandard(snapshot.config.videoStandard) || state.videoStandard;}
         if (typeof snapshot.config.memoryExpansion === "string")
           {state.memoryExpansion = normalizeMemoryExpansion(snapshot.config.memoryExpansion) || state.memoryExpansion;}
+        if (snapshot.config.vbxe !== undefined)
+          {state.vbxe = normalizeVbxeConfig(snapshot.config.vbxe);}
       }
       if (snapshot.debug) emitDebugState(snapshot.debug);
       syncReadyFlag();
@@ -1600,6 +1632,8 @@
         optionOnStart: !!opts.optionOnStart,
         videoStandard: videoStandard,
         memoryExpansion: state.memoryExpansion,
+        vbxe: state.vbxe,
+        renderer: opts.renderer === "2d" ? "2d" : "auto",
         pokeyTrace: opts.pokeyTrace === true,
         keyboardMappingMode: keyboardMappingMode,
       },
@@ -1628,6 +1662,9 @@
           state.memoryExpansion =
             normalizeMemoryExpansion(options.memoryExpansion) || state.memoryExpansion;
         }
+        if (options && typeof options === "object" && options.vbxe !== undefined) {
+          state.vbxe = normalizeVbxeConfig(options.vbxe);
+        }
         return sendRequest("reset", options || null);
       },
       powerCycle: function (options) {
@@ -1635,6 +1672,9 @@
         if (options && typeof options === "object" && options.memoryExpansion !== undefined) {
           state.memoryExpansion =
             normalizeMemoryExpansion(options.memoryExpansion) || state.memoryExpansion;
+        }
+        if (options && typeof options === "object" && options.vbxe !== undefined) {
+          state.vbxe = normalizeVbxeConfig(options.vbxe);
         }
         return sendRequest("powerCycle", options || null);
       },
@@ -1675,6 +1715,9 @@
       },
       getMemoryExpansion: function () {
         return state.memoryExpansion;
+      },
+      getVbxeConfig: function () {
+        return Object.assign({}, state.vbxe);
       },
       setKeyboardMappingMode: function (mode) {
         keyboardMappingMode = mode === "original" ? "original" : "translated";
@@ -1975,6 +2018,8 @@
       {app.getVideoStandard = function () { return normalizeVideoStandard(legacyOpts.videoStandard) || "ntsc"; };}
     if (app && typeof app.getMemoryExpansion !== "function")
       {app.getMemoryExpansion = function () { return normalizeMemoryExpansion(legacyOpts.memoryExpansion) || "130xe-128k"; };}
+    if (app && typeof app.getVbxeConfig !== "function")
+      {app.getVbxeConfig = function () { return normalizeVbxeConfig(legacyOpts.vbxe); };}
     if (app && typeof app.powerCycle !== "function")
       {app.powerCycle = function (options) {
         const result = app.reset(options);

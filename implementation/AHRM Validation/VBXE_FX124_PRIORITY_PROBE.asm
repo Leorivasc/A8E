@@ -1,0 +1,161 @@
+; FX 1.24 priority differential.
+; The three 64-line XDL bands use priority $00, $00, and $40. The ANTIC
+; field is respectively background, solid PF2, and solid PF2. On FX 1.24
+; this must appear green, blue, green: legacy $00 beats background, but PF2
+; needs bit 6. FX 1.26 instead appears blue, blue, green because bit 7 owns
+; background priority. $0082-$0083 retain CORE_REVISION/MINOR_REVISION.
+.ORG $2000
+
+DMACTL=$D400
+DLISTL=$D402
+DLISTH=$D403
+NMIEN=$D40E
+COLPF2=$D018
+COLBK=$D01A
+MEMACB=$D65D
+VIDEO=$D640
+XDL0=$D641
+XDL1=$D642
+XDL2=$D643
+CSEL=$D644
+PSEL=$D645
+CR=$D646
+CG=$D647
+CB=$D648
+
+RESULTS=$82
+PTRLO=$80
+PTRHI=$81
+SCREEN=$4000
+
+START:
+ LDA #0
+ STA NMIEN
+ LDA VIDEO
+ STA RESULTS
+ LDA XDL0
+ STA RESULTS+1
+ ; Local VRAM $00000: one 320-byte standard-overlay row of color 1.
+ LDA #$C0
+ STA MEMACB
+ LDA #1
+ LDX #0
+FILL_OVERLAY:
+ STA $4000,X
+ STA $4100,X
+ INX
+ BNE FILL_OVERLAY
+ LDX #0
+FILL_OVERLAY_TAIL:
+ STA $4200,X
+ INX
+ CPX #64
+ BNE FILL_OVERLAY_TAIL
+ LDA #0
+ STA MEMACB
+ ; Main RAM $4000-$53FF: 128 Graphics-8 rows of solid PF2.
+ LDA #<SCREEN
+ STA PTRLO
+ LDA #>SCREEN
+ STA PTRHI
+ LDA #$FF
+ LDX #20
+FILL_SCREEN_PAGE:
+ LDY #0
+FILL_SCREEN_BYTE:
+ STA (PTRLO),Y
+ INY
+ BNE FILL_SCREEN_BYTE
+ INC PTRHI
+ DEX
+ BNE FILL_SCREEN_PAGE
+ ; Blue PF2 below a black background.
+ LDA #$84
+ STA COLPF2
+ LDA #0
+ STA COLBK
+ ; Palette 1, color 1 = green.
+ LDA #1
+ STA CSEL
+ STA PSEL
+ LDA #0
+ STA CR
+ LDA #$FE
+ STA CG
+ LDA #0
+ STA CB
+ ; XDL at local $01000: three bands, each 64 scan lines.
+ LDA #$C0
+ STA MEMACB
+ LDA #$62
+ STA $5000
+ LDA #$08
+ STA $5001
+ LDA #63
+ STA $5002
+ LDA #0
+ STA $5003
+ STA $5004
+ STA $5005
+ STA $5006
+ STA $5007
+ LDA #$14
+ STA $5008
+ LDA #0
+ STA $5009
+ LDA #$22
+ STA $500A
+ LDA #$08
+ STA $500B
+ LDA #63
+ STA $500C
+ LDA #$14
+ STA $500D
+ LDA #0
+ STA $500E
+ LDA #$22
+ STA $500F
+ LDA #$08
+ STA $5010
+ LDA #63
+ STA $5011
+ LDA #$14
+ STA $5012
+ LDA #$40
+ STA $5013
+ LDA #0
+ STA $5014
+ LDA #$80
+ STA $5015
+ LDA #0
+ STA MEMACB
+ LDA #<DISPLAY_LIST
+ STA DLISTL
+ LDA #>DISPLAY_LIST
+ STA DLISTH
+ LDA #$22
+ STA DMACTL
+ LDA #0
+ STA XDL0
+ LDA #$10
+ STA XDL1
+ LDA #0
+ STA XDL2
+ LDA #5
+ STA VIDEO
+READY:
+ JMP READY
+
+.ORG $3000
+DISPLAY_LIST:
+ ; 64 background lines, then 128 solid-PF2 Graphics-8 lines.
+ .REPT 8
+ .BYTE $70
+ .ENDR
+ .BYTE $4F,<SCREEN,>SCREEN
+ .REPT 127
+ .BYTE $0F
+ .ENDR
+ .BYTE $41,<DISPLAY_LIST,>DISPLAY_LIST
+
+.RUN START

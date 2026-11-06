@@ -80,6 +80,7 @@
       const playfieldCycles = bytesPerLine * 2;
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const sourceBits = io.videoOut.anticSourceBits || null;
       let dstIndex = io.drawLine.destIndex | 0;
       let dispAddr = io.drawLine.displayMemoryAddress & 0xffff;
       const colorTable = SCRATCH_GTIA_COLOR_TABLE;
@@ -123,6 +124,16 @@
 
         const outputData = priorMode !== 0 && inverse ? (data ^ 0xff) : data;
 
+        // GTIA special modes consume the same four raw hires bits as one
+        // expanded output group. Preserve them so a VBXE Rev cell can still
+        // reinterpret the ANTIC source after GTIA composition.
+        if (sourceBits && priorMode !== 0) {
+          sourceBits[dstIndex] = outputData & mask ? 1 : 0;
+          sourceBits[dstIndex + 1] = outputData & (mask >> 1) ? 1 : 0;
+          sourceBits[dstIndex + 2] = outputData & (mask >> 2) ? 1 : 0;
+          sourceBits[dstIndex + 3] = outputData & (mask >> 3) ? 1 : 0;
+        }
+
         if (priorMode === 0) {
           const colPf1 = sram[IO_COLPF1] & 0xff;
           const colPf2 = sram[IO_COLPF2] & 0xff;
@@ -133,7 +144,9 @@
           const p0 = inverse ? PRIO_PF1 : PRIO_PF2;
           const p1 = inverse ? PRIO_PF2 : PRIO_PF1;
 
-          if (outputData & mask) {
+          const sourceBit0 = outputData & mask ? 1 : 0;
+          if (sourceBits) sourceBits[dstIndex] = sourceBit0;
+          if (sourceBit0) {
             dst[dstIndex] = c1;
             prio[dstIndex] = p1;
           } else {
@@ -143,7 +156,9 @@
           dstIndex++;
           mask >>= 1;
 
-          if (outputData & mask) {
+          const sourceBit1 = outputData & mask ? 1 : 0;
+          if (sourceBits) sourceBits[dstIndex] = sourceBit1;
+          if (sourceBit1) {
             dst[dstIndex] = c1;
             prio[dstIndex] = p1;
           } else {
@@ -153,7 +168,9 @@
           dstIndex++;
           mask >>= 1;
 
-          if (outputData & mask) {
+          const sourceBit2 = outputData & mask ? 1 : 0;
+          if (sourceBits) sourceBits[dstIndex] = sourceBit2;
+          if (sourceBit2) {
             dst[dstIndex] = c1;
             prio[dstIndex] = p1;
           } else {
@@ -163,7 +180,9 @@
           dstIndex++;
           mask >>= 1;
 
-          if (outputData & mask) {
+          const sourceBit3 = outputData & mask ? 1 : 0;
+          if (sourceBits) sourceBits[dstIndex] = sourceBit3;
+          if (sourceBit3) {
             dst[dstIndex] = c1;
             prio[dstIndex] = p1;
           } else {

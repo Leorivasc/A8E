@@ -1,0 +1,63 @@
+; ANTIC mode-9 baseline for the VBXE PF attribute diagnostic.
+; Expected: a uniform normal-width foreground field.
+.ORG $2000
+DMACTL=$D400
+DLISTL=$D402
+DLISTH=$D403
+NMIEN=$D40E
+COLBK=$D01A
+COLPF0=$D016
+START:
+ LDA #0
+ STA NMIEN
+ STA COLBK
+ LDA #$36
+ STA COLPF0
+ ; 480 foreground bytes: 48 rows * 10 bytes in mode 9.
+ LDA #0
+ STA $80
+ LDA #$32
+ STA $81
+ LDA #$FF
+ LDX #1
+ LDY #0
+FILLPAGE:
+ STA ($80),Y
+ INY
+ BNE FILLPAGE
+ INC $81
+ DEX
+ BNE FILLPAGE
+ LDY #0
+FILLTAIL:
+ STA ($80),Y
+ INY
+ CPY #224
+ BNE FILLTAIL
+ ; LMS mode 9 followed by 47 more mode-9 rows, then JVB.
+ LDA #$49
+ STA $3000
+ LDA #0
+ STA $3001
+ LDA #$32
+ STA $3002
+ LDX #46
+ LDA #$09
+FILLDL:
+ STA $3003,X
+ DEX
+ BPL FILLDL
+ LDA #$41
+ STA $3032
+ LDA #0
+ STA $3033
+ LDA #$30
+ STA $3034
+ LDA #0
+ STA DLISTL
+ LDA #$30
+ STA DLISTH
+ LDA #$22
+ STA DMACTL
+LOOP: JMP LOOP
+.RUN START

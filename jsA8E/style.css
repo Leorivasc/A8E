@@ -10,6 +10,18 @@
   --muted: #9db0d3;
   --border: rgba(255, 255, 255, 0.09);
   --accent: #5cc8ff;
+  --accent-rgb: 92, 200, 255;
+  --topbar-start: #1a2336;
+  --topbar-end: #0d1117;
+  --toolbar-start: rgba(25, 34, 52, 0.94);
+  --toolbar-end: rgba(16, 23, 36, 0.94);
+  --toolbar-input: rgba(8, 12, 20, 0.92);
+  --toolbar-group: rgba(8, 12, 20, 0.55);
+  --editor-input-bg: #061323;
+  --editor-bg: #0a1220;
+  --editor-gutter-bg: #08111e;
+  --snapshot-bg: #0f1725;
+  --snapshot-card-bg: rgba(255, 255, 255, 0.02);
 
   /* Semantic state colors */
   --state-ok: #4ade80;
@@ -32,6 +44,271 @@
   --sub-panel-btn-radius: 4px;
   --sub-panel-label: #7a90a8;
   --sub-panel-dim: #4c6880;
+
+  /* Virtual keyboard palette */
+  --keyboard-bed: #202018;
+  --keyboard-bed-hi: #d5d5c8;
+  --keyboard-stripe: #200218;
+  --keyboard-key-top: #2d2d25;
+  --keyboard-key-mid: #282820;
+  --keyboard-legend: #cccccc;
+  --keyboard-legend-dim: #a7a79a;
+  --keyboard-metal: #b0b0b0;
+  --keyboard-metal-hi: #d0d0d0;
+}
+
+html[data-ui-theme="800xl"],
+html[data-ui-theme="xegs"],
+html[data-ui-theme="65xe"],
+html[data-ui-theme="400-800"],
+html[data-ui-theme="st"],
+html[data-ui-theme="2600"] {
+  color-scheme: light;
+}
+
+html[data-ui-theme="800xl"] {
+  --bg: #ffffff;
+  --panel: #f4f4f4;
+  --panel2: #e8e8e8;
+  --text: #555555;
+  --muted: #777777;
+  --border: rgba(0, 0, 0, 0.34);
+  --accent: #b3202a;
+  --accent-rgb: 179, 32, 42;
+  --topbar-start: #ffffff;
+  --topbar-end: #d0d0d0;
+  --toolbar-start: rgba(255, 255, 255, 0.98);
+  --toolbar-end: rgba(232, 232, 232, 0.98);
+  --toolbar-input: #ffffff;
+  --toolbar-group: rgba(58, 58, 58, 0.12);
+  --state-ok: #4f7957;
+  --state-err: #b3202a;
+  --danger: #8f1720;
+  --sub-panel-bg: #f4f4f4;
+  --sub-panel-border: rgba(0, 0, 0, 0.3);
+  --sub-panel-header-bg: #e8e8e8;
+  --sub-panel-toolbar-bg: #dedede;
+  --sub-panel-inner-border: rgba(0, 0, 0, 0.2);
+  --sub-panel-statusbar-bg: #d4d4d4;
+  --sub-panel-btn-idle: #666666;
+  --sub-panel-label: #555555;
+  --sub-panel-dim: #777777;
+  --keyboard-bed: #ffffff;
+  --keyboard-bed-hi: #f4f4f4;
+  --keyboard-stripe: #3a3a3a;
+  --keyboard-key-top: #f5f5f5;
+  --keyboard-key-mid: #d9d9d9;
+  --keyboard-legend: #4f4f4f;
+  --keyboard-legend-dim: #777777;
+  --keyboard-metal: #858585;
+  --keyboard-metal-hi: #d0d0d0;
+}
+
+html[data-ui-theme="xegs"] {
+  --bg: #f0ede4;
+  --panel: #d7d1c8;
+  --panel2: #e5dfd5;
+  --text: #484341;
+  --muted: #706864;
+  --border: rgba(72, 67, 65, 0.24);
+  --accent: #b83b31;
+  --accent-rgb: 184, 59, 49;
+  --topbar-start: #e5dfd5;
+  --topbar-end: #b9b1aa;
+  --toolbar-start: rgba(229, 223, 213, 0.96);
+  --toolbar-end: rgba(185, 177, 170, 0.96);
+  --toolbar-input: rgba(246, 241, 233, 0.96);
+  --toolbar-group: rgba(185, 177, 170, 0.5);
+  --state-ok: #5b8b58;
+  --state-err: #b83b31;
+  --danger: #96302a;
+  --sub-panel-bg: #e5dfd5;
+  --sub-panel-border: rgba(72, 67, 65, 0.22);
+  --sub-panel-header-bg: #d7d1c8;
+  --sub-panel-toolbar-bg: #c7beb5;
+  --sub-panel-inner-border: rgba(72, 67, 65, 0.18);
+  --sub-panel-statusbar-bg: #b9b1aa;
+  --sub-panel-btn-idle: #706864;
+  --sub-panel-label: #625c56;
+  --sub-panel-dim: #817870;
+  --keyboard-bed: #d7d1c8;
+  --keyboard-bed-hi: #e5dfd5;
+  --keyboard-stripe: #b9b1aa;
+  --keyboard-key-top: #ece7df;
+  --keyboard-key-mid: #d6d0c7;
+  --keyboard-legend: #484341;
+  --keyboard-legend-dim: #706864;
+  --keyboard-metal: #aeb3b7;
+  --keyboard-metal-hi: #d9dde0;
+}
+
+html[data-ui-theme="65xe"] {
+  --bg: #d9dadd;
+  --panel: #eef0f1;
+  --panel2: #aeb2b7;
+  --text: #1d2024;
+  --muted: #5e646b;
+  --border: rgba(44, 48, 53, 0.24);
+  --accent: #a33d2d;
+  --accent-rgb: 163, 61, 45;
+  --topbar-start: #f2f3f3;
+  --topbar-end: #aeb2b7;
+  --toolbar-start: rgba(238, 240, 241, 0.96);
+  --toolbar-end: rgba(174, 178, 183, 0.96);
+  --toolbar-input: rgba(249, 250, 250, 0.96);
+  --toolbar-group: rgba(174, 178, 183, 0.5);
+  --state-ok: #467650;
+  --state-err: #a33d2d;
+  --danger: #8f2f26;
+  --sub-panel-bg: #eef0f1;
+  --sub-panel-border: rgba(44, 48, 53, 0.22);
+  --sub-panel-header-bg: #c9cdd1;
+  --sub-panel-toolbar-bg: #b7bbc0;
+  --sub-panel-inner-border: rgba(44, 48, 53, 0.18);
+  --sub-panel-statusbar-bg: #aeb2b7;
+  --sub-panel-btn-idle: #5e646b;
+  --sub-panel-label: #51565b;
+  --sub-panel-dim: #70767d;
+  --keyboard-bed: #aeb2b7;
+  --keyboard-bed-hi: #eef0f1;
+  --keyboard-stripe: #8f9499;
+  --keyboard-key-top: #f0f1f0;
+  --keyboard-key-mid: #d7dadd;
+  --keyboard-legend: #25282b;
+  --keyboard-legend-dim: #62686e;
+  --keyboard-metal: #8f9499;
+  --keyboard-metal-hi: #cbd0d4;
+}
+
+html[data-ui-theme="400-800"] {
+  --bg: #d6c6a5;
+  --panel: #b2a07e;
+  --panel2: #eadfca;
+  --text: #3a3025;
+  --muted: #6f604b;
+  --border: rgba(58, 48, 37, 0.25);
+  --accent: #d47a2c;
+  --accent-rgb: 212, 122, 44;
+  --topbar-start: #efe4cf;
+  --topbar-end: #b2a07e;
+  --toolbar-start: rgba(234, 223, 202, 0.96);
+  --toolbar-end: rgba(178, 160, 126, 0.96);
+  --toolbar-input: rgba(255, 248, 232, 0.96);
+  --toolbar-group: rgba(178, 160, 126, 0.5);
+  --state-ok: #527545;
+  --state-err: #b44232;
+  --danger: #9e3325;
+  --sub-panel-bg: #eadfca;
+  --sub-panel-border: rgba(58, 48, 37, 0.22);
+  --sub-panel-header-bg: #d4c29d;
+  --sub-panel-toolbar-bg: #c2ae87;
+  --sub-panel-inner-border: rgba(58, 48, 37, 0.18);
+  --sub-panel-statusbar-bg: #b2a07e;
+  --sub-panel-btn-idle: #6f604b;
+  --sub-panel-label: #66553f;
+  --sub-panel-dim: #88765a;
+  --keyboard-bed: #3a3025;
+  --keyboard-bed-hi: #eadfca;
+  --keyboard-stripe: #5a402b;
+  --keyboard-key-top: #d8c6a4;
+  --keyboard-key-mid: #a88f68;
+  --keyboard-legend: #3a3025;
+  --keyboard-legend-dim: #6f604b;
+  --keyboard-metal: #a28d6b;
+  --keyboard-metal-hi: #d8c6a4;
+}
+
+html[data-ui-theme="st"] {
+  --bg: #c7bda7;
+  --panel: #a79e8e;
+  --panel2: #e0d8c8;
+  --text: #33383a;
+  --muted: #62605a;
+  --border: rgba(51, 56, 58, 0.24);
+  --accent: #a34632;
+  --accent-rgb: 163, 70, 50;
+  --topbar-start: #eee7d9;
+  --topbar-end: #a79e8e;
+  --toolbar-start: rgba(224, 216, 200, 0.96);
+  --toolbar-end: rgba(167, 158, 142, 0.96);
+  --toolbar-input: rgba(248, 243, 232, 0.96);
+  --toolbar-group: rgba(167, 158, 142, 0.5);
+  --state-ok: #4c7956;
+  --state-err: #a34632;
+  --danger: #8f3025;
+  --sub-panel-bg: #e0d8c8;
+  --sub-panel-border: rgba(51, 56, 58, 0.22);
+  --sub-panel-header-bg: #c7bda7;
+  --sub-panel-toolbar-bg: #b8ad9a;
+  --sub-panel-inner-border: rgba(51, 56, 58, 0.18);
+  --sub-panel-statusbar-bg: #a79e8e;
+  --sub-panel-btn-idle: #62605a;
+  --sub-panel-label: #5a5751;
+  --sub-panel-dim: #777168;
+  --keyboard-bed: #33383a;
+  --keyboard-bed-hi: #e0d8c8;
+  --keyboard-stripe: #5b554c;
+  --keyboard-key-top: #d8d0c0;
+  --keyboard-key-mid: #aba18f;
+  --keyboard-legend: #33383a;
+  --keyboard-legend-dim: #625f57;
+  --keyboard-metal: #96928a;
+  --keyboard-metal-hi: #d1ccc1;
+}
+
+html[data-ui-theme="2600"] {
+  --bg: #6f4428;
+  --panel: #9b673d;
+  --panel2: #4b2d1d;
+  --text: #f5e8c9;
+  --muted: #e0c79e;
+  --border: rgba(245, 232, 201, 0.2);
+  --accent: #d5aa5a;
+  --accent-rgb: 213, 170, 90;
+  --topbar-start: #9b673d;
+  --topbar-end: #4b2d1d;
+  --toolbar-start: rgba(115, 68, 39, 0.96);
+  --toolbar-end: rgba(75, 45, 29, 0.96);
+  --toolbar-input: rgba(23, 19, 17, 0.9);
+  --toolbar-group: rgba(23, 19, 17, 0.45);
+  --state-ok: #9aca6b;
+  --state-err: #e06b4e;
+  --danger: #e06b4e;
+  --sub-panel-bg: #4b2d1d;
+  --sub-panel-border: rgba(245, 232, 201, 0.18);
+  --sub-panel-header-bg: #6f4428;
+  --sub-panel-toolbar-bg: #5a351f;
+  --sub-panel-inner-border: rgba(245, 232, 201, 0.16);
+  --sub-panel-statusbar-bg: #3c2418;
+  --sub-panel-btn-idle: #e0c79e;
+  --sub-panel-label: #d5aa5a;
+  --sub-panel-dim: #b89569;
+  --keyboard-bed: #171311;
+  --keyboard-bed-hi: #9b673d;
+  --keyboard-stripe: #3c2418;
+  --keyboard-key-top: #6f4428;
+  --keyboard-key-mid: #4b2d1d;
+  --keyboard-legend: #f5e8c9;
+  --keyboard-legend-dim: #d5aa5a;
+  --keyboard-metal: #8f765a;
+  --keyboard-metal-hi: #d5aa5a;
+}
+
+html[data-ui-theme="800xl"],
+html[data-ui-theme="xegs"],
+html[data-ui-theme="65xe"],
+html[data-ui-theme="400-800"],
+html[data-ui-theme="st"],
+html[data-ui-theme="2600"] {
+  --editor-input-bg: var(--toolbar-input);
+  --editor-bg: var(--panel2);
+  --editor-gutter-bg: var(--sub-panel-toolbar-bg);
+  --snapshot-bg: var(--panel2);
+  --snapshot-card-bg: var(--panel);
+}
+
+html[data-ui-theme="800xl"] .topbar {
+  background: linear-gradient(180deg, var(--topbar-start) 0%, #f3f3f3 43%, var(--topbar-end) 100%);
 }
 
 html,
@@ -59,7 +336,7 @@ body {
   justify-content: space-between;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, #1a2336, #0d1117);
+  background: linear-gradient(180deg, var(--topbar-start), var(--topbar-end));
   gap: 12px;
   flex-shrink: 0;
   flex-wrap: wrap;
@@ -267,7 +544,7 @@ body {
   padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: linear-gradient(180deg, rgba(25, 34, 52, 0.94), rgba(16, 23, 36, 0.94));
+  background: linear-gradient(180deg, var(--toolbar-start), var(--toolbar-end));
   color: var(--text);
   font-size: var(--fs-sm);
 }
@@ -282,7 +559,7 @@ body {
   min-width: 84px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: rgba(8, 12, 20, 0.92);
+  background: var(--toolbar-input);
   color: var(--text);
   font: inherit;
   padding: 8px 10px;
@@ -314,7 +591,7 @@ body {
   padding: 3px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(8, 12, 20, 0.55);
+  background: var(--toolbar-group);
   flex-shrink: 0;
 }
 
@@ -344,9 +621,9 @@ body {
 
 .layoutSchemeBtn.active {
   color: var(--text);
-  border-color: rgba(92, 200, 255, 0.55);
-  background: rgba(92, 200, 255, 0.16);
-  box-shadow: inset 0 0 0 1px rgba(92, 200, 255, 0.08);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.16);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.08);
 }
 
 .toolbarCollapseBtn {
@@ -396,14 +673,14 @@ button:disabled {
 .primaryIconBtn.pending:disabled {
   opacity: 1;
   color: var(--accent);
-  border-color: rgba(92, 200, 255, 0.65);
-  background: rgba(92, 200, 255, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.65);
+  background: rgba(var(--accent-rgb), 0.12);
   cursor: wait;
 }
 
 button:active:not(:disabled) {
-  border-color: rgba(92, 200, 255, 0.55);
-  background: rgba(92, 200, 255, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .romNotice[hidden] {
@@ -427,7 +704,7 @@ button:active:not(:disabled) {
   position: relative;
   width: min(100%, 500px);
   padding: 24px;
-  border: 1px solid rgba(92, 200, 255, 0.35);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
   border-radius: 12px;
   background: linear-gradient(180deg, #1a2538, #121a29);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
@@ -490,14 +767,14 @@ button:active:not(:disabled) {
   flex: 1 1 180px;
   gap: 8px;
   min-height: 42px;
-  border-color: rgba(92, 200, 255, 0.45);
-  background: rgba(92, 200, 255, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .romNoticeAction:hover:not(:disabled),
 .romNoticeAction:focus-visible {
   border-color: var(--accent);
-  background: rgba(92, 200, 255, 0.2);
+  background: rgba(var(--accent-rgb), 0.2);
 }
 
 .romNoticeHint {
@@ -1148,15 +1425,15 @@ html:-webkit-full-screen .layout {
 }
 
 .atariKeyboard {
-  --bed: #202018;
-  --bed-hi: #d5d5c8;
-  --stripe: #200218;
-  --key-top: #2d2d25;
-  --key-mid: #282820;
-  --legend: #cccccc;
-  --legend-dim: #a7a79a;
-  --metal: #b0b0b0;
-  --metal-hi: #d0d0d0;
+  --bed: var(--keyboard-bed);
+  --bed-hi: var(--keyboard-bed-hi);
+  --stripe: var(--keyboard-stripe);
+  --key-top: var(--keyboard-key-top);
+  --key-mid: var(--keyboard-key-mid);
+  --legend: var(--keyboard-legend);
+  --legend-dim: var(--keyboard-legend-dim);
+  --metal: var(--keyboard-metal);
+  --metal-hi: var(--keyboard-metal-hi);
   --gap: clamp(2px, 0.45vw, 5px);
   --key-h: clamp(29px, calc(3.8vw + 13px), 52px);
   --radius: clamp(12px, 1.9vw, 20px);
@@ -1904,10 +2181,6 @@ canvas.crtEnabled {
   border-color: rgba(255, 255, 255, 0.18);
 }
 
-.fileBtn .status-icon {
-  font-size: 13px;
-}
-
 .fileBtnPrimary span {
   min-height: 44px;
   padding: 0 14px;
@@ -1940,13 +2213,20 @@ canvas.crtEnabled {
   border-color: var(--accent);
 }
 
-.fileBtn .status-icon.fa-circle-check {
-  color: var(--state-ok);
+.rom-status-led {
+  display: inline-block;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  background-image: url("assets/leds.png");
+  background-repeat: no-repeat;
+  background-size: 72.33px 24px;
+  background-position: -53px center;
+  vertical-align: middle;
 }
 
-.fileBtn .status-icon.fa-circle-xmark {
-  color: var(--state-err);
-  opacity: 0.55;
+.rom-status-led.loaded {
+  background-position: -18px center;
 }
 
 
@@ -2589,7 +2869,7 @@ canvas.crtEnabled {
 }
 .disklib-mounted-row {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 18px 18px max-content;
+  grid-template-columns: 42px minmax(0, 1fr) 18px max-content;
   align-items: center;
   column-gap: 7px;
   min-width: 0;
@@ -2609,23 +2889,28 @@ canvas.crtEnabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.disklib-mounted-rw {
-  min-width: 18px;
-  text-align: center;
-  font-weight: 700;
-}
 .disklib-mounted-activity {
+  display: inline-block;
+  width: 18px;
   min-width: 18px;
-  color: transparent;
-  font-weight: 700;
-  text-align: center;
+  height: 18px;
+  background-image: url("assets/leds.png");
+  background-repeat: no-repeat;
+  background-size: 72.33px 24px;
+  background-position: -53px center;
+  vertical-align: middle;
 }
 .disklib-mounted-activity.active {
-  color: #5ee58a;
   animation: disk-activity-blink 180ms steps(1, end) 4;
 }
+.disklib-mounted-activity.disklib-activity-read.active {
+  background-position: -18px center;
+}
 .disklib-mounted-activity.disklib-activity-write.active {
-  color: #f2d35e;
+  background-position: -0.67px center;
+}
+.disklib-mounted-activity.disklib-activity-error.active {
+  background-position: -35.33px center;
 }
 .disklib-mounted-empty {
   color: var(--sub-panel-dim);
@@ -2658,7 +2943,7 @@ canvas.crtEnabled {
 .disklib-cols-header,
 .disklib-row {
   display: grid;
-  grid-template-columns: 28px minmax(150px, 1fr) 32px repeat(4, 42px) 112px;
+  grid-template-columns: 28px minmax(150px, 1fr) repeat(4, 42px) 112px;
   align-items: center;
   column-gap: 4px;
   padding: 3px 6px;
@@ -2668,12 +2953,12 @@ canvas.crtEnabled {
   border-bottom: 1px solid var(--sub-panel-inner-border);
   color: var(--sub-panel-dim);
   font-size: var(--fs-xs);
-  min-width: 544px;
+  min-width: 512px;
   flex-shrink: 0;
 }
 .disklib-list {
   flex: 1 1 auto;
-  min-width: 544px;
+  min-width: 512px;
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 96px;
@@ -2730,17 +3015,6 @@ canvas.crtEnabled {
   text-align: right;
   color: var(--sub-panel-dim);
   font-size: var(--fs-xs);
-}
-.disklib-col-rw {
-  text-align: center;
-}
-.disklib-rw {
-  font-family: sans-serif;
-  font-weight: bold;
-  font-size: 16px;
-}
-.disklib-rw-writable {
-  color: #70d090;
 }
 .disklib-folder-icon {
   color: #e0b84f;
@@ -2960,7 +3234,7 @@ canvas.crtEnabled {
 
 .asm-input,
 .asm-select {
-  background: #061323;
+  background: var(--editor-input-bg);
   border: 1px solid var(--sub-panel-inner-border);
   border-radius: var(--sub-panel-btn-radius);
   color: var(--text);
@@ -2974,7 +3248,7 @@ canvas.crtEnabled {
 .asm-select:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(92, 200, 255, 0.2);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.2);
 }
 
 .asm-source-name {
@@ -3006,7 +3280,7 @@ canvas.crtEnabled {
 .asm-btn:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(92, 200, 255, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 /* Run/Continue use the standard .asm-btn style — the play icon is sufficient visual cue */
@@ -3032,7 +3306,7 @@ canvas.crtEnabled {
   display: block;
   position: relative;
   overflow: hidden;
-  background: #0a1220;
+  background: var(--editor-bg);
 }
 
 .asm-breakpoints {
@@ -3043,7 +3317,7 @@ canvas.crtEnabled {
   width: var(--asm-gutter-width);
   margin: 0;
   border-right: 1px solid rgba(255, 255, 255, 0.07);
-  background: #08111e;
+  background: var(--editor-gutter-bg);
   overflow: hidden;
   padding: 10px 0;
 }
@@ -3127,7 +3401,7 @@ canvas.crtEnabled {
 }
 
 .asm-bp-row:hover {
-  background: rgba(92, 200, 255, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
 }
 
 .asm-bp-row.no-addr {
@@ -3158,7 +3432,7 @@ canvas.crtEnabled {
 /* Hover on an enabled row: accent tint signals "click to set breakpoint" */
 .asm-bp-row.has-addr:hover .asm-bp-dot {
   border-color: var(--accent);
-  background: rgba(92, 200, 255, 0.15);
+  background: rgba(var(--accent-rgb), 0.15);
 }
 
 /* Active: breakpoint is set — filled red circle */
@@ -3237,7 +3511,7 @@ canvas.crtEnabled {
 }
 
 .asm-bp-row.current {
-  background: rgba(92, 200, 255, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .asm-bp-row.current .asm-bp-num {
@@ -3306,7 +3580,7 @@ canvas.crtEnabled {
 
 .asm-errors {
   border-top: 1px solid var(--sub-panel-inner-border);
-  background: #0c1522;
+  background: var(--editor-bg);
   max-height: 128px;
   overflow: auto;
 }
@@ -3497,7 +3771,7 @@ canvas.crtEnabled {
 .snapshot-btn:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(92, 200, 255, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 .snapshot-btn:disabled {
@@ -3518,7 +3792,7 @@ canvas.crtEnabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   padding: 10px;
-  background: #0f1725;
+  background: var(--snapshot-bg);
   flex: 1 1 auto;
   min-height: 0;
   align-content: start;
@@ -3527,7 +3801,7 @@ canvas.crtEnabled {
 .snapshot-card {
   border: 1px solid var(--sub-panel-inner-border);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--snapshot-card-bg);
   padding: 10px 12px;
   min-height: 72px;
 }

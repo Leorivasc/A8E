@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "description": "Provisional VBXE browser baseline generated from the FX 1.26 boot scene.",
+  "reference": "jsA8E/tests/vbxe_browser_backend.test.js",
+  "captures": {
+    "main": {
+      "requestedWorker": false,
+      "worker": false,
+      "rendererBackend": "webgl2",
+      "width": 336,
+      "height": 240,
+      "bytes": 2940,
+      "hash": 100317318
+    },
+    "worker": {
+      "requestedWorker": true,
+      "worker": true,
+      "rendererBackend": "webgl2",
+      "width": 336,
+      "height": 240,
+      "bytes": 2940,
+      "hash": 100317318
+    },
+    "main2d": {
+      "requestedWorker": false,
+      "worker": false,
+      "rendererBackend": "2d",
+      "width": 336,
+      "height": 240,
+      "bytes": 2940,
+      "hash": 100317318
+    },
+    "worker2d": {
+      "requestedWorker": true,
+      "worker": true,
+      "rendererBackend": "2d",
+      "width": 336,
+      "height": 240,
+      "bytes": 2940,
+      "hash": 100317318
+    }
+  }
+}

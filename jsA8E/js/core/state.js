@@ -6,6 +6,8 @@
     const CYCLE_NEVER = cfg.CYCLE_NEVER;
     const CYCLES_PER_LINE = cfg.CYCLES_PER_LINE;
     const IO_INIT_VALUES = cfg.IO_INIT_VALUES;
+    const vbxeMemacAddress = cfg.vbxeMemacAddress;
+    const vbxeRamboAddress = cfg.vbxeRamboAddress;
 
     function makeIoData(video) {
       const potValues = new Uint8Array(8);
@@ -19,6 +21,7 @@
         inDrawLine: false,
         dliCycle: CYCLE_NEVER,
         vbiCycle: CYCLE_NEVER,
+        vbxeBlitterIrqCycle: CYCLE_NEVER,
         serialOutputNeedDataCycle: CYCLE_NEVER,
         serialOutputTransmissionDoneCycle: CYCLE_NEVER,
         serialInputDataReadyCycle: CYCLE_NEVER,
@@ -151,6 +154,19 @@
           pmgEventRegisters: new Uint8Array(64),
           pmgEventValues: new Uint8Array(64),
           pmgEventCycles: new Uint8Array(64),
+          // GTIA colours and PRIOR are shadowed by VBXE as well as P/M
+          // geometry. Keep their writes in scanline order so the VBXE
+          // compositor can consume the same horizontal spans as Altirra.
+          gtiaEventCount: 0,
+          gtiaEventOverflow: false,
+          gtiaInitialRegisters: new Uint8Array(10),
+          gtiaEventRegisters: new Uint8Array(64),
+          gtiaEventValues: new Uint8Array(64),
+          gtiaEventCycles: new Uint8Array(64),
+          vbxeCollisionClearCount: 0,
+          vbxeCollisionClearCycles: new Uint8Array(16),
+          vbxeLine: null,
+          vbxeScanline: -1,
           playerPmgShift: new Uint8Array(4),
           playerPmgState: new Uint8Array(4),
           missilePmgShift: new Uint8Array(4),
@@ -215,6 +231,9 @@
       }
       if (io.dliCycle < beamNext) beamNext = io.dliCycle;
       if (io.vbiCycle < beamNext) beamNext = io.vbiCycle;
+      if (io.vbxeBlitterIrqCycle < masterNext) {
+        masterNext = io.vbxeBlitterIrqCycle;
+      }
 
       if (io.serialOutputTransmissionDoneCycle < masterNext) {
         masterNext = io.serialOutputTransmissionDoneCycle;
@@ -245,11 +264,131 @@
       }
     }
 
-    function installIoHandlers(ctx, ioAccess) {
+    // `onlyIfChanged` is for MEMAC register writes: when they leave the set of
+    // routed windows as it was, nothing needs rebuilding.
+    function installIoHandlers(ctx, ioAccess, onlyIfChanged) {
       if (!ioAccess) throw new Error("A8EState: missing ioAccess");
+      const vbxe = ctx.ioData && ctx.ioData.vbxe;
+      const vbxeActive = !!(vbxe && vbxe.enabled);
+      const expansion = ctx.ioData && ctx.ioData.memoryExpansion;
+      const u1mbWindow = !!(expansion && expansion.ultimate1mb && expansion.cpuWindowEnabled);
+      // MEMAC A covers [base, base + size); MEMAC B always sits at $4000-$7FFF.
+      // Within a window the CPU either sees the VRAM or it does not, so the
+      // CPU-enable bit decides for the whole range.
+      const windows = [];
+      if (vbxeActive && vbxeMemacAddress) {
+        const control = vbxe.memacControl & 0xff;
+        if ((vbxe.memacBankSelect & 0x80) !== 0 && (control & 0x0c) !== 0) {
+          const base = (control & 0xf0) << 8;
+          const end = Math.min(0x10000, base + (0x1000 << (control & 0x03)));
+          const cpu = (control & 0x08) !== 0;
+          // The hardware pages $D000-$D7FF are never claimed; the RAM above
+          // them ($D800-$FFFF, with the OS ROM off) can be a window.
+          if (base < 0xd000) windows.push(base, Math.min(0xd000, end), cpu);
+          if (end > 0xd800) windows.push(Math.max(base, 0xd800), end, cpu);
+        }
+        if ((vbxe.memacBControl & 0xc0) !== 0) {
+          windows.push(0x4000, 0x8000, (vbxe.memacBControl & 0x80) !== 0);
+        }
+      }
+      const rambo = vbxeActive && !!vbxeRamboAddress && vbxe.profile === "fx1.26r";
+      const routeKey = (vbxeActive ? vbxe.page : -1) + ":" + windows.join(",") +
+        ":" + rambo + ":" + u1mbWindow;
+      if (onlyIfChanged && ctx.vbxeRouteKey === routeKey) return;
+      ctx.vbxeRouteKey = routeKey;
+
       for (let i = 0; i < IO_INIT_VALUES.length; i++) {
         CPU.setIo(ctx, IO_INIT_VALUES[i].addr, ioAccess);
       }
+      // MEMAC windows route RAM addresses below $D000 through ioAccess. A
+      // previous mapping may be stale after MEMAC is disabled or moved, so
+      // return those addresses to plain RAM before the active windows are
+      // installed again; otherwise writes fall into ioAccess's write-only
+      // shadow and never reach RAM.
+      // Only the ranges the previous call routed can be stale, so after the
+      // first call scan just those; software such as Mr. Proper rewrites a
+      // MEMAC register around every blit and a full scan was costly.
+      const list = ctx.accessFunctionList;
+      const ramAccess = list[0];
+      const previous = ctx.vbxeRoutedRanges;
+      const previousUniform = ctx.vbxeRoutedUniform;
+      if (!previous) {
+        for (let address = 0; address < 0xd000; address++) {
+          if (list[address] === ioAccess) CPU.setRam(ctx, address, address);
+        }
+      } else {
+        for (let r = 0; r < previous.length; r += 2) {
+          if (onlyIfChanged && previousUniform[r >> 1]) {
+            // Every address was routed by the last call and nothing has
+            // remapped memory since (a map rebuild never takes this path).
+            list.fill(ramAccess, previous[r], previous[r + 1]);
+          } else {
+            for (let address = previous[r]; address < previous[r + 1]; address++) {
+              if (list[address] === ioAccess) CPU.setRam(ctx, address, address);
+            }
+          }
+          if (ctx.vbxeFetchMaskStore) ctx.vbxeFetchMaskStore.fill(0, previous[r], previous[r + 1]);
+        }
+      }
+      // Addresses the CPU reads through a MEMAC window; instruction fetch
+      // needs them too (see stageWindowFetch in cpu.js).
+      let fetchMask = null;
+      const routed = [];
+      const uniform = [];
+      if (vbxeActive) {
+        for (let address = vbxe.page; address < vbxe.page + 0x20; address++) {
+          CPU.setIo(ctx, address, ioAccess);
+        }
+        const configBase = (vbxe.page & 0xff00) | 0x00c0;
+        for (let address = configBase; address < configBase + 0x40; address++) {
+          CPU.setIo(ctx, address, ioAccess);
+        }
+        for (let w = 0; w < windows.length; w += 3) {
+          const start = windows[w];
+          const end = windows[w + 1];
+          routed.push(start, end);
+          if (!windows[w + 2]) {
+            uniform.push(false);
+            continue;
+          }
+          let allRam = true;
+          for (let address = start; address < end; address++) {
+            if (list[address] !== ramAccess) { allRam = false; break; }
+          }
+          if (fetchMask === null) {
+            fetchMask = ctx.vbxeFetchMaskStore ||
+              (ctx.vbxeFetchMaskStore = new Uint8Array(0x10000));
+          }
+          if (allRam && !(u1mbWindow && start < 0x8000 && end > 0x4000)) {
+            list.fill(ioAccess, start, end);
+            fetchMask.fill(1, start, end);
+            uniform.push(true);
+            continue;
+          }
+          uniform.push(false);
+          for (let address = start; address < end; address++) {
+            if (list[address] === ramAccess &&
+                !(u1mbWindow && address >= 0x4000 && address < 0x8000)) {
+              CPU.setIo(ctx, address, ioAccess);
+              fetchMask[address] = 1;
+            }
+          }
+        }
+        if (rambo) {
+          routed.push(0x4000, 0x8000);
+          uniform.push(false);
+          for (let address = 0x4000; address < 0x8000; address++) {
+            if (list[address] === ramAccess) CPU.setIo(ctx, address, ioAccess);
+          }
+        }
+      }
+      ctx.vbxeRoutedRanges = routed;
+      ctx.vbxeRoutedUniform = uniform;
+      ctx.vbxeFetchMask = fetchMask;
+      ctx.vbxeFetchRead = fetchMask === null ? null : function (fetchCtx, address) {
+        const local = vbxeMemacAddress(vbxe, address, false);
+        return local >= 0 ? vbxe.vram[local] : fetchCtx.ram[address];
+      };
     }
 
     return {

@@ -92,6 +92,7 @@ function makeCtx() {
       videoOut: {
         pixels: new Uint8Array(456),
         priority: new Uint16Array(456),
+        vbxeCollisionPriority: new Uint16Array(456),
       },
     },
   };
@@ -314,6 +315,35 @@ function testMidLinePriorWriteAffectsOnlyLaterPixels() {
   assert.equal(ctx.ioData.videoOut.pixels[100], 0x66);
 }
 
+function testVbxeCollisionContributorsExcludeHiddenPlayer() {
+  const api = loadGtiaApi();
+  const hidden = makeCtx();
+
+  hidden.sram[0xd01b] = 0x04; // PF0 has priority over P0.
+  hidden.sram[0xd00d] = 0xff;
+  hidden.sram[0xd000] = 0x30;
+  hidden.sram[0xd008] = 0x00;
+  hidden.sram[0xd012] = 0x66;
+  hidden.ioData.videoOut.priority[96] = 0x01;
+  hidden.ioData.videoOut.priority[97] = 0x01;
+  api.drawPlayerMissilesClock(hidden, 96);
+
+  assert.equal(hidden.ioData.videoOut.priority[96], 0x11);
+  assert.equal(hidden.ioData.videoOut.vbxeCollisionPriority[96], 0x8001);
+
+  const visible = makeCtx();
+  visible.sram[0xd01b] = 0x00;
+  visible.sram[0xd00d] = 0xff;
+  visible.sram[0xd000] = 0x30;
+  visible.sram[0xd008] = 0x00;
+  visible.sram[0xd012] = 0x66;
+  visible.ioData.videoOut.priority[96] = 0x01;
+  visible.ioData.videoOut.priority[97] = 0x01;
+  api.drawPlayerMissilesClock(visible, 96);
+
+  assert.equal(visible.ioData.videoOut.vbxeCollisionPriority[96], 0x8010);
+}
+
 function testPlayerCollisionSetsBothPlayerLatches() {
   const api = loadGtiaApi();
   const ctx = makeCtx();
@@ -431,6 +461,7 @@ testHposZeroStillRenders();
 testMidImageHposWriteKeepsOriginalStart();
 testOverlappingRightwardHposRetriggerMergesShiftRegister();
 testMidLinePriorWriteAffectsOnlyLaterPixels();
+testVbxeCollisionContributorsExcludeHiddenPlayer();
 testPlayerCollisionSetsBothPlayerLatches();
 testHpos30MapsToNormalPlayfieldLeftEdge();
 testHiddenSpanReplaysMidLineHposHistory();

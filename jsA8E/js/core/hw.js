@@ -269,10 +269,12 @@
       { addr: IO_COLPF2, write: 0x00, read: 0x0f },
       { addr: IO_COLPF3, write: 0x00, read: 0x0f },
       { addr: IO_COLBK, write: 0x00, read: 0x0f },
-      { addr: IO_PRIOR, write: 0x00, read: 0xff },
-      { addr: IO_VDELAY, write: 0x00, read: 0xff },
-      { addr: IO_GRACTL, write: 0x00, read: 0xff },
-      { addr: IO_HITCLR, write: 0x00, read: 0xff },
+      // AHRM 6.1: unassigned GTIA reads in $D015-$D01E return $0F; no data bit
+      // floats. Popeye probes $D01C/$D01D and branches on bit 7.
+      { addr: IO_PRIOR, write: 0x00, read: 0x0f },
+      { addr: IO_VDELAY, write: 0x00, read: 0x0f },
+      { addr: IO_GRACTL, write: 0x00, read: 0x0f },
+      { addr: IO_HITCLR, write: 0x00, read: 0x0f },
       { addr: IO_CONSOL, write: 0x00, read: 0x07 },
 
       // POKEY

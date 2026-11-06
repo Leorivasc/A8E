@@ -158,6 +158,7 @@ static void AtariIoAdvanceScanline(_6502_Context_t *pContext)
 	if(pIoData->tVideoData.lCurrentDisplayLine >= pIoData->lLinesPerScreen)
 	{
 		pIoData->tVideoData.lCurrentDisplayLine = 0;
+		Vbxe_VerticalSync(pIoData->pVbxe);
 		pIoData->lNextDisplayListLine = 8;
 		pIoData->cCurrentDisplayListCommand = 0;
 		pIoData->cModeLineRowCounter = 0;
@@ -1165,6 +1166,20 @@ static u8 AtariIo_PlayfieldDmaAllowedAtCycle(_6502_Context_t *pContext, u32 lCyc
 static u8 AtariIo_ReadAnticMemory(_6502_Context_t *pContext, u16 sAddress)
 {
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	if(pIoData->pVbxe)
+	{
+		/* MEMAC lets ANTIC read VRAM through its window, except where an
+		 * Ultimate1MB owns the extended-memory window. */
+		s32 lVram = Vbxe_MemacAddress(pIoData->pVbxe, sAddress, 1);
+		if(lVram >= 0 &&
+		   !(pIoData->eMemoryExpansion == ATARI_MEMORY_ULTIMATE1MB &&
+			 sAddress >= 0x4000 && sAddress < 0x8000 && pIoData->bAnticExtendedWindow))
+		{
+			if(pIoData->pVbxe->lMemacSlots < VBXE_LOCAL_BUS_SLOTS)
+				pIoData->pVbxe->lMemacSlots++;
+			return pIoData->pVbxe->pVram[lVram];
+		}
+	}
 	if(pIoData->eMemoryExpansion != ATARI_MEMORY_NONE &&
 	   pIoData->bAnticExtendedWindow && sAddress >= 0x4000 && sAddress < 0x8000)
 	{
@@ -1446,7 +1461,13 @@ static void AtariIo_DrawClockAction(_6502_Context_t *pContext)
 	 * scanline only through cycle 5, so the exit-line DLI decision is
 	 * evaluated once the beam reaches cycle 6.
 	 */
+	/* Mode lines are not processed in vertical blank, where the row counter no
+	 * longer advances and would keep matching VSCROL, raising a DLI on every
+	 * line after scan line 247.
+	 */
 	if(lCycleInLine == 6 && pIoData->bModeLineExitDli &&
+	   pIoData->tVideoData.lCurrentDisplayLine >= 8 &&
+	   pIoData->tVideoData.lCurrentDisplayLine <= 247 &&
 	   pIoData->cModeLineRowCounter == AtariIo_CurrentVscrolRegister(pContext))
 	{
 		pIoData->llDliCycle = llLineStartCycle + DLI_HORIZONTAL_OFFSET;
@@ -1707,10 +1728,11 @@ static IoInitValue_t m_aIoInitValues[] =
 		{IO_COLPF2, 0x00, 0x0f, Gtia_COLPF2},
 		{IO_COLPF3, 0x00, 0x0f, Gtia_COLPF3},
 		{IO_COLBK, 0x00, 0x0f, Gtia_COLBK},
-		{IO_PRIOR, 0x00, 0xff, Gtia_PRIOR},
-		{IO_VDELAY, 0x00, 0xff, Gtia_VDELAY},
-		{IO_GRACTL, 0x00, 0xff, Gtia_GRACTL},
-		{IO_HITCLR, 0x00, 0xff, Gtia_HITCLR},
+		/* AHRM 6.1: unassigned GTIA reads in $D015-$D01E return $0F. */
+		{IO_PRIOR, 0x00, 0x0f, Gtia_PRIOR},
+		{IO_VDELAY, 0x00, 0x0f, Gtia_VDELAY},
+		{IO_GRACTL, 0x00, 0x0f, Gtia_GRACTL},
+		{IO_HITCLR, 0x00, 0x0f, Gtia_HITCLR},
 		{IO_CONSOL, 0x00, 0x07, Gtia_CONSOL},
 
 		{IO_AUDF1_POT0, 0x00, 0xff, Pokey_AUDF1_POT0},
@@ -3477,7 +3499,7 @@ void AtariIoFetchLine(_6502_Context_t *pContext)
 			printf(" $%04X:", pIoData->sDisplayListAddress);
 #endif
 			// Fetch new display list command
-			pIoData->cCurrentDisplayListCommand = RAM[pIoData->sDisplayListAddress];
+			pIoData->cCurrentDisplayListCommand = AtariIo_ReadAnticMemory(pContext, pIoData->sDisplayListAddress);
 			FIXED_ADD(pIoData->sDisplayListAddress, 0x03ff, 1);
 
 			// LMS (bit 6) or JUMP (instruction 01) schedule 2 more DMA steals
@@ -3570,8 +3592,8 @@ void AtariIoFetchLine(_6502_Context_t *pContext)
 			if((pIoData->cCurrentDisplayListCommand & 0x0f) == 0x01)
 			{
 				pIoData->sDisplayListAddress =
-					RAM[pIoData->sDisplayListAddress] |
-					(RAM[pIoData->sDisplayListAddress + 1] << 8);
+					AtariIo_ReadAnticMemory(pContext, pIoData->sDisplayListAddress) |
+					(AtariIo_ReadAnticMemory(pContext, (u16)(pIoData->sDisplayListAddress + 1)) << 8);
 			}
 
 			// Wait for VBL?
@@ -3583,9 +3605,9 @@ void AtariIoFetchLine(_6502_Context_t *pContext)
 			// Fetch new display memory address
 			if((pIoData->cCurrentDisplayListCommand & 0x4f) >= 0x42)
 			{
-				pIoData->sDisplayMemoryAddress = RAM[pIoData->sDisplayListAddress];
+				pIoData->sDisplayMemoryAddress = AtariIo_ReadAnticMemory(pContext, pIoData->sDisplayListAddress);
 				FIXED_ADD(pIoData->sDisplayListAddress, 0x03ff, 1);
-				pIoData->sDisplayMemoryAddress |= RAM[pIoData->sDisplayListAddress] << 8;
+				pIoData->sDisplayMemoryAddress |= AtariIo_ReadAnticMemory(pContext, pIoData->sDisplayListAddress) << 8;
 				FIXED_ADD(pIoData->sDisplayListAddress, 0x03ff, 1);
 			}
 
@@ -4560,6 +4582,58 @@ static u16 AtariIo_DrawMissileSpan(
 	return cCollision;
 }
 
+/* True when a player or missile with graphics data starts inside
+ * [lFrom, lTo).  Conservative: it ignores the two-pixel stepping of the draw
+ * loop, so it may report a position the loop never lands on.
+ */
+static u8 AtariIo_PmgMayReloadInSpan(_6502_Context_t *pContext, u32 lFrom, u32 lTo)
+{
+	u32 lHpos;
+	u8 cMissiles = SRAM[IO_GRAFM_TRIG1];
+
+	if(SRAM[IO_GRAFP3_TRIG0])
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSP3_M3PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(SRAM[IO_GRAFP2_P3PL])
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSP2_M2PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(SRAM[IO_GRAFP1_P2PL])
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSP1_M1PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(SRAM[IO_GRAFP0_P1PL])
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSP0_M0PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(cMissiles & 0xc0)
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSM3_P3PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(cMissiles & 0x30)
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSM2_P2PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(cMissiles & 0x0c)
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSM1_P1PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	if(cMissiles & 0x03)
+	{
+		lHpos = AtariIo_PmgStartX(SRAM[IO_HPOSM0_P0PF]);
+		if(lHpos >= lFrom && lHpos < lTo) return 1;
+	}
+	return 0;
+}
+
 static void AtariIo_DrawPlayerMissilesClock(_6502_Context_t *pContext)
 {
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
@@ -4600,6 +4674,26 @@ static void AtariIo_DrawPlayerMissilesClock(_6502_Context_t *pContext)
 
 	lSpanEndX = MIN(lSpanStartX + 4, PIXELS_PER_LINE);
 	lVisibleSpanStartX = lSpanStartX;
+
+	/* Nothing to draw: no shift register holds bits, nothing can load in this
+	 * span, and no catch-up of earlier spans is pending.  The per-pixel loop
+	 * and the collision merge would change nothing, and this runs for every
+	 * color clock of every line even with no player/missile in use.
+	 */
+	if(!pIoData->tDrawLineData.cPmgFirstVisibleSpan &&
+	   (pIoData->tDrawLineData.aPlayerPmgShift[0] |
+	    pIoData->tDrawLineData.aPlayerPmgShift[1] |
+	    pIoData->tDrawLineData.aPlayerPmgShift[2] |
+	    pIoData->tDrawLineData.aPlayerPmgShift[3] |
+	    pIoData->tDrawLineData.aMissilePmgShift[0] |
+	    pIoData->tDrawLineData.aMissilePmgShift[1] |
+	    pIoData->tDrawLineData.aMissilePmgShift[2] |
+	    pIoData->tDrawLineData.aMissilePmgShift[3]) == 0 &&
+	   !AtariIo_PmgMayReloadInSpan(pContext, lVisibleSpanStartX, lSpanEndX))
+	{
+		return;
+	}
+
 	pLineDestination =
 		(u8 *)pIoData->tVideoData.pSdlAtariSurface->pixels +
 		lDisplayLine * PIXELS_PER_LINE;
@@ -5506,6 +5600,39 @@ void AtariIoDrawPlayerMissiles(_6502_Context_t *pContext)
 	}
 }
 
+static void AtariIo_ApplyVbxeOverlay(
+	const IoData_t *pIoData,
+	SDL_Surface *pDestination,
+	const SDL_Rect *pRect)
+{
+	const SDL_PixelFormat *pFormat = pDestination->format;
+	u8 bDirect;
+	int y;
+
+	if(pIoData->pVbxe == NULL || pFormat->BytesPerPixel != 4) return;
+	bDirect = pFormat->Rmask == 0x00ff0000u && pFormat->Gmask == 0x0000ff00u &&
+		pFormat->Bmask == 0x000000ffu;
+	for(y = 0; y < pDestination->h; y++)
+	{
+		const uint32_t *pOverlay = Vbxe_OverlayLine(pIoData->pVbxe, (u32)(pRect->y + y));
+		uint32_t *pRow = (uint32_t *)((u8 *)pDestination->pixels + (size_t)y * pDestination->pitch);
+		int x;
+
+		if(pOverlay == NULL) continue;
+		for(x = 0; x < pDestination->w; x++)
+		{
+			int sx = pRect->x + x;
+			uint32_t lArgb;
+
+			if(sx < 0 || sx >= PIXELS_PER_LINE) continue;
+			lArgb = pOverlay[sx];
+			if(lArgb == 0) continue;
+			pRow[x] = bDirect ? lArgb :
+				SDL_MapRGB(pFormat, (u8)(lArgb >> 16), (u8)(lArgb >> 8), (u8)lArgb);
+		}
+	}
+}
+
 void AtariIoDrawScreen(
 	_6502_Context_t *pContext,
 	SDL_Surface *pSdlScreenSurface,
@@ -5525,6 +5652,7 @@ void AtariIoDrawScreen(
 	if(pSdlScreenSurface->w == (int)lScreenWidth && pSdlScreenSurface->h == (int)lScreenHeight)
 	{
 		SDL_BlitSurface(pIoData->tVideoData.pSdlAtariSurface, &tRect, pSdlScreenSurface, NULL);
+		AtariIo_ApplyVbxeOverlay(pIoData, pSdlScreenSurface, &tRect);
 		return;
 	}
 
@@ -5586,6 +5714,7 @@ void AtariIoDrawScreen(
 		}
 
 		SDL_BlitSurface(pIoData->tVideoData.pSdlAtariSurface, &tRect, pViewportSurface, NULL);
+		AtariIo_ApplyVbxeOverlay(pIoData, pViewportSurface, &tRect);
 
 		SDL_BlitScaled(pViewportSurface, NULL, pSdlScreenSurface, NULL);
 	}
@@ -5632,6 +5761,9 @@ void AtariIoCycleTimedEventUpdate(_6502_Context_t *pContext)
 	pContext->llIoMasterTimedEventCycle =
 		MIN(pIoData->llPokeyTimerResetCycle, pContext->llIoMasterTimedEventCycle);
 
+	pContext->llIoMasterTimedEventCycle =
+		MIN(pIoData->llVbxeIrqCycle, pContext->llIoMasterTimedEventCycle);
+
 	pContext->llIoCycleTimedEventCycle = pContext->llIoMasterTimedEventCycle;
 }
 
@@ -5646,6 +5778,16 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 	if(llMasterCycle >= pIoData->llPokeyTimerResetCycle)
 	{
 		Pokey_ApplyTimerReset(pContext);
+	}
+
+	if(llMasterCycle >= pIoData->llVbxeIrqCycle)
+	{
+		pIoData->llVbxeIrqCycle = CYCLE_NEVER;
+		if(Vbxe_RaiseScheduledIrq(pIoData->pVbxe))
+		{
+			Pia_ReconcileIrq(pContext);
+		}
+		AtariIoCycleTimedEventUpdate(pContext);
 	}
 
 	if(!pIoData->bInDrawLine &&
@@ -5670,6 +5812,34 @@ static void AtariIo_CycleTimedEvent(_6502_Context_t *pContext)
 		AtariIoCycleTimedEventUpdate(pContext);
 
 		AtariIoDrawLine(pContext);
+		if(pIoData->pVbxe)
+		{
+			u32 lLine = pIoData->tVideoData.lCurrentDisplayLine;
+
+			if(lLine >= FIRST_VISIBLE_LINE && lLine <= LAST_VISIBLE_LINE)
+			{
+				/* VBXE overlay, attribute map and playfield palettes are
+				 * composed over the line ANTIC/GTIA just drew. */
+				Vbxe_ComposeLine(pIoData->pVbxe, lLine,
+					(const u8 *)pIoData->tVideoData.pSdlAtariSurface->pixels +
+						lLine * PIXELS_PER_LINE,
+					pIoData->tVideoData.pPriorityData + lLine * PIXELS_PER_LINE,
+					pIoData->cCurrentDisplayListCommand & 0x0f,
+					SRAM[IO_COLPF3],
+					(u8)(SRAM[IO_PRIOR] >> 6));
+			}
+			/* AHRM 12.4: the blitter consumes the local-bus residue of the
+			 * scanline; a completion inside it raises the IRQ at the
+			 * matching CPU cycle. */
+			s32 lResidual = Vbxe_EndOfLine(pIoData->pVbxe);
+			if(lResidual >= 0)
+			{
+				pIoData->llVbxeIrqCycle = pIoData->llDisplayListFetchCycle +
+					CYCLES_PER_LINE - (u64)(lResidual >> 3);
+				AtariIoCycleTimedEventUpdate(pContext);
+			}
+			Pia_ReconcileIrq(pContext);
+		}
 		AtariIoEvaluateModeLineEnd(pContext);
 		pIoData->cPmgPhantomMissileDmaPending =
 			((SRAM[IO_DMACTL] & 0x2c) == 0x20) &&
@@ -6098,6 +6268,7 @@ void AtariIoOpenWithMemory(
 	pIoData->llTimer2Cycle = CYCLE_NEVER;
 	pIoData->llTimer4Cycle = CYCLE_NEVER;
 	pIoData->llPokeyTimerResetCycle = CYCLE_NEVER;
+	pIoData->llVbxeIrqCycle = CYCLE_NEVER;
 	pIoData->llPokeySlowClockOriginCycle = 0;
 	pIoData->cSerialOutputClockHigh = 0;
 	pIoData->bSerialOutputBytePending = 0;
@@ -6391,9 +6562,62 @@ u8 AtariIoGetDiskActivity(
 	return pIoData->abDiskActivity[lDrive];
 }
 
+void AtariIoEnableVbxe(_6502_Context_t *pContext, VbxeProfile_t eProfile, u16 sPage)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u32 lIndex;
+
+	if(pIoData->pVbxe)
+	{
+		Vbxe_Free(pIoData->pVbxe);
+		pIoData->pVbxe = NULL;
+	}
+	pIoData->pVbxe = Vbxe_Create(eProfile, sPage);
+	if(pIoData->pVbxe == NULL) return;
+	/* AHRM 12.4: power-up loads palette 0 from the GTIA palette; the other
+	 * three palettes stay clear until software writes them. */
+	for(lIndex = 0; lIndex < 256; lIndex++)
+	{
+		pIoData->pVbxe->aPalette[lIndex * 3u + 0u] = m_aAtariColors[lIndex].r;
+		pIoData->pVbxe->aPalette[lIndex * 3u + 1u] = m_aAtariColors[lIndex].g;
+		pIoData->pVbxe->aPalette[lIndex * 3u + 2u] = m_aAtariColors[lIndex].b;
+	}
+	Vbxe_Attach(pContext);
+}
+
+/* Altirra runs the rest of the current scanline's blitter budget as soon as
+ * BLITTER_START is written, so a program that polls the collision code right
+ * after starting a blit already sees the rows completed in that slice. */
+void AtariIoVbxeBlitterStarted(_6502_Context_t *pContext)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u64 llWriteCycle;
+	u32 lLineCycle;
+	s32 lResidual;
+
+	llWriteCycle = pIoData->llCycle +
+		(u64)(pContext->cCurrentInstructionCycles > 0
+			? pContext->cCurrentInstructionCycles - 1
+			: 0);
+	lLineCycle = llWriteCycle > pIoData->llDisplayListFetchCycle
+		? (u32)(llWriteCycle - pIoData->llDisplayListFetchCycle) : 0u;
+	if(lLineCycle > CYCLES_PER_LINE) lLineCycle = CYCLES_PER_LINE;
+	/* Eight local-bus slots per CPU cycle remain in this scanline. */
+	lResidual = Vbxe_StartBlitterMidLine(pIoData->pVbxe, (CYCLES_PER_LINE - lLineCycle) * 8u);
+	if(lResidual >= 0)
+	{
+		pIoData->llVbxeIrqCycle = pIoData->llDisplayListFetchCycle +
+			CYCLES_PER_LINE - (u64)(lResidual >> 3);
+		AtariIoCycleTimedEventUpdate(pContext);
+	}
+}
+
 void AtariIoClose(_6502_Context_t *pContext)
 {
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+
+	Vbxe_Free(pIoData->pVbxe);
+	pIoData->pVbxe = NULL;
 
 	Pokey_Close(pContext);
 

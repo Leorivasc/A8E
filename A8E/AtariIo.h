@@ -16,6 +16,7 @@
 #include <SDL2/SDL.h>
 
 #include "6502.h"
+#include "Vbxe.h"
 
 /********************************************************************
 *
@@ -166,6 +167,10 @@ typedef struct
 	u64 llTimer2Cycle;
 	u64 llTimer4Cycle;
 	u64 llPokeyTimerResetCycle;
+	/* VBXE: optional device (NULL when absent) and the cycle at which a
+	 * blitter completion inside the current line raises its IRQ. */
+	Vbxe_t *pVbxe;
+	u64 llVbxeIrqCycle;
 	u64 llPokeySlowClockOriginCycle;
 	u8 cSerialOutputClockHigh;
 	u8 bSerialOutputBytePending;
@@ -298,6 +303,12 @@ void AtariIoOpenWithMemory(
 	AtariVideoStandard_t eVideoStandard,
 	AtariMemoryExpansion_t eMemoryExpansion);
 void AtariIoClose(_6502_Context_t *pContext);
+
+/* Adds a VBXE device (call once after AtariIoOpen*). Stage 1 of the native
+ * VBXE port: registers, VRAM, MEMAC and blitter; no video output yet. */
+void AtariIoEnableVbxe(_6502_Context_t *pContext, VbxeProfile_t eProfile, u16 sPage);
+/* Called by the VBXE register handler after BLITTER_START begins a blit. */
+void AtariIoVbxeBlitterStarted(_6502_Context_t *pContext);
 
 void AtariIoCycleTimedEventUpdate(_6502_Context_t *pContext);
 void AtariIoStatus(_6502_Context_t *pContext);

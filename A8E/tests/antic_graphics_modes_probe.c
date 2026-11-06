@@ -814,7 +814,7 @@ static int TestPmgModeZeroPlayfieldMix(void)
 	for(multi = 0; multi < 2; multi++)
 	{
 		u8 *pPixels = (u8 *)pIoData->tVideoData.pSdlAtariSurface->pixels + 8 * PIXELS_PER_LINE;
-		u8 *pPriority = pIoData->tVideoData.pPriorityData + 8 * PIXELS_PER_LINE;
+		u16 *pPriority = pIoData->tVideoData.pPriorityData + 8 * PIXELS_PER_LINE;
 		ProbeMachine_ResetVideo(&tMachine);
 		pIoData->bInDrawLine = 1;
 		pIoData->cCurrentDisplayListCommand = special ? 2 : 4;

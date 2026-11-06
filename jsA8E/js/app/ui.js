@@ -53,6 +53,41 @@
     return null;
   }
 
+  function normalizeVbxePreference(value) {
+    if (value && typeof value === "object") {
+      if (value.enabled === false) return "off";
+      const profile = String(value.profile || "").trim().toLowerCase();
+      const normalized = profile === "fx1.20" || profile === "fx120" ? "fx1.20" :
+        profile === "fx1.24" || profile === "fx124" ? "fx1.24" :
+          profile === "fx1.26" || profile === "fx126" ? "fx1.26" :
+            profile === "fx1.26r" || profile === "fx126r" || profile === "r" ? "fx1.26r" :
+            value.enabled === true ? "fx1.26" : "off";
+      if (normalized === "off") return "off";
+      return normalized + ((value.page | 0) === 0xd740 ? "-d700" : "-d600");
+    }
+    const text = String(value === undefined || value === null ? "" : value)
+      .trim()
+      .toLowerCase();
+    const page = text.endsWith("-d700") || text === "d700" ? "-d700" : "-d600";
+    const profile = text.replace(/-d[67]00$/, "");
+    if (profile === "fx1.20" || profile === "fx120") return "fx1.20" + page;
+    if (profile === "fx1.24" || profile === "fx124") return "fx1.24" + page;
+    if (profile === "fx1.26r" || profile === "fx126r" || profile === "r") return "fx1.26r" + page;
+    if (profile === "fx1.26" || profile === "fx126" || text === "d600" || text === "d700")
+      return "fx1.26" + page;
+    return "off";
+  }
+
+  function vbxeConfigForPreference(value) {
+    const preference = normalizeVbxePreference(value);
+    if (preference === "off") return { enabled: false, profile: "off", page: 0xd640 };
+    return {
+      enabled: true,
+      profile: preference.slice(0, 6),
+      page: preference.endsWith("-d700") ? 0xd740 : 0xd640,
+    };
+  }
+
   function resolveVideoStandardPreference() {
     const boot =
       window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
@@ -110,6 +145,73 @@
     return normalized;
   }
 
+  const UI_THEME_STORAGE_KEY = "a8e_ui_theme";
+  const UI_THEMES = Object.freeze({
+    classic: "classic",
+    "800xl": "800xl",
+    xegs: "xegs",
+    "65xe": "65xe",
+    "400-800": "400-800",
+    st: "st",
+    "2600": "2600",
+  });
+
+  function normalizeUiTheme(value) {
+    const text = String(value === undefined || value === null ? "" : value)
+      .trim()
+      .toLowerCase();
+    return Object.prototype.hasOwnProperty.call(UI_THEMES, text)
+      ? text
+      : null;
+  }
+
+  function resolveUiThemePreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    const bootTheme = boot ? normalizeUiTheme(boot.uiTheme) : null;
+    if (bootTheme) return bootTheme;
+
+    try {
+      if (window.localStorage) {
+        const stored = normalizeUiTheme(
+          window.localStorage.getItem(UI_THEME_STORAGE_KEY),
+        );
+        if (stored) return stored;
+      }
+    } catch {
+      // ignore storage failures
+    }
+
+    return "classic";
+  }
+
+  function applyUiTheme(value) {
+    const normalized = normalizeUiTheme(value) || "classic";
+    if (document.documentElement) {
+      document.documentElement.dataset.uiTheme = normalized;
+    }
+    return normalized;
+  }
+
+  function persistUiThemePreference(value) {
+    const normalized = applyUiTheme(value);
+    try {
+      if (window.localStorage) {
+        window.localStorage.setItem(UI_THEME_STORAGE_KEY, normalized);
+      }
+    } catch {
+      // ignore storage failures
+    }
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : {};
+    window.A8E_BOOT_OPTIONS = Object.assign({}, boot, { uiTheme: normalized });
+    return normalized;
+  }
+
   function resolveMemoryExpansionPreference() {
     const boot =
       window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
@@ -163,6 +265,53 @@
         : {};
     window.A8E_BOOT_OPTIONS = Object.assign({}, boot, {
       memoryExpansion: normalized,
+    });
+    return normalized;
+  }
+
+  function resolveVbxePreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    if (boot && boot.vbxe !== undefined) return normalizeVbxePreference(boot.vbxe);
+    try {
+      if (window.localStorage) {
+        const stored = window.localStorage.getItem("a8e_vbxe");
+        if (stored !== null) return normalizeVbxePreference(stored);
+      }
+    } catch {
+      // ignore storage failures
+    }
+    if (
+      window.location &&
+      typeof window.location.search === "string" &&
+      typeof window.URLSearchParams === "function"
+    ) {
+      try {
+        const params = new window.URLSearchParams(window.location.search);
+        const query = params.get("a8e_vbxe") || params.get("vbxe");
+        if (query !== null) return normalizeVbxePreference(query);
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+    return "off";
+  }
+
+  function persistVbxePreference(value) {
+    const normalized = normalizeVbxePreference(value);
+    try {
+      if (window.localStorage) window.localStorage.setItem("a8e_vbxe", normalized);
+    } catch {
+      // ignore storage failures
+    }
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : {};
+    window.A8E_BOOT_OPTIONS = Object.assign({}, boot, {
+      vbxe: vbxeConfigForPreference(normalized),
     });
     return normalized;
   }
@@ -286,6 +435,20 @@
     return null;
   }
 
+  function resolveRendererPreference() {
+    const boot =
+      window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
+        ? window.A8E_BOOT_OPTIONS
+        : null;
+    const raw = boot && boot.renderer !== undefined
+      ? boot.renderer
+      : (window.location && typeof window.location.search === "string" &&
+        typeof window.URLSearchParams === "function"
+        ? new window.URLSearchParams(window.location.search).get("a8e_renderer")
+        : null);
+    return String(raw || "").trim().toLowerCase() === "2d" ? "2d" : "auto";
+  }
+
   function resolvePokeyTracePreference() {
     const boot =
       window.A8E_BOOT_OPTIONS && typeof window.A8E_BOOT_OPTIONS === "object"
@@ -326,6 +489,7 @@
     const nativeScreenW = canvas.width | 0;
     const nativeScreenH = canvas.height | 0;
     const workerPreference = resolveWorkerPreference();
+    const rendererPreference = resolveRendererPreference();
     const pokeyTracePreference = resolvePokeyTracePreference();
     let crtEnabled = true;
     try {
@@ -336,9 +500,13 @@
     const videoStandardPreference = persistVideoStandardPreference(
       resolveVideoStandardPreference(),
     );
+    const uiThemePreference = persistUiThemePreference(
+      resolveUiThemePreference(),
+    );
     const memoryExpansionPreference = persistMemoryExpansionPreference(
       resolveMemoryExpansionPreference(),
     );
+    const vbxePreference = persistVbxePreference(resolveVbxePreference());
     const layoutSchemePreference = persistLayoutSchemePreference(
       resolveLayoutSchemePreference(),
     );
@@ -366,8 +534,7 @@
     let romNoticeDismissed = false;
     let primaryDriveQueue = Promise.resolve();
     let standbyXexPromise = null;
-    const useWorkerApp =
-      window.A8EApp &&
+    const useWorkerApp = window.A8EApp &&
       ((typeof window.A8EApp.shouldUseWorker === "function" &&
         window.A8EApp.shouldUseWorker({
           worker: workerPreference,
@@ -377,7 +544,7 @@
           workerPreference !== false &&
           window.A8EApp.supportsWorker()));
     let gl = null;
-    if (!useWorkerApp) {
+    if (!useWorkerApp && rendererPreference !== "2d") {
       try {
         gl =
           canvas.getContext("webgl2", {
@@ -618,7 +785,7 @@
         false,
       );
     } else {
-      canvas.classList.remove("crtEnabled");
+      canvas.classList.add("crtEnabled");
       ctx2d = canvas.getContext("2d", { alpha: false });
     }
 
@@ -673,6 +840,8 @@
     const btnSnapshots = document.getElementById("btnSnapshots");
     const videoStandardSelect = document.getElementById("videoStandardSelect");
     const memoryExpansionSelect = document.getElementById("memoryExpansionSelect");
+    const vbxeSelect = document.getElementById("vbxeSelect");
+    const uiThemeSelect = document.getElementById("uiThemeSelect");
     const layoutSchemeButtons = Array.from(
       document.querySelectorAll("[data-layout-scheme]"),
     );
@@ -718,6 +887,16 @@
           : memoryExpansionPreference,
       ) || "130xe-128k";
       if (memoryExpansionSelect.value !== next) memoryExpansionSelect.value = next;
+    }
+
+    function syncVbxeUi() {
+      if (!vbxeSelect) return;
+      const next = normalizeVbxePreference(
+        app && typeof app.getVbxeConfig === "function"
+          ? app.getVbxeConfig()
+          : vbxePreference,
+      );
+      if (vbxeSelect.value !== next) vbxeSelect.value = next;
     }
 
     function isMobileViewport() {
@@ -1336,6 +1515,25 @@
       });
     }
 
+    if (vbxeSelect) {
+      vbxeSelect.value = vbxePreference;
+      vbxeSelect.addEventListener("change", function () {
+        const next = persistVbxePreference(vbxeSelect.value);
+        vbxeSelect.value = next;
+        if (app && typeof app.reset === "function") {
+          app.reset({ vbxe: vbxeConfigForPreference(next) });
+        }
+      });
+    }
+
+    if (uiThemeSelect) {
+      uiThemeSelect.value = uiThemePreference;
+      uiThemeSelect.addEventListener("change", function () {
+        const next = persistUiThemePreference(uiThemeSelect.value);
+        uiThemeSelect.value = next;
+      });
+    }
+
     layoutSchemeButtons.forEach(function (button) {
       button.addEventListener("click", function () {
         const next = persistLayoutSchemePreference(
@@ -1372,7 +1570,9 @@
         keyboardMappingMode: getKeyboardMappingModeFromUi(),
         videoStandard: videoStandardPreference,
         memoryExpansion: memoryExpansionPreference,
+        vbxe: vbxeConfigForPreference(vbxePreference),
         pokeyTrace: pokeyTracePreference,
+        renderer: rendererPreference,
       }, workerPreference));
       resizeCrtCanvas();
     } else {
@@ -1390,7 +1590,9 @@
           keyboardMappingMode: getKeyboardMappingModeFromUi(),
           videoStandard: videoStandardPreference,
           memoryExpansion: memoryExpansionPreference,
+          vbxe: vbxeConfigForPreference(vbxePreference),
           pokeyTrace: pokeyTracePreference,
+          renderer: rendererPreference,
         }, workerPreference));
       } catch (e) {
         // If WebGL init succeeded but shader/program setup failed, fall back to 2D by replacing the canvas.
@@ -1425,7 +1627,9 @@
               keyboardMappingMode: getKeyboardMappingModeFromUi(),
               videoStandard: videoStandardPreference,
               memoryExpansion: memoryExpansionPreference,
+              vbxe: vbxeConfigForPreference(vbxePreference),
               pokeyTrace: pokeyTracePreference,
+              renderer: rendererPreference,
             }, workerPreference));
             resizeCrtCanvas();
           } else {
@@ -1526,6 +1730,7 @@
 
     syncVideoStandardUi();
     syncMemoryExpansionUi();
+    syncVbxeUi();
 
     function focusCanvas(preventScroll) {
       if (!canvas || typeof canvas.focus !== "function") return;
@@ -2365,23 +2570,9 @@
     }
 
     function updateStatus() {
-      // Update OS ROM status icon
-      if (app.hasOsRom()) {
-        romOsStatus.classList.remove("fa-circle-xmark");
-        romOsStatus.classList.add("fa-circle-check");
-      } else {
-        romOsStatus.classList.remove("fa-circle-check");
-        romOsStatus.classList.add("fa-circle-xmark");
-      }
-
-      // Update BASIC ROM status icon
-      if (app.hasBasicRom()) {
-        romBasicStatus.classList.remove("fa-circle-xmark");
-        romBasicStatus.classList.add("fa-circle-check");
-      } else {
-        romBasicStatus.classList.remove("fa-circle-check");
-        romBasicStatus.classList.add("fa-circle-xmark");
-      }
+      // Update OS and BASIC ROM status LEDs.
+      romOsStatus.classList.toggle("loaded", app.hasOsRom());
+      romBasicStatus.classList.toggle("loaded", app.hasBasicRom());
       updateRomStatusTitle(
         romOsStatus,
         "Atari OS ROM",

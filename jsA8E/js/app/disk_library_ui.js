@@ -286,17 +286,11 @@
         const activeActivity = mountedActivity.get(info.mountedSlot);
         activity.className = "disklib-mounted-activity" +
           (activeActivity ? " active " + activeActivity.className : "");
-        activity.textContent = activeActivity ? "*" : "";
         activity.title = activeActivity
-          ? (activeActivity.write ? "Writing" : "Reading")
+          ? activeActivity.title
           : "No active media operation";
         activity.setAttribute("aria-label", activity.title);
         row.appendChild(activity);
-        const rw = document.createElement("span");
-        rw.className = "disklib-mounted-rw disklib-rw-writable";
-        rw.textContent = "*";
-        rw.title = "Writable";
-        row.appendChild(rw);
         const unmount = document.createElement("button");
         unmount.type = "button";
         unmount.className = "disklib-action-btn";
@@ -499,7 +493,6 @@
           nameCell.textContent = String(info.format || "").toUpperCase() + " " + info.name;
           nameCell.title = "Deleted " + new Date(info.deletedAt || 0).toLocaleString();
           row.appendChild(nameCell);
-          row.appendChild(createTextCell("disklib-col-rw", "TRASH"));
           for (let drive = 0; drive < DRIVE_COUNT; drive++) row.appendChild(createTextCell("disklib-col-drive", ""));
           const actions = document.createElement("span");
           actions.className = "disklib-col disklib-col-actions";
@@ -610,7 +603,6 @@
         nameCell.className = "disklib-col disklib-col-name";
         nameCell.innerHTML = '<i class="fa-solid fa-folder disklib-folder-icon"></i><span class="disklib-name">..</span>';
         row.appendChild(nameCell);
-        appendEmptyCell(row, "disklib-col-rw");
         for (let drive = 0; drive < DRIVE_COUNT; drive++) appendEmptyCell(row, "disklib-col-drive");
         const parentActions = document.createElement("span");
         parentActions.className = "disklib-col disklib-col-actions";
@@ -636,7 +628,6 @@
         name.textContent = folder.name;
         nameCell.appendChild(name);
         row.appendChild(nameCell);
-        appendEmptyCell(row, "disklib-col-rw");
         for (let drive = 0; drive < DRIVE_COUNT; drive++) appendEmptyCell(row, "disklib-col-drive");
         const folderActions = document.createElement("span");
         folderActions.className = "disklib-col disklib-col-actions";
@@ -739,14 +730,6 @@
           });
         }
         row.appendChild(nameCell);
-        const rwCell = document.createElement("span");
-        rwCell.className = "disklib-col disklib-col-rw";
-        const rw = document.createElement("span");
-        rw.className = "disklib-rw disklib-rw-writable";
-        rw.textContent = "*";
-        rw.title = "Writable";
-        rwCell.appendChild(rw);
-        row.appendChild(rwCell);
 
         for (let drive = 0; drive < DRIVE_COUNT; drive++) {
           const driveCell = document.createElement("span");
@@ -1345,10 +1328,13 @@
         const slot = activity.deviceSlot | 0;
         if (slot < 0 || slot > 7) return;
         const operation = String(activity.operation || "access").toLowerCase();
-        const write = operation === "write" || operation === "format";
+        const error = activity.error === true || activity.failed === true ||
+          operation.indexOf("error") >= 0 || operation.indexOf("fail") >= 0;
+        const write = !error && (operation === "write" || operation === "format");
+        const state = error ? "error" : (write ? "write" : "read");
         mountedActivity.set(slot, {
-          write: write,
-          className: write ? "disklib-activity-write" : "disklib-activity-read",
+          className: "disklib-activity-" + state,
+          title: error ? "Media error" : (write ? "Writing" : "Reading"),
         });
         if (mountedActivityTimers.has(slot)) clearTimeout(mountedActivityTimers.get(slot));
         mountedActivityTimers.set(slot, setTimeout(function () {

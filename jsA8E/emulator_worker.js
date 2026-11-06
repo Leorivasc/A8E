@@ -347,6 +347,7 @@
       "js/core/keys.js",
       "js/core/input.js",
       "js/core/hw.js",
+      "js/core/vbxe.js",
       "js/core/state.js",
       "js/core/snapshot_codec.js",
       "js/core/memory.js",
@@ -518,6 +519,10 @@
           app && typeof app.getMemoryExpansion === "function"
             ? app.getMemoryExpansion()
             : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.memoryExpansion) || "130xe-128k",
+        vbxe:
+          app && typeof app.getVbxeConfig === "function"
+            ? app.getVbxeConfig()
+            : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.vbxe) || { enabled: false, profile: "off", page: 0xd640 },
       },
       debug:
         app && typeof app.getDebugState === "function" ? app.getDebugState() : null,
@@ -542,6 +547,7 @@
       {
         videoStandard: normalizeVideoStandard(msg.videoStandard) || "ntsc",
         memoryExpansion: normalizeMemoryExpansion(msg.memoryExpansion) || "130xe-128k",
+        vbxe: msg.vbxe || { enabled: false, profile: "off", page: 0xd640 },
         pokeyTrace: !!msg.pokeyTrace,
       },
     );
@@ -561,7 +567,7 @@
     if (initH > 0) screenCanvas.height = initH;
 
     let gl = null;
-    try {
+    if (msg.renderer !== "2d") try {
       gl =
         screenCanvas.getContext("webgl2", {
           alpha: true,
@@ -589,11 +595,10 @@
           premultipliedAlpha: false,
           preserveDrawingBuffer: false,
         });
-    } catch {
-      gl = null;
-    }
+    } catch { gl = null; }
 
     let ctx2d = null;
+    if (!gl) ctx2d = screenCanvas.getContext("2d", { alpha: false });
     if (gl && self.A8EGlRenderer && self.A8EGlRenderer.loadShaderSources) {
       try {
         await self.A8EGlRenderer.loadShaderSources();
@@ -615,6 +620,7 @@
         optionOnStart: !!msg.optionOnStart,
         videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
         memoryExpansion: self.A8E_BOOT_OPTIONS.memoryExpansion,
+        vbxe: self.A8E_BOOT_OPTIONS.vbxe,
         pokeyTrace: !!msg.pokeyTrace,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
@@ -640,6 +646,7 @@
         optionOnStart: !!msg.optionOnStart,
         videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
         memoryExpansion: self.A8E_BOOT_OPTIONS.memoryExpansion,
+        vbxe: self.A8E_BOOT_OPTIONS.vbxe,
         pokeyTrace: !!msg.pokeyTrace,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";

@@ -92,6 +92,7 @@
       const playfieldCycles = bytesPerLine * 2;
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const sourceLores = io.videoOut.anticSourceLores || null;
       let dstIndex = io.drawLine.destIndex | 0;
       let dispAddr = io.drawLine.displayMemoryAddress & 0xffff;
 
@@ -136,14 +137,24 @@
           ? PRIORITY_TABLE_BKG_PF013
           : PRIORITY_TABLE_BKG_PF012;
 
-        let c = colorTable[(data >> 6) & 0x3] & 0xff;
-        let p = prioTable[(data >> 6) & 0x3] & 0xff;
+        let source = (data >> 6) & 0x3;
+        if (sourceLores) {
+          sourceLores[dstIndex] = source;
+          sourceLores[dstIndex + 1] = source;
+        }
+        let c = colorTable[source] & 0xff;
+        let p = prioTable[source] & 0xff;
         dstIndex = writePixelPair(dst, prio, dstIndex, c, p);
 
         data = (data << 2) & 0xff;
 
-        c = colorTable[(data >> 6) & 0x3] & 0xff;
-        p = prioTable[(data >> 6) & 0x3] & 0xff;
+        source = (data >> 6) & 0x3;
+        if (sourceLores) {
+          sourceLores[dstIndex] = source;
+          sourceLores[dstIndex + 1] = source;
+        }
+        c = colorTable[source] & 0xff;
+        p = prioTable[source] & 0xff;
         dstIndex = writePixelPair(dst, prio, dstIndex, c, p);
 
         data = (data << 2) & 0xff;

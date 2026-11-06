@@ -498,6 +498,7 @@ static int TestVscrolExitDliDeadlineCycle5(void)
 	pIoData->cNmienEnabledByCycle7 = NMI_DLI;
 	pIoData->cNmienEnabledByCycle8 = NMI_DLI;
 	pIoData->bInDrawLine = 1;
+	pIoData->tVideoData.lCurrentDisplayLine = 100;
 	pIoData->llDisplayListFetchCycle = 0x4000;
 	pIoData->llCycle = 0x4000;
 	pContext->llCycleCounter = 0x4000 + 200;
@@ -530,6 +531,7 @@ static int TestVscrolExitDliDeadlineCycle5(void)
 	pIoData->cNmienEnabledByCycle7 = NMI_DLI;
 	pIoData->cNmienEnabledByCycle8 = NMI_DLI;
 	pIoData->bInDrawLine = 1;
+	pIoData->tVideoData.lCurrentDisplayLine = 100;
 	pIoData->llDisplayListFetchCycle = 0x5000;
 	pIoData->llCycle = 0x5000;
 	pContext->llCycleCounter = 0x5000 + 200;
@@ -552,6 +554,47 @@ static int TestVscrolExitDliDeadlineCycle5(void)
 	AtariIoTimingProbeStepClock(pContext); /* cycle 8: NMI */
 	REQUIRE(pContext->cNmiPendingFlag == 1,
 			"exit-line DLI did not raise the NMI at cycle 8");
+
+	ProbeMachine_Close(&tMachine);
+	return 1;
+}
+
+static int TestExitDliIsNotArmedInVerticalBlank(void)
+{
+	/* A scrolled-region exit line still open when vertical blank starts leaves
+	 * the row counter parked on VSCROL. ANTIC processes no mode lines after
+	 * scan line 247, so no DLI may be raised for the following lines.
+	 */
+	ProbeMachine_t tMachine = ProbeMachine_Open();
+	_6502_Context_t *pContext = tMachine.pContext;
+	IoData_t *pIoData = tMachine.pIoData;
+	u32 i;
+
+	REQUIRE(pContext != NULL, "machine open failed");
+
+	ProbeMachine_ResetTiming(&tMachine);
+
+	pContext->pShadowMemory[IO_NMIEN] = NMI_DLI;
+	pIoData->cNmienEnabledByCycle7 = NMI_DLI;
+	pIoData->cNmienEnabledByCycle8 = NMI_DLI;
+	pIoData->bInDrawLine = 1;
+	pIoData->tVideoData.lCurrentDisplayLine = 250;
+	pIoData->llDisplayListFetchCycle = 0x6000;
+	pIoData->llCycle = 0x6000;
+	pContext->llCycleCounter = 0x6000 + 200;
+	pIoData->bModeLineScrollExit = 1;
+	pIoData->bModeLineExitDli = 1;
+	pIoData->cModeLineRowCounter = 3;
+	pContext->pShadowMemory[IO_VSCROL] = 3;
+
+	for(i = 0; i < 9; i++) /* cycles 0-8 */
+	{
+		AtariIoTimingProbeStepClock(pContext);
+	}
+	REQUIRE(pIoData->llDliCycle == CYCLE_NEVER,
+			"a stale exit-line DLI was armed after scan line 247");
+	REQUIRE(pContext->cNmiPendingFlag == 0,
+			"a stale exit-line DLI raised an NMI in vertical blank");
 
 	ProbeMachine_Close(&tMachine);
 	return 1;
@@ -816,6 +859,7 @@ int main(int argc, char *argv[])
 	lPassed &= TestVscrolEntryWrapExtendsModeLine();
 	lPassed &= TestVscrolExitLineFollowsLiveVscrol();
 	lPassed &= TestVscrolExitDliDeadlineCycle5();
+	lPassed &= TestExitDliIsNotArmedInVerticalBlank();
 	lPassed &= TestVcountUpdatesAtCycle111();
 	lPassed &= TestJvbDliReplayBehavior();
 	lPassed &= TestDliEnableOnCycle7DelaysByOneCycle();

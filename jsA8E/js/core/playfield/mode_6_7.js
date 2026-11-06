@@ -88,6 +88,7 @@
       const playfieldCycles = bytesPerLine * 4;
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const sourceLores = io.videoOut.anticSourceLores || null;
       let dstIndex = io.drawLine.destIndex | 0;
       let dispAddr = io.drawLine.displayMemoryAddress & 0xffff;
 
@@ -132,6 +133,11 @@
         const cColor0 = sram[IO_COLBK] & 0xff;
         const cColor1 = aColorTable[colorIndex] & 0xff;
 
+        let source = data & mask ? colorIndex : 0;
+        if (sourceLores) {
+          sourceLores[dstIndex] = source;
+          sourceLores[dstIndex + 1] = source;
+        }
         if (data & mask) {
           dstIndex = writePixelPair(dst, prio, dstIndex, cColor1, p);
         } else {
@@ -139,6 +145,11 @@
         }
         mask >>= 1;
 
+        source = data & mask ? colorIndex : 0;
+        if (sourceLores) {
+          sourceLores[dstIndex] = source;
+          sourceLores[dstIndex + 1] = source;
+        }
         if (data & mask) {
           dstIndex = writePixelPair(dst, prio, dstIndex, cColor1, p);
         } else {

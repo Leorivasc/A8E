@@ -59,7 +59,13 @@ set(A8E_CORE_SOURCES
   LibraryWindow.c
   Pia.c
   Pokey.c
+  Vbxe.c
+  VbxeVideo.c
 )
+
+# The library window formats status text into fixed 160-character lines and
+# truncates long paths on purpose; GCC's truncation warnings are noise there.
+set_source_files_properties(LibraryWindow.c PROPERTIES COMPILE_OPTIONS "-Wno-format-truncation")
 
 function(a8e_configure_target target_name)
   target_compile_definitions(${target_name} PRIVATE A8E_BUILD_VERSION=\"${A8E_BUILD_VERSION}\")
@@ -192,6 +198,17 @@ if(BUILD_TESTING)
 
   add_test(NAME antic_timing_probe COMMAND antic_timing_probe)
   set_tests_properties(antic_timing_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
+
+  add_executable(vbxe_probe
+    tests/vbxe_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(vbxe_probe PRIVATE A8E_ENABLE_TEST_PROBES=1)
+  a8e_configure_target(vbxe_probe)
+
+  add_test(NAME vbxe_probe COMMAND vbxe_probe)
+  set_tests_properties(vbxe_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
 
   add_executable(antic_dma_probe
     tests/antic_dma_probe.c
