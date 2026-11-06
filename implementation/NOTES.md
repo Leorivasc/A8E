@@ -1,5 +1,1933 @@
 # NOTES.md
 
+- 2026-11-06 (jsA8E: Disk Library parity with and without the worker): the
+  library UI talks to either the core `disk_library.js` (main thread) or the
+  proxy in `app_proxy.js` (worker). Comparing both APIs showed that the proxy
+  lacked `exportWorkspacePackage`, `renameFolder`, `listRevisions`,
+  `selectRevision`, `verifyFile` and `getStorageEstimate`. With the worker the
+  "export mounted workspace" button was not wired at all, folder rename threw
+  a TypeError, and revision info, ATR verification and the storage estimate
+  were missing. Added the proxy methods, the matching worker commands
+  (`diskLibraryRenameFolder`, `...SelectRevision`, `...Verify`,
+  `...StorageEstimate`; workspace export reuses `diskLibraryExport` with
+  `workspaceOnly`), and a `revisions` map in the `diskLibrarySnapshot` message so
+  `listRevisions` stays synchronous. `app_proxy_library_export.test.js` covers the
+  new proxy calls. Not verified in a browser with the worker. Progress and
+  cancel of export, import preview and import now work with the worker too:
+  the proxy tags the request with an `opId`, the worker posts
+  `diskLibraryProgress` messages with that id, and the proxy sends
+  `diskLibraryCancel` when the caller's `isCanceled` or `signal` is set
+  (checked on each progress report, so a cancel takes effect at the next step).
+  `disk_library_api_parity.test.js` (in `test:automation`) fails if the UI calls
+  a library method that is missing from either the core or the proxy. Root
+  cause of the whole group: the two paths (worker proxy and main-thread core)
+  are selected at runtime (Firefox and Tauri use the main thread) and had
+  drifted apart since the Full Library work of 2026-10-09/16; the Firefox
+  main-thread default of 2026-11-04 only exposed it.
+- 2026-11-06 (jsA8E: "Export the complete library" downloaded the text
+  `undefined`): the UI read `result.bytes`, but only the worker proxy
+  (`app_proxy.js`) converts the export's `buffer` into `bytes`. The main-thread
+  library (`atari.js` -> `disk_library.js`) returns `{ buffer, manifest,
+  fileName }`, so `new Blob([undefined])` produced a file containing
+  "undefined". `disk_library_ui.js` now uses a `packageBytes(result)` helper
+  (accepts `bytes` or `buffer`, throws if neither) for both the library and the
+  mounted-workspace export. Not verified in a browser; the main-thread path
+  was inferred from the code. No automated test covers the UI handler.
+- 2026-11-06 (VBXE merge readiness and Altirra source audit): prepared the
+  `VBXE` branch for merging into `main` as an experimental, opt-in feature (the
+  merge itself is done by the maintainer). Results: jsA8E 59 of 59 VBXE tests
+  pass (including `vbxe_blitter_attrmap_phase_boot`, which is intermittent),
+  native `ctest` 16 of 17 (`pokey_sio_contract_probe` fails identically on a
+  clean `main` worktree, so it is not from this branch); the diff has no
+  binaries, ROMs or build output. Read `build/Altirra-4.40-src/src/Altirra/source/vbxe.cpp`
+  (memory maps, `ReadControl`/`WriteControl`, XDL decoder, blitter) against
+  `vbxe.js` and `Vbxe.c`: registers, MEMAC and XDL match; blitter differences
+  D1-D7 were found and recorded, not changed (mode 6 collision nibble order,
+  mode 7 treated as copy by Altirra, mode 4 zero-source cost, `BLITTER_BUSY`,
+  per-row budget, undefined register reads, attribute-map cell). The renderers
+  and priority tables were not audited. All open items now live in
+  [VBXE_ROADMAP.md, Known issues and pending work](VBXE_ROADMAP.md#known-issues-and-pending-work);
+  resume from there. Side effect to remember: `npm run test:vbxe:browser`
+  drove the Chromium on port 9222 that was open with Commando. READMEs and
+  `VBXE.md` now point to the list; the root README no longer says the native
+  core lacks VBXE.
+- 2026-11-05 (jsA8E VBXE: MEMAC A above $D800, Commando terrain): in
+  `commando230810.xex` the player walked over palms, rocks and the bridge in
+  jsA8E but was blocked in A8E. Disassembling the game showed that its
+  collision routine ($394E/$3872) does not use GTIA or VBXE collision
+  registers (it never writes HITCLR and reads <500 VBXE registers per run); it
+  indexes a tile map in plain RAM at $4000-$5F3F. Level init ($2078/$20F6)
+  fills that map by opening MEMAC A as a 4K window at $E000 (`$D65E=$E8`,
+  `$D65F=$C0|bank`, OS ROM off) and copying it from VRAM. jsA8E's
+  `installIoHandlers` capped every MEMAC A window at `$D000`
+  (`Math.min(0xd000, ...)`), so a window at $E000 was never routed and the copy
+  read RAM zeros: the map stayed empty and nothing blocked the player. Windows
+  are now split around the hardware pages and may cover $D800-$FFFF (RAM only,
+  ROM keeps priority, as in the native `Vbxe_SyncWindows`). After the fix the
+  map is byte-identical to A8E and the player stops at the rock plateau.
+  `vbxe_memac_window_sync` gained a $E000 read/write/close case. Lesson:
+  when a game "works in one core", compare the CPU-visible memory at the same
+  game moment first; here an 8000-byte diff pointed straight at the cause.
+- 2026-11-05 (Gacek VBXE: BASIC and BCB latch): `Gacek_vbxe_f+.xex` showed two
+  separate problems. (1) Noise instead of bombs/enemies: the game keeps its
+  sprite sheet in RAM `$8000-$B03F` and copies it to VRAM; with BASIC enabled
+  the part from `$A000` reads the BASIC ROM. The 16 rows of the source sprite in
+  VRAM matched `ATARIBAS.ROM` byte for byte (read bottom-up). Not an emulator
+  bug: run with `-o` (A8E) or "Option on start" (jsA8E), as Altirra does for
+  executables. Open question: whether loading an XEX should disable BASIC by
+  default. (2) Trails behind moving sprites with BASIC off, in both cores:
+  Altirra's `BLITTER_START` loads the first BCB immediately (vbxe.cpp ~line
+  1356: "some demos are a bit creative and overwrite the first entry without
+  checking blitter status"); we read it when the 21-cycle load finished, so a
+  program that reuses the block right after START (Gacek queues its next sprite
+  that way) changed the blit in flight and the erase blits were wrong. Fix in
+  both cores: START copies the 21 bytes (`preloadedBlock` in `vbxe.js`,
+  `aPreloaded` in `Vbxe.c`); the load cycles still cost time. Tests:
+  `vbxe_blitter_start_latches_bcb` and `TestBlitterStartLatchesBcb`, both
+  failing without the fix. VBXE suite 57 of 58 (only the unstable
+  `vbxe_blitter_attrmap_phase_boot`), `ctest` 16 of 17 (`pokey_sio_contract_probe`).
+  Still different from Altirra and not changed: `BLITTER_BUSY` bit 1 is set only
+  while processing (not while loading the BCB), and a START written while the
+  BCB loads restarts the blit; both cores ignore a START while loading. Tooling
+  note: native screenshots for such checks came from a debug copy of `A8E.c`
+  built outside the repo, with env-driven frame dumps and key/fire injection.
+- 2026-11-05 (VBXE overlay priority for ANTIC hires): `vbxe_fx124_priority_probe_boot`
+  (known failing "legacy bit 6 must win over PF2") traced to Altirra's
+  `RenderMode8` (`vbxe.cpp`, lines 2530-2690): in ANTIC hires (modes 2, 3, F
+  with PRIOR bits 7-6 clear) the priority logic sees PF2 for every pixel; the
+  luma bit only changes the color. Only FX 1.26 with extended color
+  (VIDEO_CONTROL bit 1) uses PF1 for set pixels (comments at lines 2539-2540:
+  "For V1.26+, use PF1 priority for set pixels. For V1.25-, use PF2/PF3
+  priority for all pixels"). jsA8E and the native core always gave set pixels
+  PF1, so the FX 1.24 bit-6 band did not cover them. Fix in both cores
+  (`hiresPriorityForOverlay` in `vbxe.js`, `Vbxe_Composite` in `VbxeVideo.c`):
+  the overlay's priority and collision input maps PF1 to PF2 for hires lines
+  unless FX 1.26 with extended color, and never for reverse attribute cells
+  (they read the data as lores). GTIA's own priority/collision data and the
+  attribute-map colors are unchanged. Results: the probe passes; the VBXE suite
+  is 56 of 57 (only the unstable `vbxe_blitter_attrmap_phase_boot` fails, as
+  before); `vbxe_probe` passes with a case for extended color. Not done: in
+  Altirra, without extended color a set pixel in an attribute-map cell takes the
+  cell's PF2 color with only the PF1 luminance (lines 2610-2620); both cores
+  still use the full PF1 color. No real program showed the difference yet.
+- 2026-11-05 (VBXE text mode: clipped top of characters): in Textmode Test
+  modes 3 and 4 (80x30, 80x32) the XDL uses entries of 7 lines with
+  `OVSCRL Y=1` (skipping the usually blank first glyph row). `nextXdlLine`
+  already starts each entry at `textRow = scrollY`, but `renderTextXdlLine`
+  added `textScrollY` again (`sourceRow = textRow + textScrollY`), so the
+  first line showed glyph row 2 and the top of every character was cut. Fixed
+  in both cores (`sourceRow = textRow`); the `vbxe_device_state` render case
+  was rewritten for the corrected semantic, and `vbxe_probe` has
+  `TestTextVerticalScrollStartsAtLatchedRow`. The text, scroll, collision and
+  Textmode Test boot tests still pass.
+- 2026-11-04 (Native A8E: VBXE stage 2 on a real demo): running `demoD600.xex`
+  (`./A8E -128k -n --vbxe`) showed every other screen column black. Cause: the
+  project's `u32` is `unsigned long`, 8 bytes on LP64, and the ARGB overlay
+  plane and its copy into the 32-bit SDL surface used `u32` as the pixel type.
+  Pixel buffers now use `uint32_t`; keep that in mind for any new pixel code
+  (the existing `u32` is fine for values, wrong for memory layouts). The first
+  suspects (priority bits of ANTIC hires, the blitter) were ruled out by
+  logging the first 400 BCBs and 128 page checksums at blit 300 in both cores:
+  identical. Also added reverse attribute-map cells for plain ANTIC hires and
+  lores (the demo's Fuji logos use them) and averaging of hires/text pixel
+  pairs. Probe: `TestOverlayReachesScreen` now checks three consecutive screen
+  pixels; `TestHiresPairIsAveraged`.
+- 2026-11-04 (Native A8E: VBXE stage 2): `A8E/VbxeVideo.c` ports the video
+  side of `vbxe.js`: the XDL engine (`Vbxe_NextXdlLine`: control bytes,
+  repeat, END after the repeat run, OVADR/OVSCRL/CHBASE/ATT/MAP/MISC fields,
+  latches kept across VSync), the standard, lores, hires and text overlay with
+  Altirra's transparency rule (VIDEO_CONTROL D2 set = opaque), overlay
+  priority tables per profile (FX 1.20/1.24 without the background bit), COLMASK
+  collisions into COLDETECT, playfield palettes from MISC, the attribute map
+  (43-cell line buffer, scroll, cell size, PF3 bitmap) and the DMA slots a line
+  takes (22 per new XDL entry, overlay 64/80/84 machine cycles by width, text
+  195/243/255, 172 for a map reload), subtracted in `Vbxe_EndOfLine`. A line is
+  composed by `Vbxe_ComposeLine` right after `AtariIoDrawLine` into an ARGB
+  plane (`pOverlay`, 456 x 312, 0 = no VBXE pixel); `AtariIoDrawScreen` copies
+  it over the 8-bit frame in the direct and the scaled paths. Native limits,
+  documented in `A8E/README.md`: output is the 336-pixel window, so hires and
+  text overlays average each pair of source pixels into one (a first version took one sample and showed vertical stripes on dithered hires images); each line is composed once
+  when it closes (no GTIA mid-line replay); reverse attribute-map cells rebuild the ANTIC source bits from the GTIA layer
+  of each pixel (hires pairs, lores values) and only the GTIA special-mode
+  combinations fall back to the plain selection; slot
+  accounting is aggregate. As in jsA8E, the playfield palette only applies on
+  lines where the overlay or the map is enabled. Tests: four new cases in
+  `vbxe_probe` (standard overlay with repeat/END/priority/collision, text,
+  attribute map plus playfield palette, overlay reaching the screen surface);
+  a mutation of the XDL update cost makes the probe fail. `ctest` unchanged:
+  the same two older failures.
+- 2026-11-04 (Native A8E: VBXE stage 1 and parity check): compared the branch
+  against `main`; everything jsA8E changed outside VBXE is already in the
+  native core (GTIA `$D01B-$D01E` reads, no DLI in vblank, player/missile early
+  return). The remaining gap is the VBXE device, so it is being ported in
+  stages. Stage 1 is `A8E/Vbxe.c`/`Vbxe.h` (a port of the relevant parts of
+  `vbxe.js`): register bank with revisions `$10`/`$20|$24|$26`, 512 KiB VRAM,
+  palette latches with the D7 to D0 expansion, configuration latch, MEMAC A/B
+  for CPU, ANTIC and instruction fetch, blitter (BCB load, modes 0-6, zoom,
+  pattern, signed steps, byte and nibble collisions with the AHRM `value>>5`
+  groups, linked blocks, stop), completion IRQ as a level source placed at its
+  cycle inside the line, `BLITTER_START` running the rest of the scanline's
+  budget (Altirra behavior that Mr. Proper depends on), and the
+  `$D080-$D0FF` reset strobe. Native specifics: MEMAC windows are installed as
+  access handlers only over RAM-mapped addresses (ROM and `$D000-$D7FF` keep
+  priority) and are rebuilt only when the routing bits change or when `Pia.c`
+  changes the OS/BASIC/Self-test mapping; `6502.c` got `pfnFetchStage`/
+  `pfnFetchRestore` hooks to run code from a window; `Pia_IrqAsserted` ORs the
+  VBXE line; `AtariIo_ReadAnticMemory` (and the display-list reads) go through
+  MEMAC. Not done yet: XDL parser, overlay, attribute map, priority/collision
+  composition, XDL/overlay local-bus slots (the blitter budget is 912 minus
+  MEMAC accesses), FX 1.26r RAMBO, snapshots, UI selector. CLI:
+  `--vbxe[=fx1.20|fx1.24|fx1.26]`, `--vbxe-d7`. Test: `tests/vbxe_probe.c`
+  (11 cases; a mutation of the mid-line budget makes it fail). `ctest`: 15 of
+  17 pass; `antic_graphics_modes_probe` and `pokey_sio_contract_probe` were
+  already failing. Also updated `implementation/DIAGRAM.mermaid` (VBXE in both
+  cores, Tauri shell, ROM library, headless/MCP, Firefox main-thread default,
+  test counts).
+- 2026-11-04 (Evaluation of moving work to the GPU, no code changes):
+  `render/gl.js` already uploads the 8-bit indexed framebuffer and applies the
+  palette, VBXE and CRT in shaders; the CRT has no measurable CPU cost in
+  Firefox (emulator thread 92-100 % with or without it). What remains in JS
+  cannot be moved without losing accuracy: CPU/ANTIC/GTIA/POKEY and the
+  blitter are sequential and the program reads their results (collisions);
+  `applyPlayfieldAttributes` alters the colors/priorities that GTIA collisions
+  use. The only movable piece would be `renderXdlLine` (overlay, ~5-7 % of the
+  active CPU), which would require uploading the 512 KB VRAM with change
+  tracking and per-line XDL/palette state, and keeping two bit-for-bit
+  equivalent paths (GL and software/headless). Small gain versus the
+  maintenance cost: discarded.
+- 2026-11-04 (Interactive Firefox and per-row blitter): interactive session
+  with a graphical Firefox (own instance with a BiDi port, key and screenshot
+  recorder, file-based command channel) with the user playing Popeye in worker
+  mode: the worker stopped answering `getCounters`/`captureScreenshot` for
+  4-15 s, with the `DOM Worker` thread at ~92 % of a core, from the moment the
+  game went from loading to the title screen (before any user key). Without
+  human intervention, the same sequence gave an emulation speed of 83-92 % in
+  that phase, that is: the worker is at the limit of one core and any added
+  load (my screenshot queries, the user's Chromium with jsA8E open at ~35 %)
+  leaves it behind. In Chromium the same phase used 72 % of the main thread.
+  V8 profile of Popeye during play: `advanceBlitter` 12.2 % (the top),
+  `clockAction` 8 %, mode 4/5 5 %, attribute composition 4.5 %. Change:
+  `advanceBlitter` processes rows without X zoom with a tight loop (same
+  per-byte rate and the same free slots consumed in the same order; the last
+  byte of the row stays in the per-byte path, which handles row and block
+  rollover). Equivalence checked: Mr. Proper and Popeye give the same VRAM
+  hash, the same cycle counter, the same collision code and the same blitter
+  state before and after. Result in Chromium: `advanceBlitter` 12.2 % to 3.3 %
+  and thread occupancy 72 % to 63 %. Firefox's native profiler
+  (`MOZ_PROFILER_STARTUP`) only delivered the parent process, so there is no
+  SpiderMonkey profile. Full suite: 120 of 122; the two known ones fail
+  (`vbxe_fx124_priority_probe_boot` and the unstable
+  `vbxe_blitter_attrmap_phase_boot`).
+
+- 2026-11-04 (Firefox: worker mode): on the user's desktop Firefox the worker
+  mode (the default) had several seconds of input lag; a minimal request to
+  the worker (`getCounters`) hit the 4 s timeout, and with the emulation on
+  the main thread (`?a8e_no_worker=1`, private window) the game was playable.
+  On the development machine's windowless Firefox 158 (software WebGL) the
+  worker ran at 58-60 fps with a 14-25 ms round trip, so it was not reproduced
+  and the cause inside Firefox (`OffscreenCanvas` presentation or the worker's
+  rAF scheduling) is not identified. Palliative measure: `supportsWorker()`
+  returns false on Firefox unless `?a8e_worker=1`, as it already did for the
+  Tauri WebView. Pending: test on Firefox with `a8e_renderer=2d` in worker
+  mode and without the CRT effect to see whether it is the worker's WebGL, and
+  remove the exception if it is fixed.
+
+- 2026-11-04 (AHRM review and generality): reviewed this session's changes
+  against the AHRM. Fixed: the blitter's byte collision mask used
+  `(value-1)>>5`; AHRM 12.4 says bit 0 = `$01-1F`, bit 1 = `$20-3F`, that is
+  `value>>5` (Altirra does the same). Fixed: the blitter's mid-line start now
+  subtracts that line's screen DMA (overlay, XDL, attribute-map reload)
+  instead of using all the remaining time. Documented as deliberate deviations
+  from the AHRM text, both because of Altirra and real software: polarity of
+  `VIDEO_CONTROL` D2 and the bits of `MEMAC_B_CONTROL` (D7 CPU, D6 ANTIC; the
+  AHRM gives them the other way round). No change depends on a title: all are
+  device rules or optimizations that preserve the output (verified pixel by
+  pixel on Mr. Proper). The `vbxe_blitter_short_overlay_timing_boot` marker
+  went from VCOUNT 56 to 57 because of the DMA discount; the test does not fix
+  the value and the documented spread versus Altirra was already one sample.
+
+- 2026-11-04 (Mr. Proper: fruits that cannot be eaten, and performance with
+  MEMAC B): `mrproper_vbxe.xex` boots and draws, but the user saw fruits that
+  could not be eaten and repeated blocks. Cause: the game reads
+  `BLT_COLLISION_CODE` (`$D650`) a few cycles after writing `BLITTER_START`
+  (`$25da`-`$25e2`, without waiting for the blit to finish) and stores the
+  result in the object. In Altirra (`vbxe.cpp`, case `0x53` of `WriteControl`)
+  the start loads the BCB and immediately runs whatever is left of the
+  scanline (`maxBlitTime = (mBlitterEndScanTime - now) * 8`), so the first rows
+  of the sprite have already detected collision when the game reads the
+  register. We gave the full line budget at the end of the line, so `$D650`
+  was almost always 0 (1823 of ~1900 reads) and detection never fired. Now
+  `io.js` calls `startBlitterMidLine` when `BLITTER_START` is written with the
+  blitter stopped: `(114 - line cycle) * 8` slots are run without a bus
+  schedule, `blitterEarlyRun` is set so that that line's budget is not spent
+  twice (`antic.js`) and, if the blit finishes, the end IRQ is placed at its
+  cycle. With the change, 1021 of ~2000 reads are non-zero. New test:
+  `vbxe_blitter_midline_start.test.js` (in `test:vbxe`). The other blitter
+  timing tests still pass (the unstable `vbxe_blitter_attrmap_phase_boot`
+  fails the same with and without the change, 3 of 4 runs under load).
+  The frames with green smudges and a cyan band that appear in Mr. Proper also
+  appear in Altirra (checked by capturing both); they are not an artifact.
+  Performance: the game writes `$D65D` (MEMAC B) twice per blit, about 21
+  `installIoHandlers` calls per frame, and each one walked 16 K addresses
+  calling `vbxeMemacAddress` (11.6 % of the Node profile).
+  `installIoHandlers` now decides per range using the CPU enable bits, fills
+  the whole range with `fill` when everything was RAM and is not rebuilt if
+  the window set has not changed (`onlyIfChanged`, only from
+  `syncVbxeWindows`; the memory-map rebuild still walks address by address so
+  as not to overwrite ROM). `applyPlayfieldAttributes` looks up the attribute
+  map cell once per cell run and has a fast path for cells without Rev (the
+  Rev chain is only evaluated on Rev cells); decoded cells are stored on the
+  row buffer itself. Mr. Proper in Node: 42 to 51 fps; the output is
+  identical pixel by pixel before and after. Windowless Firefox 158, main
+  thread, 60 fps with callbacks averaging 10 ms but p95 of 29 ms and a maximum
+  of 58 ms (stutter); in worker mode 60 fps with the main thread almost free.
+  There are still about 45 garbage collections per 300 frames in Mr. Proper
+  (versus 1 in BASIC and 6-16 in other VBXE games), spread across
+  `renderXdlLine`, the attribute map and the blitter; the exact source of the
+  allocation was not located. Native A8E does not implement VBXE, so there is
+  nothing to port.
+
+- 2026-11-04 (performance, second round): the CPU profile taken inside
+  Chromium (CDP `Profiler`, not Node's) showed that the most expensive thing
+  was not VBXE but GTIA's `drawPlayerMissilesClock` (36 %): it runs on every
+  color clock of every line even when there are no players or missiles. It now
+  returns early when no shift register has bits, nothing can load in the span
+  (`pmgMayReloadInSpan`) and there is no pending catch-up of earlier spans;
+  the per-pixel loop and collision mixing changed nothing in that case. The
+  same fix is in native A8E (`AtariIo_PmgMayReloadInSpan`). Other VBXE changes:
+  `attributeMapPf3MaskBit` exits immediately with an empty mask (it was 32 %
+  of the Node profile on D600) and without `Math.floor`; `installIoHandlers`
+  only walks the addresses MEMAC can cover and reuses the capture mask (D600
+  rewrites a MEMAC register every frame); `buildLocalBusSchedule` reuses its
+  buffer; `loadAttributeMapBuffer` copies with `set`; and
+  `applyPlayfieldAttributes` makes a single pass per pixel (the two decision
+  chains were identical) and writes the same RGB to the native plane and the
+  legacy one with the same guards each pass had. Results (the machine was
+  saturated by other user tabs, load 8-12, so these are lower bounds): D600 in
+  the Node harness 28 to 49 fps, windowless Firefox 158 34 to 49 fps. Thread
+  occupancy in Chromium is not comparable between runs under that load.
+  Lessons: leaving measurement processes alive (a windowless Firefox kept
+  running the demo) corrupts everything measured afterwards; the instance and
+  the CDP tabs must be closed when done. Native A8E was not timed; its
+  `antic_graphics_modes_probe` probe was already failing before with the same
+  message (`TestPmgModeZeroPlayfieldMix`).
+
+- 2026-11-04 — Summary of the "VBXE with real software" session (the detail is
+  in the following entries, from newest to oldest). Starting point: almost all
+  real VBXE software stayed in the loader, and D600, Popeye and company were
+  slow or did not draw. Result: Popeye playable, D600 correct and at 60 fps in
+  Chromium, Phoenix/Celeste/Galaga/Crysis/Falcon working. Causes, in the order
+  they appeared:
+  1. MEMAC window remapping (RAM that did not return to RAM when the window
+     was disabled; a full map rebuild that erased the RAM under the ROM).
+  2. Performance: per-DMA-byte `window.A8EVbxe` lookups, a 912-slot rescan per
+     blitter byte, `Math.*` in hot paths.
+  3. GTIA reads `$D01B-$D01E` (`$FF` instead of `$0F`).
+  4. Polarity of `VIDEO_CONTROL` D2 (transparency) inverted with respect to
+     Altirra; the AHRM describes it the other way round.
+  5. Instruction fetch from MEMAC windows (the CPU read the RAM).
+  6. Spurious DLI in vblank (region-exit decision with VSCROL without checking
+     for a visible line). Also ported to native A8E, together with (3).
+  Methodology that worked: (a) compare with Altirra 4.40 under wine (`/run`,
+  debugger with F8, `ba w <addr>` to see who writes an address, `.writemem`
+  to dump 64 KiB, `.vbxe_xdl`, `.antic`, `.restart`) and with jsA8E's RAM;
+  (b) pcHooks in jsA8E to count and order the flow; (c) read the loader
+  structure from the XEX (Popeye: 623 segments with an LZ decompressor at
+  `$8E6A`); (d) the stack on VBI entry reveals what was interrupted; (e)
+  `Object.defineProperty` on an `ioData` property to see who writes it; (f)
+  measure fps in the Node harness, in a fresh Chromium tab over CDP (port 9222,
+  `Page.bringToFront`, `Performance.getMetrics`) and in Firefox over WebDriver
+  BiDi (port 9223).
+  Pitfalls: in the headless harness every access to a global (`window.X`,
+  `Math`) is a slow lookup in the `vm` context, so it overestimates that cost
+  compared with the browser; several files mix CRLF and LF line endings (edit
+  by bytes and check `git diff --stat`); `pkill -f`/`pgrep -f` with a pattern
+  that is present in the command itself kills the shell; a script of mine
+  named `dis.py` shadows Python's `dis` module; the `phase_boot` tests and
+  similar use wall-clock timeouts and fail intermittently when the machine is
+  loaded; `vbxe_fx124_priority_probe_boot` was already failing before this
+  session. Pending: `vbxe_real_software_scene` gates that wait for the end of
+  loading, Firefox (≈2x slower than Chromium), and comparing
+  Galaga/Crysis/Falcon/Phoenix/Celeste with Altirra.
+
+- 2026-11-04: Native A8E: ported the two core fixes made in jsA8E; the VBXE
+  ones do not apply because the native core does not implement VBXE.
+  (1) `AtariIo.c`: the region-exit DLI decision with VSCROL (cycle 6) is only
+  evaluated on lines 8-247; without that guard a last display-list command
+  `$94` after `$B4` left `bModeLineExitDli` active and ANTIC raised a DLI on
+  every line 249-261 (in Popeye it blocked the game). (2) GTIA register table:
+  `PRIOR`, `VDELAY`, `GRACTL` and `HITCLR` read `$0F`, not `$FF` (AHRM 6.1).
+  Tests: `TestExitDliIsNotArmedInVerticalBlank` in `antic_timing_probe.c` and
+  `TestUnassignedReadsReturnF` in `gtia_consol_probe.c` (they fail without the
+  fixes). The existing probe `TestVscrolExitDliDeadlineCycle5` now fixes a
+  visible line (100) before arming the DLI. CTest runs with the repository
+  root as the working directory and needs the ROMs there; checked with
+  temporary links. Baselines already broken in the native build, unrelated:
+  `antic_graphics_modes_probe` and `pokey_sio_contract_probe`.
+
+- 2026-11-04: Popeye now advances and is usable: after the title and the
+  score table it reaches the game screen with all colors. The blocker was a
+  spurious DLI in vblank. `clockAction` (`playfield/renderer_base.js`) arms
+  `io.dliCycle` at cycle 6 of each line when `modeLineExitDli` is active and
+  the row counter matches VSCROL, but did not check that the line was visible.
+  If the last display-list instruction is a region exit with scroll and DLI
+  (`$94` after `$B4`), `modeLineExitDli` stayed active, the row counter
+  stopped advancing in vblank and kept matching VSCROL: ANTIC generated a DLI
+  on every line 249-261. Popeye's DLI handlers are multi-line routines with
+  WSYNC (color kernel), so one of them ran for the whole vblank, the VBI
+  handler entered its `$21A1` loop (wait for `VCOUNT=$7E`) on line 44 of the
+  next frame and the next VBI interrupted it before line 252, forever: the
+  main thread (30 s wait at `$A7C1` with exact RTCLOK equality) never ran
+  again. Now the decision is only evaluated on lines 8-247. How it was found:
+  the interrupted PC pushed by the VBI (always `$21A3`), the stack (VBI frame
+  over VBI frame) and an Object.defineProperty access on `io.dliCycle` to see
+  who armed it.
+
+- 2026-11-04: Popeye now works (title, "TOP FIVE CHART", scenery with the
+  attribute-map colors). Cause: the CPU fetches opcode and operands directly
+  from `ctx.ram[pc]`, so the code the game executes from a MEMAC window (it
+  configures `$D65E=$99`, `$D65F=$80`: an 8 KB window at `$9000-$AFFF` over
+  VRAM, decompresses its character sets and its code there, and jumps to
+  `$A516`) was read from the underlying RAM (graphics data) instead of VRAM.
+  `installIoHandlers` now builds `ctx.vbxeFetchMask` with the addresses that
+  MEMAC routes to VRAM, and `run`/`executeOne` stage the 3 instruction bytes
+  in `ctx.ram` (`stageWindowFetch`) and restore them when done
+  (`restoreWindowFetch`). With no active window the cost is one comparison
+  with `null` per instruction. New test `tests/vbxe_memac_code_fetch.test.js`
+  (in `test:vbxe`). How it was reached: Altirra under wine with the debugger
+  (watchpoints and `.writemem`) showed that the code at `$A516` existed in its
+  RAM; the XEX does not contain it (623 segments with an LZ decompressor at
+  `$8E6A`) and jsA8E traces showed the decompression destinations inside the
+  MEMAC window.
+
+- 2026-11-04: D600 (blitter demo) now looks like Altirra: ANTIC hires bitmap
+  colored by the attribute map (one color per line) with the blitter spheres
+  on top. The cause was the polarity of bit 2 of VIDEO_CONTROL. Altirra
+  (`WriteControl`: `mbOvTrans = (value & 4) == 0`, and `RenderOverlay` skips
+  color 0 only in that branch) makes overlay color 0 transparent with D2 = 0
+  (reset value) and opaque with D2 = 1; D3 adds color `$F` only in the
+  transparent case. jsA8E had it the other way round, following the AHRM
+  prose, and with `VIDEO_CONTROL=3` (the value D600 and Popeye use) the
+  zero-filled overlay was painted as opaque black covering the background.
+  New helper `overlayTransparency` in `vbxe.js`. Since the inversion is exact,
+  the tests keep their intent by inverting D2: `videoControlActive` values in
+  `vbxe_device_state.test.js` and the writes to `$D640` in the `.asm` sources
+  of `implementation/AHRM Validation` (29 files), with all the `.XEX` files
+  regenerated with the project assembler (including the `_V2_`, `12`, etc.
+  aliases that the tests declare).
+  Performance (measured in the headless Node harness, not in the browser):
+  D600 went from 8 to about 27-45 fps. `advanceBlitter` walked the 912 local
+  bus positions for every copied byte (it now counts once and subtracts),
+  `attributeMapCell` caches the cell per line and drops one closure per call,
+  and `blitByteCycles`/the column division avoid `Math.*` on the per-pixel/
+  per-byte path (in the `vm` context every global is a slow lookup).
+  D600 with BASIC active stays waiting for a line from `E:` (it needs ENTER and
+  then a key): same as Altirra with BASIC. Popeye still does not draw the
+  playfield (ANTIC's screen memory stays at zero); that is another problem.
+  `vbxe_fx124_priority_probe_boot` was already failing in the previous commit
+  ("legacy bit 6 must win over PF2"); it is not a regression of this change.
+
+- 2026-11-03: GTIA reads of `$D01B-$D01E` (PRIOR, VDELAY, GRACTL, HITCLR)
+  returned `$FF`; AHRM 6.1 and Altirra return `$0F` across `$D015-$D01E`
+  (no floating bits). Popeye reads `$D01C` and branches on bit 7. Fixed in
+  the `hw.js` table and covered by `tests/gtia_unassigned_reads.test.js` (in
+  `test:gtia-spans`). This is not enough for Popeye to draw its screen.
+  Compared with Altirra (VBXE FX 1.26 via wine): the XDL is identical,
+  effective DMACTL is `$21` in both and the GTIA colors are 0 in both; the
+  difference is that in jsA8E ANTIC's screen memory (`$B029-$BFFF`) stays at
+  zeros except for the status line, i.e. the game does not get to draw the
+  playfield.
+
+- 2026-11-03: with VBXE the emulator ran 2.7 times slower (31 fps versus 83
+  without VBXE, measured with Celeste headless). The profile showed two fixed
+  costs per scanline/DMA byte: (1) `readExpansionMemoryByte` (called for every
+  ANTIC DMA byte) consulted `window.A8EVbxe` 4 to 8 times per call, and in a
+  `vm` context every access to the global is slow; now the API is resolved
+  once (`getVbxeApi`) and only if VBXE is enabled. (2) `buildLocalBusSchedule`
+  walked the 912 local bus positions on every scanline to count the free
+  ones; now `reserveLocalSlot` keeps the counter. Result: 77 fps with VBXE
+  (83 without it). `test:vbxe` passes. Pending observation (Popeye): its main
+  loop at `$21A3` waits for `VCOUNT=$7E` and then toggles DMACTL between 3 and
+  0 with cycle timing inside the line; the playfield does not appear, and the
+  overlay at `$0-$1E000` stays empty with the blitter not started.
+
+- 2026-11-03: fixed two MEMAC window remapping bugs that lost CPU writes and
+  explained why most real VBXE software did not get past the loader. (1)
+  `installIoHandlers` routes RAM addresses under an active MEMAC window to
+  `ioAccess`, but never returned them to RAM when it was disabled; outside the
+  window `ioAccess` treats the address as a write-only register (`sram[addr] =
+  v`) and the RAM did not change. Now they are restored to RAM before the
+  active windows are reinstalled. (2) `vbxeMapSync` pointed at
+  `setupMemoryMap`, which, with the OS ROM off, reloaded `$C000-$FFFF` from
+  `sram` (stale while that RAM is visible) when writing
+  `MEMAC_CONTROL`/`BANK_SEL`, erasing the image the program had just copied.
+  Now it uses `syncVbxeWindows`, which only reinstalls the windows. Phoenix
+  copies its image from VRAM to `$0400-$FFFF` with a stub at `$4000` and jumps
+  to `$D800`; before, it executed BRK (zeroed RAM), fell into PC=0 and VBXE
+  never got activated; now it runs its own code with `VIDEO_CONTROL=1` and XDL
+  at `$49000`. `vbxe_memac_window_sync` covers both cases and fails if either
+  fix is disabled. Associated diagnosis: the XEXs are mounted as a disk and
+  load at normal SIO speed (~5 frames per sector), so the 480-frame gates of
+  `vbxe_real_software_scene` only saw the loader; Phoenix needs ~4200 frames,
+  Falcon/Crysis ~9000 and Galaga ~19000. Those gates still do not test the
+  real software and must wait for the end of loading before accepting a scene.
+
+- 2026-11-03: VBXE cleanup audit: no dead functions or retirable exports were
+  found; the blitter, snapshot and MEMAC trace APIs have consumers in the
+  runtime or in regressions. The repeated overlay geometry and DMA tables were
+  centralized and a redundant scheduler branch that returned exactly the same
+  result as the common path was removed.
+
+- 2026-11-03: fixed the overlay DMA start in the local schedule. The table now
+  uses Altirra's indices `Narrow=0`, `Normal=1`, `Wide=2` and reserves the
+  first slots at `10/18/26`, respectively; before, narrow and wide were
+  swapped. `vbxe_blitter_state` covers the three widths. The blitter's
+  cycle-by-cycle consumption of the remainder and the physical MEMAC order
+  still require an independent differential comparison.
+
+- 2026-11-03: MEMAC accesses now keep a temporal trace with type, AHRM phase,
+  CPU cycle, relative scanline cycle and candidate local slot.
+  `localBusBudget()` uses that slot when the caller has a timestamp and keeps
+  the aggregate path for older accesses. The trace is kept in snapshots and
+  `getMemacTrace()` exposes it for differential diagnostics.
+
+- 2026-11-03: `vbxe_browser_backend` compares the four paths against the
+  persisted baseline `tests/fixtures/vbxe_browser_golden.json`. It also
+  accepts `A8E_VBXE_REFERENCE` to compare an external Altirra JSON with the
+  same schema, without introducing dependencies.
+
+- 2026-11-03: the browser gate accepts `a8e_renderer=2d` and forces Canvas2D
+  in both main-thread and worker. The VBXE capture now validates four paths
+  (WebGL2 main/worker and Canvas2D main/worker), with dimensions, a non-empty
+  PNG and an identical hash between the two backends of each pair.
+
+- 2026-11-03: the local scheduler now keeps the MEMAC access type: CPU/ANTIC
+  reads reserve phase 1 and CPU writes reserve phase 3. The aggregate counter
+  is kept for compatibility with older callers and `vbxe_blitter_state`
+  verifies that both types are not mixed.
+
+- 2026-11-03: refined the replay after `COLCLR`: the later span keeps the
+  visual composition by `PRIOR`, but the collision mask uses the current
+  playfield priority, avoiding reinjecting latched P/M contributors from the
+  earlier span. This keeps the historical P5 and GTIA-special oracles while
+  leaving the normal replay without `COLCLR` untouched.
+
+- 2026-11-03: completed the raster handling of `COLCLR` during the GTIA
+  replay. The line records the horizontal cycle of the clear, discards earlier
+  contributions and rebuilds only the later span; on the path validated by
+  FX 1.26 the later calculation uses the current playfield priority so as not
+  to reintroduce P/M from a pre-clear span. The P5 and GTIA-special probes
+  pass again.
+
+- 2026-11-03: cleaned up per scanline the contributor planning of
+  `vbxeCollisionPriority` before drawing GTIA. The planning keeps a mark valid
+  only for the current line; without this cleanup the collision replay could
+  reuse P0/P1 of the same line of the previous frame and break the P5 probe
+  when those players were turned off.
+
+- 2026-11-03: added `npm run test:vbxe:browser`, a CDP gate with no external
+  dependencies that selects the same application in main-thread and worker,
+  waits for a VBXE scene and compares dimensions, size and hash of the PNG
+  capture. It restores the original URL and can be made mandatory with
+  `A8E_REQUIRE_CDP=1`; without Chromium/CDP available it is an explicit skip.
+
+- 2026-11-03: replaced the purely aggregate VBXE budget with an explicit
+  schedule of 912 local slots per scanline. Overlay uses AHRM's even phases,
+  MEMAC the odd phases, XDL reserves its 22 slots after the active area and
+  the map reload reserves the next 172 cells; the blitter consumes only free
+  slots. The aggregate contract is kept and now has a regression on concrete
+  positions. The MEMAC access still reaches the model as a counter, so the
+  exact CPU-read/write phase on the external bus remains the next refinement.
+
+- 2026-11-03: the VBXE GTIA replay now also recalculates the line's
+  `COLDETECT` contribution. Before, it was preserved to avoid double
+  counting, which prevented reflecting a mid-line change of `PRIOR`/GTIA mode.
+  Now the mask produced by the initial render is removed, rebuilt per span and
+  the historical bits of earlier lines are kept. The `COLCLR` cycle is
+  documented and covered in the later entry.
+
+- 2026-11-03: fixed the attribute-map buffer reload at the end of a row in a
+  repeated XDL entry. The reload no longer depends on decoding a new entry: it
+  also happens when the five-bit vertical counter returns to zero, after
+  advancing the address by the stride. The regression covers two consecutive
+  rows and confirms that the second uses its 43 freshly captured cells.
+
+- 2026-11-03: adjusted the blitter to charge the initial BCB read cycle with a
+  constant source (`AND=$00`), which Altirra discounts separately before
+  applying the reduced per-output-byte cost. The operation is still
+  functional and the state/timing tests remain green.
+
+- 2026-11-03: the VBXE compositor can now rebuild overlay and playfield per
+  GTIA span within a single line. `applyGtiaSpans()` redraws each interval with
+  the current `PRIOR`/GTIA mode, instead of reapplying only map colors over an
+  overlay composed with the first state. The collision is kept from the
+  primary render during this replay so as not to count the same pixel twice;
+  collision dependent on mid-line changes is still a specific pending
+  differential. The P5/multicolor and GTIA-special probes still pass.
+
+- 2026-11-03: also separated the `VIDEO_CONTROL` latch in the temporal model:
+  D1-D3 are applied on write and D0 is consumed at VSync, per AHRM 12.4. The
+  register regression was updated and remains green.
+
+- 2026-11-03: the attribute map now explicitly captures the 43 four-byte cells
+  during row load and every pixel of that line consumes the buffer, not the
+  live VRAM. This aligns the model with AHRM/Altirra's line buffer and keeps a
+  MEMAC write during display from retroactively modifying the line. The buffer
+  is part of snapshots and the state regression covers the immutability of the
+  capture.
+
+- 2026-11-03: fixed four edges of the XDL path per AHRM 12.4 and Altirra 4.40's
+  `vbxe.cpp`. `VIDEO_CONTROL` applies EXT and the two transparency bits
+  immediately, leaving the XDL bit for VSync; the decoder disables the invalid
+  mode combination `c0&3==3`; a new text entry starts at `OvScrollY`; and
+  VSync/warm reset also keep `characterBase` and the address/stride latches.
+  The `vbxe_device_state` and `vbxe_register_snapshot` regressions pass. The
+  full raster compositor, the attribute map's temporary buffer and per-phase
+  DMA arbitration remained pending; the buffer and the first raster replay
+  were completed in the later entries, but per-phase arbitration is still
+  open.
+
+- 2026-11-03: completed the first visual gate of the real FX1.26 corpus in
+  `vbxe_real_software_scene.test.js`, integrated into `test:vbxe:full`. With
+  `turbo=true`, `sioTurbo=true`, 130XE-128K, NTSC and active rendering, the
+  gate checks the corpus at checkpoints up to 480 frames. Popeye, DACTest,
+  Textmode Test mode 4, Crysis and Falcon produce a non-black frame different
+  from any reset; Galaga, Celeste, D600 and Phoenix keep only their boot gates
+  for now because the headless capture is black or matches the reset set. The
+  initial 120 frames were insufficient for Popeye. The visual gate complements
+  the minimal XEX's RAM marker, but is not yet a program-specific mark or a
+  golden comparison against Altirra.
+
+- 2026-11-03: hardened the corpus visual gate. The test no longer accepts any
+  different digest: it compares checkpoints of 120, 240, 360 and 480 frames
+  against all reset digests and requires at least one non-black frame. This
+  keeps a temporal variant of the boot screen or a transient black state
+  (observed in Galaga) from being interpreted as a valid scene; five cases
+  pass and four remain explicitly boot-only.
+
+- 2026-11-03: the visual corpus configuration was separated from the
+  synthetic RAMBO test. The real programs use 130XE-128K/NTSC, consistent with
+  the documented Altirra validation; the minimal marker keeps RAMBO explicit.
+  Galaga is not forced to pass a black capture: it is flagged as pending an
+  observable marker or scene in headless.
+
+- 2026-11-03: `npm run test:vbxe:full` went green after integrating the
+  hardened visual gate. The output records five visually observable scenes
+  and four explicit boot-only cases; pixel-by-pixel equivalence with Altirra
+  is not claimed.
+
+- 2026-11-03: the real gate now adds a SHA-256 fingerprint of the 64 KiB of
+  memory at each checkpoint. Cases without a visual scene are not relaxed to
+  `cycleCounter`: they must change the RAM with respect to the reset set and
+  record that marker as evidence of XEX execution. This still does not
+  replace a scene-specific marker or an Altirra comparison.
+
+- 2026-11-03: enabled the worker path for VBXE profiles as well. The UI no
+  longer forces the main runtime when VBXE is active: the worker receives the
+  FX configuration and composes `vbxeRgb`/hires inside its `OffscreenCanvas`.
+  A dedicated browser regression comparing worker, main-thread fallback and
+  Canvas 2D is still pending; headless functional validation does not cover
+  `OffscreenCanvas`.
+
+- 2026-11-03: manual CDP smoke test confirmed both backends with VBXE
+  FX1.26 active: worker `true`/WebGL2 and main-thread fallback `false`/WebGL2
+  started with a non-black 336x240 PNG capture (`40795` non-black pixels in
+  both cases). Automated content equivalence and Canvas 2D remain pending;
+  this result only validates that the worker path does not stay black or block
+  automation.
+
+- 2026-11-03: the stage 7 check was repeated on the real Chromium instance
+  (`localhost:8090/jsA8E`, CDP `9222`) because the headless harness captured a
+  common initial screen. `A8EAutomation.runXexFromUrl()` loaded the FX1.26
+  corpus and advanced 120 frames with `rendererBackend=webgl2` and
+  `worker=false`; the observed PCs left the OS's initial loop. The Chromium
+  capture produced a non-black frame. In Textmode Test, the menu digest was
+  `8288d135...` and the one with mode 4 selected `8c5f3da9...`, so the visual
+  change is observable in the browser. This validates the browser capture
+  protocol, not yet equivalence with Altirra or a headless baseline; the
+  external comparison is still pending.
+
+- 2026-11-03: closed the first part of the XEX harness hardening. The
+  headless run now inherits a configuration comparable to Chromium (explicit
+  `sioTurbo` and RAMBO in the diagnostic), and
+  `vbxe_xex_scene_marker.test.js` assembles a minimal XEX, boots it and waits
+  for the RAM markers `$0600=$A5`/`$0601=$5A`; the test passes and is in
+  `test:vbxe:full`. A breakpoint during boot proved unreliable in headless, so
+  the gate uses observable memory. The real corpus gates still need their own
+  scene markers before accepting visual baselines.
+
+- 2026-11-03: an attempt was made to advance stage 7 with a visual baseline of
+  Popeye, Galaga, DACTest, Textmode Test, Crysis, Celeste, D600, Falcon and
+  Phoenix. The experiment is not valid evidence: the headless captures
+  returned the same frame and the VBXE VRAM stayed at zero; the existing gates
+  use `runXex({ awaitEntry: false })` and only check that `cycleCounter`
+  advances. A variant that waited for the XEX entry did not reach the entry
+  point within the harness limit. The invalid baseline was withdrawn. Before
+  comparing images with Altirra the harness must be made to prove real
+  execution (XEX entry or scene marker) and capture a non-empty VRAM/frame;
+  stage 7 stays in progress and this conclusion avoids declaring visual
+  equivalence from a common initial screen.
+
+- 2026-11-03: advanced step 6 of blitter timing. New XDL entries now reserve
+  the 22 fixed local update cycles defined by AHRM 12.4, while repeated lines
+  do not pay an additional update. The budget regressions were adjusted and
+  the continuous/restart pair is still green; the scheduler stays aggregated
+  per scanline because there is no horizontal marker yet that would justify
+  per-phase arbitration.
+
+- 2026-11-03: completed step 5 of registers, MEMAC, reset and snapshots.
+  `vbxe_register_snapshot` checks both banks `$D640`/`$D740`, read-only/
+  write-only readback, bit masks, VSync, MEMAC A and the configuration latch.
+  It also restores an active XDL and a blitter during the load of its BCB;
+  `restoreState()` now sanitizes the impossible bits of that latch in old or
+  edited snapshots. Warm/cold reset coverage was already in
+  `vbxe_device_state`; the full VBXE suite remains green.
+
+- 2026-11-02: closed the first deterministic VBXE priority and collision
+  matrix. The `vbxe_priority_collision_matrix` regression pins the PF0--PF3/P5
+  and P0--P3 groups in normal GTIA/9/11, the `$7F` mask measured for visible
+  inputs in GTIA 10, and the legacy/full priority tables of FX 1.20, 1.24,
+  1.26 and 1.26r. The XEX coverage of `COLMASK`/`COLDETECT`, P0+P1 and P5 is
+  also kept. Still pending: widening the differentials of real scenes and the
+  transparency/map combinations not yet measured.
+
+- 2026-11-02: implemented the first visible span replay of attribute maps.
+  When a line closes, the GTIA write queue rebuilds the map per interval using
+  the initial registers and the values of `COLPF3` and `PRIOR`/GTIA mode in
+  effect at each event; ANTIC hires PF3 is verified on the legacy and hires
+  outputs. The path keeps the overlay pixels and refreshes only the necessary
+  map regions. Coverage is still partial: VBXE map register changes and the
+  full crossing with hires/text overlay and per-phase timing remain pending.
+  `vbxe_device_state` and `npm run test:vbxe:full` pass.
+
+- 2026-11-02: completed the VBXE attribute-map geometry slice. The map now
+  shares `OvMisc`'s narrow/normal/wide start and width in both the legacy
+  `vbxeRgb` plane and the hires presentation plane, even when the overlay is
+  disabled. Added unit coverage for all three widths and updated the normal
+  and narrow AHRM boot oracles. Full temporal cross-product replay and
+  phase-exact timing remain separate pending work.
+
+- 2026-11-02: fixed VBXE XDL restart state. `verticalSync()` now resets the
+  per-frame visual latches while preserving the running overlay and
+  attribute-map address/stride latches, as required by AHRM 12.4. Added a
+  multi-frame regression proving that the counters continue from the previous
+  line, that `AtMapOn` can reuse the carried map state, and that visual
+  defaults still reset. The XDL start address remains restarted from
+  `XDL_ADR0-2` each frame.
+
+- 2026-11-02: audited the `VBXE` branch against AHRM 12.4, including the local
+  uncommitted changes. `npm run test:vbxe:full` and `npm run test:automation`
+  pass; two general tests are skipped for lack of ROMs and `npm run lint`
+  cannot run because the environment exposes ESLint 6.4 without a compatible
+  configuration. The conclusion is practical compatibility, but not complete
+  AHRM compliance: in the audited state, `verticalSync()` reset XDL/map
+  addresses that AHRM says to keep; that first point has already been fixed
+  and regressed on the same branch. The compositor's fixed normal geometry for
+  the attribute map was also fixed after that audit. Still open are the XDL
+  budget that reserves decoded bytes instead of the 22 AHRM cycles and the
+  aggregate local arbitration per scanline. The MEMAC-B polarity uses
+  D7=CPU/D6=ANTIC for compatibility with Altirra and software, even though
+  the AHRM table labels them the other way round; the MAPPAR scroll remains an
+  AHRM/Altirra discrepancy without a conclusive physical differential. These
+  conclusions and priorities are detailed in `VBXE.md` and `VBXE_ROADMAP.md`;
+  no code was modified during the audit.
+
+- 2026-11-02: documented the VBXE completion plan in `VBXE_ROADMAP.md` with
+  separate definitions for practical compatibility, raster fidelity, and
+  product integration. Added architecture, scanline, and dependency diagrams;
+  stage exit criteria; regression/differential gates; and links from the root,
+  native, browser, core, renderer, and worker README/documentation. Corrected
+  the documentation boundary so JavaScript FX 1.26r RAMBO is recorded as
+  implemented, while worker RGB transport and native VBXE remain optional
+  integration work.
+
+- 2026-11-02: began the missing scanline-span path from Altirra's
+  `AddRegisterChange`/`RenderScanline` model. In addition to the established
+  P/M geometry queue, each line now snapshots and timestamps all four player,
+  four playfield/background colour registers and `PRIOR`; I/O records their
+  latched values (including the GTIA forced-zero LSB). This is the required
+  temporal source for VBXE's later span compositor; rendering those spans is
+  still pending, so this entry does not claim visible mid-line fidelity.
+
+- 2026-11-02: wired the first visible consumer of that timeline. For XDL
+  lines using the default playfield palette (no attribute map), jsA8E retains
+  the decoded XDL line until the scanline closes and reapplies the palette in
+  GTIA event spans, selecting PF0--PF3/background from the recorded register
+  state. At that point overlay and attribute-map span replay remained open;
+  the later map/PF3 slice is documented above. `test:gtia-spans` runs the
+  queue's timestamp/order regression independently of the longer VBXE suite.
+
+- 2026-11-02: added the FX 1.26 RAMBO-capable profile (`fx1.26r`). It returns
+  `MINOR_REVISION=$A6` and maps the PORTB-D4-enabled `$4000-$7FFF` CPU/ANTIC
+  window directly to local `$40000-$7FFFF`, using inverted D6/D5/D3/D2 bank
+  bits as documented by AHRM. It is selectable at either VBXE page in the UI
+  and proxy configuration; the state regression pins the revision and both
+  end-bank addresses, while `vbxe_rambo_bus` verifies actual CPU writes,
+  ANTIC reads, D4 disable, and bank isolation through the installed handlers.
+
+- 2026-11-02: aligned `BLITTER_START=0` with Altirra's event handling. A
+  stop now cancels a completion IRQ still queued for its in-line phase without
+  acknowledging one that already fired; `IRQ_CONTROL` remains the explicit
+  acknowledge path. The blitter-state test covers this stop-before-event
+  boundary.
+
+- 2026-11-02: updated the PF3 attribute-map boot oracle for the already
+  Altirra-aligned CR/CG/CB expansion: a stored `$FE` has D7 set and therefore
+  reads as `$FF` after the hardware's D7→D0 expansion. Both PF3-green and
+  PF2-red expected components now express that observable value. The same
+  stale `$FE` expectations in normal/lores reverse and FX1.24 priority gates
+  were updated to `$FF`.
+
+- 2026-11-02: implemented Altirra's VBXE configuration-pin latch at every
+  selected `$DxC0-$DxFF` address. It stores only DATA0/DCLK/`/CONFIG` (D0-D2),
+  is snapshot-safe, survives warm reset, and clears on a power cycle. The
+  device-state regression covers both register pages and reset boundaries.
+  The CPU I/O installer now maps that complete latch range as well as the
+  normal `$Dx40-$Dx5F` register bank.
+
+- 2026-11-02: matched two remaining XDL timing latches to Altirra 4.40:
+  `OVSCRL` now retains only its documented three text-scroll bits, and the
+  scanline blitter budget now reserves the FX's distinct narrow/normal/wide
+  overlay DMA counts (lores 128/160/168, standard/hires 256/320/336, text
+  195/243/255). Focused XDL and blitter-state tests cover high-bit scroll
+  masking, width-code-three's narrow alias, and both non-normal reservations.
+
+- 2026-11-02: began the AHRM/Altirra fidelity pass by correcting the XDL
+  `OvMisc` latch decode. jsA8E now preserves the narrow alias, ANTIC
+  playfield-palette bits 7-6, and overlay-palette bits 5-4; it had read the
+  latter from bits 3-2. `vbxe_device_state.test.js` now asserts all three
+  fields and the actual descriptor byte count. AHRM's “minus one” wording for
+  MAPPAR scroll conflicts with Altirra's literal latch; that remains pending
+  an external visual differential rather than being changed speculatively.
+
+- 2026-11-02: aligned three reset-visible details with Altirra: palette writes
+  now expand the seven hardware component bits by copying D7 to D0,
+  `WarmReset` preserves the P0--P3 priority latches while clearing the blit
+  collision code, and every linked blitter control block begins with a fresh
+  collision code. Device/blitter state tests cover those latches and the
+  linked-list boundary.
+
+- 2026-11-02: replaced the attribute-map's synthetic two-dimensional index
+  with Altirra's live map-row state: literal five-bit scroll counters,
+  overscroll wrap, 1--32 pixel cells, and address advancement only when the
+  row counter reaches cell height. `localBusBudget` now reloads from that
+  same row boundary. The existing Reverse-character regression exposed the
+  corrected 7-to-8-bit palette expansion; its expected RGB values were
+  updated and the attribute-map boot gates remain green.
+
+- 2026-11-02: moved XDL overlay placement onto Altirra's real field bounds:
+  standard and lores now occupy narrow `$40-$BF`, normal `$30-$CF`, or wide
+  `$2C-$D3` in the ANTIC line buffer; hires/text use the corresponding
+  centered 512/640/672-pixel native signals. Every mode transition clears
+  both presentation planes, preventing stale standard pixels from leaking
+  under hires/text. Device-state coverage now pins all three widths.
+
+- 2026-11-02: made VBXE soft reset match Altirra `WarmReset`: it now disables
+  MEMAC while retaining its bank/base latches, preserves XDL addresses and
+  `COLDETECT`, and cancels only active XDL processing. A power cycle remains
+  the full clear path. Device-state coverage now distinguishes both resets.
+
+- 2026-11-02: implemented the `OvMisc` default playfield-palette path for
+  XDL lines without an attribute map. It recolors visible GTIA
+  playfield/background samples in the selected VBXE palette while preserving
+  player/missile winners; focused device state coverage checks both cases.
+
+- 2026-11-02: corrected MEMAC-B access enables against Altirra 4.40's
+  `UpdateMemoryMaps`: bit 7 grants CPU read/write and bit 6 grants ANTIC DMA,
+  not the inverse. The previously inverted mapping made the supplied DACTest
+  fall back from `$D640` to `$D740` after its CPU-only `$80` probe. Focused
+  device-state assertions now cover each one-bit form. A fresh Chrome run at
+  128K/FX 1.26 keeps DACTest's probe at `$D640` and reaches its red VBXE field
+  instead of `NO VBXE or improper core`.
+
+- 2026-11-02: completed the functional-compatibility validation pass. The
+  deterministic register/XDL/map/MEMAC/blitter suite is green, as are the
+  supplied FX 1.26 Popeye, Galaga, DACTest, Textmode (all four selections),
+  Crysis, Celeste, D600, Falcon, and Phoenix execution gates. `VBXE.md` now
+  distinguishes that usable compatibility milestone from the still-open
+  phase-exact and optional hardware-fidelity work.
+
+- 2026-11-02: parameterized the non-reversed PF3 attribute-map diagnostic
+  with its GTIA mode and raw Graphics-8 source byte, then added reproducible
+  FX 1.26 wrappers for GTIA 9, 10, and 11. The attribute-map assembler gate
+  now rebuilds and byte-compares all three. Altirra's source confirms that
+  PF2-to-PF3 bitmap promotion belongs to its ordinary GTIA renderer; the new
+  diagnostic is retained for an externally visible special-mode palette/map
+  differential rather than broadening jsA8E from an ambiguous black field.
+
+- 2026-11-02: the phase pair now repeats one measurement per video frame: its
+  first DLI paints the visible palette entry blue, the blitter IRQ paints it
+  red, and the next frame restarts the same transfer. Fresh Altirra FX 1.26
+  captures of both continuous and restarted map forms show the same stable
+  red/blue/red scanline geometry. The one forced buffered-map reload has no
+  observable whole-line displacement, matching jsA8E's aggregate scheduler;
+  no timing change is warranted. A separate horizontal marker would still be
+  required to claim sub-line arbitration fidelity.
+
+- 2026-11-02: the corrected phase-pair palette IRQ is now externally visible
+  in Altirra: both stable captures are red, proving completion delivery and
+  the palette target. A static capture necessarily observes the later frames,
+  not the completion frame's in-line edge, because the one-shot blit leaves
+  that palette red. The next timing diagnostic must restart deterministically
+  once per frame; no jsA8E scheduler change follows from the static result.
+
+- 2026-11-02: aligned `XDLC_END` with Altirra's XDL engine: an entry marked
+  `END` now remains active through its complete repeat count, instead of
+  disappearing immediately after it is decoded. `vbxe_device_state.test.js`
+  covers a terminating standard-overlay entry with one additional repeated
+  line. This fixes a real XDL rendering/lifetime gap; the phase-pair assembly
+  and boot regressions remain green.
+
+- 2026-11-02: rebuilt the attribute-map phase pair against Altirra 4.40's
+  local `vbxe.cpp` decoder. The diagnostic now writes its XDL to local
+  `$02000`, supplies its opaque standard source at `$28000`, and accounts for
+  `CB` auto-incrementing `CSEL`. Its final map-off entry now repeats beyond
+  the visible field, isolating phase from an XDL vertical-end boundary. Both
+  wrapper binaries reassemble and their device-state/boot checks pass. The
+  palette marker still needs an independently observable completion edge;
+  this is not evidence for changing jsA8E scheduling.
+
+- 2026-11-02: added the FX 1.26 sustained-execution gate for the additional
+  supplied VBXE XEX corpus: `celeste1.3.xex`, `demoD600.xex`, `falcon1.xex`,
+  and `phoenix-vbxe.xex`. Each launches and executes for 400,000 cycles in
+  jsA8E with VBXE enabled. The gate is included in `test:vbxe:full`; it is a
+  compatibility smoke test, not an Altirra image-equivalence claim.
+
+- 2026-11-02: fresh Altirra FX 1.26 captures of both current phase-pair XEXs
+  are stable: each has a red outer field and a blue central XDL band (the
+  restarted-map form has a small artifact at the band's upper edge). This
+  confirms the blitter completion path is reached, but the two presentation
+  planes still hide the intended within-line edge and do not distinguish the
+  restarted map fetch. No scheduler change follows from these captures.
+
+- 2026-11-02: corrected the phase-pair capture documentation to name the
+  actual Altirra FX 1.26 register page used by this setup, `$D640` (with
+  `alt_page=0`), rather than the stale `$D600` page.
+
+- 2026-11-02: `crysis1.xex` reaches its 320x480i presentation screen in
+  Altirra 4.40 with VBXE FX 1.26. `vbxe_crysis_boot.test.js` records the
+  corresponding jsA8E sustained-execution launch gate and is part of
+  `test:vbxe:full`. It deliberately does not assert image equivalence.
+
+- 2026-11-02: the supplied `Galaga_VBXE_1.01.xex` starts in Altirra 4.40
+  under the same NTSC, 128K, VBXE FX 1.26 configuration and reaches its title
+  screen. `vbxe_galaga_boot.test.js` is the corresponding jsA8E launch gate,
+  included in `test:vbxe:full`; like Popeye, it asserts executable sustained
+  boot with VBXE active, not frame-image equivalence. The subsequently
+  supplied `DACTest (2009, KMK).xex` reaches its self-test menu in Altirra
+  and passes the same sustained-execution gate in jsA8E. `Textmode Test
+  (2009, KMK).xex` reaches its 80x24/25/30/32 mode-selection screen in
+  Altirra. Its jsA8E FX 1.26 regression sends each of the four menu keys,
+  verifies delivery through POKEY, and confirms that the rendered result
+  changes from the menu. This covers the interactive mode transition, though
+  it is still not a pixel-for-pixel Altirra comparison.
+
+- 2026-11-02: began real-software validation with the user-supplied
+  `build/Altirra-4.40-bin/popeye.xex`. Altirra 4.40 starts its VBXE FX1.26
+  detection/instructions screen successfully. `vbxe_popeye_boot.test.js`
+  now boots that exact XEX under jsA8E FX1.26 and asserts sustained execution
+  with VBXE still enabled; it is included in `test:vbxe:full`. This is an
+  entry/initialisation compatibility gate, not a claim of automated gameplay
+  or image equivalence.
+
+- 2026-11-01: Altirra 4.40 under Wine successfully ran the known
+  `VBXE_BLITTER_IRQ_TEST.XEX` and showed its expected black/blue IRQ stripes,
+  validating this local external environment and its FX 1.26 setup. The phase
+  continuous capture nevertheless stayed blue, so the phase probe cannot yet
+  establish timing. It now records `POLLSEEN` at `$0084`: the DLI shows green
+  when polling observed completion but `IRQSEEN` (`$0083`) did not, separating
+  a missing IRQ from an unfinished blit before the pair is interpreted again.
+  A second `STARTED` marker at `$0085` now makes an active blit yellow and an
+  unreached start blue. Altirra then established that the old VCOUNT polling
+  never reached its start write; the shared probe now arms the blit from its
+  first DLI instead. This gives both wrappers the same visible scanline phase
+  and removes the invalid VCOUNT-dependent pre-start state. Its first external
+  capture was black, however, so it is likewise invalid: do not tune jsA8E
+  from it. The remaining immediate task is to debug this diagnostic-only DLI
+  start path until it yields its self-checking red field in Altirra. The next
+  variant lets the DLI release only a RAM flag and has the main loop write
+  `BLITTER_START`, preserving shared DLI phase without issuing that device
+  write from NMI context. Its first external run still remained in the blue
+  pre-DLI state. Enabling the standard OS VBI (`NMIEN=$C0`) instead yielded a
+  black display, because the OS recovered its own video state; neither result
+  is valid timing evidence. A WSYNC-only replacement also failed the existing
+  headless IRQ contract, so it was rejected. The reproducible DLI version is
+  restored and all timing conclusions remain deferred until its Altirra RAM
+  markers can be observed directly. Altirra's automated debugger breakpoint
+  at `READY` now reads `$0082-$0085` as `$09,$01,$01,$01`, validating the
+  start, completion poll, and completion IRQ. The apparent all-blue field was
+  a visual-probe error: the opaque XDL uses palette 1 entry `$FF`, above the
+  GTIA `COLPF1` marker. The diagnostic now changes that VBXE palette entry
+  directly; this is required before the pair can expose a phase edge. The
+  first palette variant wrote colors on every DLI and made the headless boot
+  harness fail to reach its stable loop, so it was simplified: the DLI only
+  releases the start and the completion IRQ performs the sole blue-to-red
+  palette write, which remains visible for later lines. The subsequent Altirra
+  marker read remains valid (`$5B,$01,$01,$01`), but its stopped-frame output
+  mixes presentation planes and does not yet expose a clean red edge. Treat
+  the horizontal phase capture as pending; do not retune jsA8E from its image.
+  The map entry itself has no overlay payload and exposes palette 0/color 0,
+  so the probe updates it together with opaque standard-XDL palette-1/color
+  `$FF`. Both captures now identify that visible plane. The final phase form
+  leaves P0:$00 selected and has each DLI repaint only its three blue RGB
+  components; the IRQ paints that same entry red for the remainder of its
+  completion scanline, then disables DLI so that edge and its red lower field
+  remain stable for capture. This restores a true horizontal edge without
+  heavy DLI palette-selection traffic. The DLI disable now precedes the red
+  write: an NMI can interrupt a maskable IRQ, so the former order let a pending
+  DLI restore blue between the red write and `NMIEN=0`.
+  It remains diagnostic work; no jsA8E timing change is justified until a
+  red-field capture is obtained.
+
+- 2026-11-01: began roadmap milestone 2. The current continuous/restarted
+  phase wrappers reassemble and pass their deterministic boot check. The local
+  `build/Altirra-4.40-src` tree is source-only, so `VBXE.md` now records the
+  exact external capture protocol: FX 1.26 at `$D600`, stable-loop RAM checks
+  (`$0082/$0083`), validity criteria, and comparison of the in-line edge rather
+  than RGB shade or raw two-line `VCOUNT`. Fresh Altirra captures remain the
+  required external evidence.
+
+- 2026-11-01: completed roadmap milestone 1's first reconciliation pass.
+  `VBXE.md` now has a JavaScript support matrix tied to the actual regression
+  families; `test:vbxe:full` now runs that complete matrix while `test:vbxe`
+  remains its faster historical subset. The pass also removes a duplicated
+  device-state heading and records
+  the current Altirra-aligned scheduler: actual XDL byte count, aggregate
+  overlay reservations of 160/320/243 local slots, 172-slot map-row reloads,
+  and delayed in-line completion IRQ delivery. It also distinguishes covered
+  text/attribute-map behavior from the remaining non-reversed GTIA-special
+  PF3-mask and fine-arbitration work.
+
+- 2026-11-01: recorded the accepted functional-VBXE roadmap in
+  `implementation/VBXE.md`. Its ordered exit gates are: consolidate the
+  documented/tested contract; close blitter timing with the corrected Altirra
+  phase pair; complete XDL/attribute-map combinations; audit MEMAC, registers,
+  and IRQ behavior; then validate a curated real-software suite. The immediate
+  blocking evidence is a fresh Altirra capture of the deterministic continuous
+  and restarted attribute-map phase diagnostics.
+
+- 2026-11-01: compared jsA8E's VBXE scanline scheduler with the local
+  Altirra 4.40 source and adapted the observable scheduling model without
+  importing its implementation. A decoded XDL entry now reserves precisely
+  the number of local-VRAM bytes it consumed (rather than a fixed 22); normal
+  overlay lines use the reference model's aggregate reservations (LR 160,
+  SR/HR 320, text 243); and a machine-driven blitter completion is scheduled
+  at `line end - remaining local slots / 8` before it raises its level IRQ.
+  Focused device, blitter, boot IRQ, and phase-pair regressions cover the
+  changed behavior.
+
+- 2026-11-01: the corrected Altirra phase captures still did not expose a
+  usable within-line edge: one showed only a full orange scanline and the
+  other only the blue field. The shared probe now latches completion in RAM;
+  its DLI paints blue before that latch and red on every subsequent line,
+  while the IRQ still turns the remainder of its own line red. This preserves
+  the intended horizontal marker and adds an unambiguous persistent red lower
+  field. The boot regression asserts the latch as well as the VRAM setup.
+
+- 2026-11-01: a boot regression with VRAM prefilled to `$A5` found two more
+  phase-probe construction errors. Its 21-byte blitter block still encoded
+  destination `$00000` because the `$01` had been placed in the destination
+  X-step field rather than destination address byte 2, so the transfer erased
+  the displayed source. The XDL also occupied local `$01000`, inside that
+  source. The shared probe now stores the XDL at `$02000` and encodes its
+  512-by-64 destination as `$10000`; both wrappers must be rebuilt before an
+  Altirra comparison. The boot regression poisons VRAM before launch and
+  verifies the complete visible source and all 4 KiB of map storage.
+
+- 2026-11-01: the phase-pair initialisation fix was incomplete. Although it
+  cleared the first 256 bytes at local `$22000`, an 8-pixel-high map spans 24
+  rows with `$00A0` stride, so later 172-byte buffered-row fetches reached
+  uninitialised VRAM and the continuous diagnostic still varied between
+  Altirra launches. The shared setup now clears the full 4 KiB reachable map
+  range before XDL is enabled. The paired boot regression poisons local VRAM
+  before launch and asserts that both wrappers clear the complete display and
+  map ranges. Rebuild both wrappers; their new captures must be stable before
+  interpreting the blue/red phase edge.
+
+- 2026-11-01: the first external phase capture showed that
+  `VBXE_BLITTER_ATTRMAP_PHASE_CONTINUOUS_TEST.XEX` was not a valid probe: it
+  left both the Graphics-8 source and the `$22000` attribute-map row
+  uninitialised, so Altirra legitimately displayed prior local-VRAM contents
+  (black, coloured blocks, or blue stripes) between launches. The shared
+  probe now fills the display source with `$FF` and the sole map row with
+  zero through the appropriate MEMAC-B bank before enabling XDL. That capture
+  then exposed a second diagnostic-only error: its blit wrote 32 KiB to local
+  `$00000`, overwriting the displayed source while it measured it. It now
+  writes to local `$10000`, outside both the display and map. All prior phase
+  captures are discarded; rebuild both wrappers before comparing them.
+
+- 2026-10-31: added the paired `VBXE_BLITTER_ATTRMAP_PHASE_*_TEST.XEX`
+  diagnostics for the sub-line attribute-map question. A DLI restores a blue
+  Graphics-8 field on every scanline; the blitter-complete IRQ changes only
+  the remainder of its completion scanline to red. The continuous and
+  four-line-restarted map cases therefore expose their relative completion
+  phase as a horizontal red edge, rather than collapsing it into `VCOUNT`'s
+  two-scanline buckets. The pair is assembled reproducibly with the existing
+  include-aware assembler path and awaits its Altirra differential capture.
+
+- 2026-10-31: added `VBXE_BLITTER_ATTRMAP_RESTART_TIMING_TEST.XEX` to
+  isolate an early attribute-map restart. Its second `AtMapOn`/`MAPADR`
+  begins four scanlines after the first, forcing one extra 172-byte buffered
+  fetch before the usual eight-line rollover. jsA8E records raw `VCOUNT`
+  `$27` (one count after its `$26` continuous-map short probe). Altirra 4.40
+  records `$24`, the same raw two-scanline `VCOUNT` bucket as its continuous
+  probe, so this observation cannot confirm or reject the reload's sub-line
+  cost. Its source identity and headless completion contract pass; a
+  horizontal-phase diagnostic is required for a decisive external result.
+
+- 2026-10-31: refined the attribute-map DMA contract from AHRM 12.4 without
+  changing the measured global throughput. `AtMapOn` and an XDL map-address
+  update now reset the map-row phase and force the 172-byte line-buffer
+  reservation immediately, even when the prior row had not reached its cell
+  height rollover. A focused blitter-budget regression covers this restart
+  case. The remaining one-`VCOUNT` short-probe delta is deliberately not
+  hidden by an unsubstantiated global timing adjustment.
+
+- 2026-10-31: Altirra 4.40 FX 1.24 readback established
+  `CORE_REVISION=$10`, `MINOR_REVISION=$24` at `$D640`, contrary to the
+  older AHRM prose that names `$11` for the latest FX core. jsA8E now returns
+  `$10` for each selectable full-FX revision and its profile regressions
+  assert it. `VBXE_FX124_PRIORITY_PROBE.XEX` then matched Altirra's three
+  priority bands: legacy `$00` over a background is visible, `$00` is hidden
+  by PF2, and bit 6 restores the overlay over PF2. Its blue/purple RGB shade
+  varies with the emulator's NTSC palette, while the indexed priority result
+  and geometry agree. The first priority visual was intentionally retired:
+  its inherited OS display list left uncontrolled PF2 content beneath the
+  overlay, so it could not isolate the documented background case.
+
+- 2026-10-31: Altirra 4.40 FX 1.20 returned `CORE_REVISION=$10`,
+  `MINOR_REVISION=$20` and matched the same green / PF2-hidden / bit-6-green
+  priority field as FX 1.24. FX 1.20 and FX 1.24 are therefore externally
+  validated for the shared legacy priority profile; their remaining
+  differences, if any, are outside this documented table-109 scope.
+
+- 2026-10-31: Altirra 4.40 FX 1.24 returned `$03,$7F,$03,$40,$7F,$40`
+  from `VBXE_XDL_GTIA_SPECIAL_COLLISION_PROBE.XEX`, exactly the established
+  FX 1.26 result. The P0+P1 multicolor and P5 collision contributors in
+  GTIA 9/10/11 therefore use the shared current collision path for FX 1.24;
+  no revision-only branch is warranted for this measured matrix.
+
+- 2026-10-31: Altirra 4.40 FX 1.20 returned the same
+  `$03,$7F,$03,$40,$7F,$40` GTIA-special collision matrix. The currently
+  measured P0+P1/P5 contributor behavior is now externally shared by FX
+  1.20, 1.24, and 1.26.
+
+- 2026-10-31: added selectable FX 1.20, 1.24, and 1.26 JavaScript profiles
+  at both VBXE register pages. The legacy FX 1.20/1.24 priority table follows
+  AHRM 12.4 table 109: a zero mask remains visible over background, bit 6
+  selects PF2, and bit 7 selects PF3/P5; FX 1.26 keeps its full layer map.
+  Device-state regressions cover aliases, revision reads, and the legacy
+  priority cases. The remaining Altirra pass is a direct visual differential.
+
+- 2026-10-31: extended the AHRM 12.4 non-reversed attribute-map PF3-mask
+  rule from Graphics 8 (mode F) to all ANTIC hires sources (modes 2, 3, F).
+  A focused mode-2 state regression verifies that a set byte-0 mask bit
+  replaces PF2 with GTIA PF3 and a clear bit retains PF2. GTIA-special
+  combinations remain outside this AHRM-defined ordinary-mode rule.
+
+- 2026-10-31: the VBlank-synchronised GTIA-special collision differential
+  returned `$03,$7F,$03,$40,$7F,$40` in Altirra. GTIA 9 and 11 retain the
+  ordinary visible contributor result, while GTIA 10 exposes its final
+  special-color input group to VBXE's `COLDETECT` as `$7F`. jsA8E applies that
+  GTIA-10 collision mapping only; ordinary GTIA collision registers and RGB
+  composition are unchanged. The earlier pre-VBlank-clear `$77` observation
+  was discarded as a mixed-field sample.
+
+- 2026-10-31: added `VBXE_XDL_GTIA_SPECIAL_COLLISION_PROBE.XEX` for the
+  remaining collision case: P0+P1 multicolor and P5 under GTIA 9, 10, and 11.
+  It records six independently frame-synchronised `COLDETECT` samples at
+  `$0082-$0087`. Its source/XEX and ROM-backed regression are in `test:vbxe`;
+  the subsequent VBlank-synchronised Altirra result and implementation rule
+  are recorded above.
+
+- 2026-10-31: Altirra 4.40 FX 1.26 returned `$43,$40` from
+  `VBXE_XDL_P5_MULTICOLOR_PROBE.XEX`, exactly matching jsA8E's separate
+  P0+P1-multicolor and P5 samples. This externally validates the final-layer
+  contributor handling for those basic PRIOR bit-5 and bit-4 cases; only
+  profile combinations remain in this area.
+
+- 2026-10-31: added `VBXE_XDL_P5_MULTICOLOR_PROBE.XEX` to isolate the two
+  outstanding FX 1.26 overlay-collision contributors. It stores the P0+P1
+  multicolor result and the P5 (missile-as-PF3) result at `$0082-$0083` after
+  separate whole-frame samples. jsA8E produces `$43,$40`; the source/XEX
+  identity and ROM-backed assertion are in `test:vbxe`. The external Altirra
+  comparison remains deliberately pending.
+
+- 2026-10-31: added `VBXE_XDL_TEXT_COLLISION_PROBE.XEX` to identify which
+  text fetch byte (`character`, `attribute`, or `glyph`) the hardware applies
+  to `COLMASK`. It records the three `COLDETECT` results at `$0082-$0084`.
+  Altirra 4.40 FX 1.26 returned `$00,$40,$00`: the attribute byte is the
+  source. jsA8E now passes that byte through its existing COLMASK compositor;
+  direct and ROM-backed regressions cover the observed rule.
+
+- 2026-10-31: added `VBXE_BLITTER_SHORT_ATTRMAP_TIMING_TEST.XEX`, a no-wrap
+  512-by-64 counterpart to the visual attribute-map timing probe. It leaves
+  the map active and records the completion IRQ's raw `VCOUNT` at `$0082`.
+  Its source/XEX identity and headless completion/acknowledgement/non-wrap
+  contract are included in `test:vbxe`. Altirra 4.40 FX 1.26 recorded `$24`
+  versus jsA8E's `$26`; after the one-count base sampling offset, the
+  attribute-map difference is one remaining `VCOUNT` tick, so the documented
+  172-byte buffered-row reservation is retained rather than overfit.
+
+- 2026-10-31: the no-wrap overlay probe measured `$4C` in jsA8E versus `$2F`
+  in Altirra. The prior scheduler had charged standard-overlay DMA across all
+  912 local slots and charged a 22-cycle XDL decode on every repeated line.
+  AHRM 12.4 confines overlay cycles to the active interval and only decodes a
+  new XDL entry; standard/hires, lores, and text reservations are now 216,
+  108, and 162 cycles. The local-bus regression covers a decoded entry. With
+  that correction the same probe records `$30` in jsA8E, within one sample of
+  Altirra's already observed `$2F`.
+
+- 2026-10-31: the no-wrap baseline probe recorded raw completion `VCOUNT`
+  `$25` in jsA8E and `$24` in Altirra 4.40 FX 1.26. That one-line sampling
+  phase difference validates the base blit duration without changing the
+  scheduler. Added the equivalent active transparent-standard-overlay/XDL
+  probe, `VBXE_BLITTER_SHORT_OVERLAY_TIMING_TEST.XEX`, for the next external
+  local-bus measurement.
+
+- 2026-10-31: added `VBXE_BLITTER_SHORT_TIMING_TEST.XEX`, a 512-by-64
+  MEMAC-B blit probe whose completion IRQ stores the raw `VCOUNT` in `$0082`.
+  The transfer completes within one NTSC frame, so this value is a valid
+  direct jsA8E/Altirra calibration datum rather than an ambiguous wrapped
+  long-transfer marker. Source/XEX reproducibility and ROM-backed completion,
+  acknowledgement, and non-wrap assertions are part of `test:vbxe`.
+
+- 2026-10-31: the attribute-map timing probe exposed a stale jsA8E
+  presentation-plane bug: after `VIDEO_CONTROL` disabled XDL at VSync, the
+  prior attribute-map RGB values could remain above ANTIC/GTIA. The renderer
+  now clears both VBXE output planes for every no-XDL scanline, with focused
+  regression coverage. This restores the normal base display and matches the
+  hardware's disabled-overlay behavior.
+
+- 2026-10-31: the frame-synchronised `VBXE_BLITTER_TIMING_TEST.XEX` has now
+  matched Altirra 4.40 FX 1.26: jsA8E and Altirra place its completion-IRQ
+  horizontal marker at the same scanline while ANTIC reads the visible field
+  through MEMAC B. This externally validates the current 912-cycle baseline,
+  mode-0 cost, actual MEMAC reservation, IRQ delivery, and frame-phase
+  integration. Overlay/XDL/attribute-map contention remains separate work.
+
+- 2026-10-31: `VBXE_BLITTER_OVERLAY_TIMING_TEST.XEX` matches Altirra 4.40
+  FX 1.26 at the same relative completion-marker scanline. This validates the
+  standard-overlay and XDL local-DMA reservations against the prior MEMAC B
+  baseline. The diagnostic disables the overlay only after completion and a
+  VSync latch, solely to reveal the saved base-field marker.
+
+- 2026-10-31: added `VBXE_BLITTER_ATTRMAP_TIMING_TEST.XEX`, which activates
+  the documented periodic 172-byte attribute-map line-buffer fetch over the
+  same MEMAC B field. The XEX, source reproducibility, and headless marker
+  construction are covered. Its current external marker is obscured by the
+  attribute-map presentation path in both emulators, so it is not yet a valid
+  Altirra timing observation; it must not be used to tune the scheduler.
+
+- 2026-10-31: added `VBXE_BLITTER_OVERLAY_TIMING_TEST.XEX`, a transparent
+  standard-overlay differential. It leaves the MEMAC B Graphics 8 marker
+  visible while exercising standard-overlay and XDL local DMA. Its source/XEX
+  reproducibility and ROM-backed marker tests cover construction.
+
+- 2026-10-31: added `VBXE_BLITTER_TIMING_TEST.XEX`, a reproducible external
+  timing probe. It runs a long mode-0 local-VRAM blit while ANTIC uses MEMAC B,
+  waits for a VCOUNT frame boundary, captures the completion-IRQ `VCOUNT`,
+  and encodes it as a black/blue horizontal split. Its assembler and
+  ROM-backed boot regressions verify the binary, completion acknowledgement,
+  and marker construction; its exact jsA8E/Altirra split comparison is
+  recorded in the newer validation entry above.
+
+- 2026-10-31: Altirra 4.40 FX 1.26 rendered the blitter IRQ probe with its
+  unambiguous stripe marker while jsA8E remained solid. This established that
+  an enabled completion IRQ reaches the CPU. jsA8E now treats enabled uncleared
+  `IRQ_STATUS` as a level-sensitive shared CPU IRQ source, reconciles it after
+  every blitter slice and VBXE register write, and releases it when the guest
+  writes `IRQ_CONTROL`. The headless IRQ diagnostic now verifies guest handler
+  entry, acknowledgement, and the visible marker.
+
+- 2026-10-31: replaced the blitter's arbitrary 256-output-byte scanline
+  budget with the AHRM 12.4 uncongested local-bus model: 912 local cycles per
+  scanline, 21 cycles to load a block, and the documented one-, two-, or
+  three-cycle mode/source costs, including constant-source and X-zoom fetch
+  elision. State coverage now verifies partial block loading and cycle-gated
+  copy/fill progress. The eight-phase display/XDL/MEMAC contention arbiter is
+  still pending.
+
+- 2026-10-31: added scanline local-bus reservation for the VBXE blitter. It
+  accounts for XDL, overlay mode, buffered attribute-map rows, and actual
+  CPU/ANTIC MEMAC accesses before scheduling the lowest-priority blitter. The
+  maximal standard-overlay case is asserted at AHRM's 236-cycle minimum;
+  phase-exact ordering remains the next timing refinement.
+
+- 2026-10-30: added the first functional VBXE blitter state machine. It loads
+  21-byte VRAM blocks and implements linked lists, signed X/Y source and
+  destination steps, width/height, zoom, pattern source, modes 0-6, byte and
+  nibble collision-code latching, stop, snapshots, and `IRQ_STATUS`.
+  It originally advanced with a fixed output-byte scanline budget; its current
+  cycle-based scheduler is described by the newer entries above.
+  `BLITTER_BUSY` exposes the documented distinct load (D0) and
+  active (D1) states, so guest polling waits for both to clear. The new
+  `vbxe_blitter_state` regression covers a strided 2D copy,
+  snapshot resume, every operation, zoom/pattern, linked lists, collisions,
+  completion status, plus assembled and headless-booted copy diagnostics.
+
+- 2026-10-31: Altirra 4.40 FX 1.26 and jsA8E both completed
+  `VBXE_BLITTER_COPY_TEST.XEX` and rendered the same centered 40-byte by
+  192-line Graphics 8 field. Their blue differs because each uses its own
+  GTIA palette conversion; the result confirms the blitter's visible copied
+  data and display geometry, not an RGB-palette calibration.
+
+- 2026-10-31: added `VBXE_BLITTER_IRQ_TEST.XEX` as an external observation
+  probe for the CPU-delivery path. It uses the OS immediate IRQ vector and
+  visibly distinguishes an entered-and-acknowledged completion IRQ
+  (black/blue vertical stripes) from polling-only completion (solid blue),
+  without depending on GTIA palette calibration or assuming a PBI status-bit
+  mapping. The jsA8E/Altirra stripe comparison validates the resulting shared
+  level-sensitive IRQ behavior.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 and jsA8E both rendered
+  `VBXE_ATTRMAP_REVERSE_CHAR7_GTIA11_TEST.XEX` as opaque palette color 0.
+  This completes the remaining Reverse/GTIA attribute-map matrix: hires
+  modes 2/3/F, lores characters 4/5, selector characters 6/7, and graphics
+  modes 8-E all have externally observed behavior in GTIA 9/10/11. The
+  focused selector-mode regression now asserts the final mode-7/GTIA-11 case.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 and jsA8E both rendered
+  `VBXE_ATTRMAP_REVERSE_CHAR7_GTIA9_TEST.XEX` as opaque palette color 0.
+  The tall selector-character GTIA-9 case is now directly asserted. Only the
+  mode-7 GTIA-11 observation remains in this Reverse/GTIA matrix.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 and jsA8E both rendered
+  `VBXE_ATTRMAP_REVERSE_CHAR6_GTIA11_TEST.XEX` as opaque palette color 0.
+  Selector-character mode 6 is now directly asserted in both GTIA 9 and 11;
+  tall selector-character mode 7 remains a separate observation.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 comparison of
+  `VBXE_ATTRMAP_REVERSE_CHAR6_GTIA9_TEST.XEX` established opaque palette
+  color 0 in reversed ANTIC selector-character mode 6 with GTIA mode 9.
+  jsA8E now applies that narrow source/mode rule only for valid raw lores
+  values, with focused state coverage. Mode 7 and the GTIA-11 selector cases
+  remain separately pending.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 and jsA8E both rendered
+  `VBXE_ATTRMAP_REVERSE_CHAR3_GTIA11_TEST.XEX` as opaque palette color 0.
+  The tall hires-character mode-3 GTIA-11 Reverse case is now directly
+  asserted alongside its GTIA-9 counterpart.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 and jsA8E both rendered
+  `VBXE_ATTRMAP_REVERSE_CHAR3_GTIA9_TEST.XEX` as opaque palette color 0.
+  This externally confirms the tall hires-character mode-3 GTIA-9 Reverse
+  case already covered by the shared valid-hires path. The focused state
+  regression now asserts that result directly; GTIA 11 remains a separate
+  observation.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 comparison of
+  `VBXE_ATTRMAP_REVERSE_LORES_B_GTIA11_TEST.XEX` established opaque palette
+  color 0 in reversed ANTIC graphics mode B with GTIA mode 11. Together with
+  the separately observed modes 8/A and C-E, this completes the graphics
+  mode 8-E GTIA-11 subset. The GTIA-9/11 graphics compositor now applies the
+  opaque result to the complete source family, with a focused mode-B
+  regression.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 comparison of
+  `VBXE_ATTRMAP_REVERSE_LORES_A_GTIA11_TEST.XEX` established opaque palette
+  color 0 in reversed ANTIC graphics mode A with GTIA mode 11. jsA8E now
+  includes that exact source/mode pair in its GTIA-11 opaque subset, with
+  focused state coverage. Only mode B remains pending for that source family.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 comparison of
+  `VBXE_ATTRMAP_REVERSE_LORES_8_GTIA11_TEST.XEX` established opaque palette
+  color 0 in reversed ANTIC graphics mode 8 with GTIA mode 11. jsA8E now
+  includes that exact source/mode pair in its GTIA-11 opaque subset, with
+  focused state coverage. Modes A/B remain pending.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 comparison of
+  `VBXE_ATTRMAP_REVERSE_LORES_B_GTIA9_TEST.XEX` established opaque palette
+  color 0 in reversed ANTIC graphics mode B with GTIA mode 9. Together with
+  the independently observed modes 8/A and C-E, this completes the graphics
+  mode 8-E GTIA-9 subset. jsA8E now applies the opaque result to that complete
+  source family, with a state assertion for mode B. GTIA-11 modes 8/A/B are
+  still pending and remain outside this rule.
+
+- 2026-10-30: the same Altirra 4.40 FX 1.26 comparison for
+  `VBXE_ATTRMAP_REVERSE_LORES_A_GTIA9_TEST.XEX` established opaque palette
+  color 0 in reversed ANTIC graphics mode A with GTIA mode 9. The narrowly
+  scoped GTIA-9 graphics compositor and state regression now include mode A.
+  Mode B remains unvalidated; this observation does not affect GTIA 11.
+
+- 2026-10-30: Altirra 4.40 FX 1.26 comparison of
+  `VBXE_ATTRMAP_REVERSE_LORES_8_GTIA9_TEST.XEX` established that a reversed
+  ANTIC graphics-mode-8 field in GTIA mode 9 is opaque palette color 0. The
+  jsA8E diagnostic instead initially retained the ordinary red/blue/green
+  lores-reverse bands. The GTIA-9 graphics compositor now includes mode 8 in
+  the already validated C-E opaque subset, with focused state coverage.
+  Modes A/B remain pending, as does mode 8 in GTIA 11; no broader rule is
+  inferred from this one comparison.
+
+- 2026-10-30: completed the reproducible diagnostic set for the remaining
+  Reverse/GTIA matrix observations. The mode-3 hires-character probes now
+  cover GTIA 9 and 11, modes 6 and 7 now cover GTIA 9 and 11, and graphics
+  modes 8/A/B now have GTIA-11 probes. Each is an intentionally neutral
+  external-differential XEX: its result must be recorded from Altirra FX 1.26
+  before changing the compositor. The assembler regression checks every new
+  source/artifact pair, so the exact binaries used for the external runs are
+  reproducible. Existing graphics-mode probes remain unclaimed until that
+  comparison is made.
+  The GTIA-9/11 graphics compositor is correspondingly limited to the
+  externally observed C-E modes; it must not generalize their opaque result
+  to modes 8/A/B before those probes are run.
+
+- 2026-10-29: implemented the first attribute-map subset from AHRM 12.4.
+  XDL now retains `AtMapOn`/`AtMapOff`, map address and four-byte stride,
+  scroll, and 8x1 through 32x32 cell layout. Active cells select P0-P3
+  priority, override the overlay palette, and raise the attribute-map
+  collision bit for non-transparent overlay pixels; the documented 43-cell
+  line-buffer limit is applied. The playfield-color/PF3-mask and reverse-mode
+  controls still require earlier ANTIC/GTIA composition work and are not
+  claimed. Added the reproducible `VBXE_XDL_ATTRMAP_TEST.XEX` (227 bytes),
+  which should show alternating green/blue 16-pixel stripes in a centered
+  normal-width text field. Its attribute-map row stride uses the AHRM's native bits 7-2
+  encoding (`$A0` for 160 bytes), rather than a shifted byte. Its palette
+  setup writes CR/CG/CB in order because CB increments CSEL. It sets MAPSTEP
+  to zero, deliberately reusing one initialized 40-cell row for the complete
+  field; its text stride is also zero, because only one character row is
+  initialized. Attribute-layout scroll values are now decoded as the AHRM's
+  documented pixel counts minus one; static diagnostics omit that optional
+  block and use the VSync default of zero scroll. `VBXE_XDL_ATTRMAP_V2_TEST.XEX` is byte-identical to the
+  corrected diagnostic under a distinct filename, so visual testers cannot
+  accidentally rerun the prior 227-byte artifact. Its vertical MAPSTEP
+  companion validates map-row advancement independently. Added a separate
+  checkerboard scroll diagnostic with four-pixel horizontal/vertical map
+  offsets. Altirra and jsA8E now match for its cell order and scroll phase;
+  their field dimensions differ only with host presentation. Focused state
+  and assembler regressions pass. Attribute-map overscrolling beyond a cell
+  dimension is validated by the 12-pixel checkerboard diagnostic: Altirra and
+  jsA8E match for the initial partial cell and the continuing checker phase.
+  Attribute-map cells now retain their three playfield values, playfield
+  palette, and reverse flag as well as their already-rendered overlay fields.
+  The first playfield subset applies per-cell PF0-PF2 palette colors to
+  visible normal playfield pixels while preserving an overlay that won
+  priority. `VBXE_ATTRMAP_PF0_V4_TEST.XEX` is the first external differential
+  for that path: it contains no overlay and uses palette-0 PF0 overrides;
+  it clears the whole attribute row and sets the ordinary Atari PF0 to black,
+  so the region outside the normal-width map aperture is deterministic too.
+  The reproducible `VBXE_ATTRMAP_PF12_TEST.XEX` extends the external
+  differential scene to the PF1/PF2 byte fields with a mode-F bit pattern;
+  it stores the complete 7.5 KiB mode-F screen, XDL, and map in known local
+  VRAM through MEMAC B, eliminating CPU/ANTIC extended-RAM bank ambiguity;
+  it also clears GTIA `PRIOR`, which fixes mode F to its documented PF1/PF2
+  interpretation before comparison. PF3 masks and reversal remain pending.
+  Its 191-line display-list loop uses `BNE` rather than signed `BPL`: the
+  original `$BE` counter was negative on its first iteration and generated
+  only one mode-F line. The ROM-backed `vbxe_attrmap_pf12_boot` regression
+  now checks all 191 non-LMS lines plus the complete 192-line VBXE RGB field.
+  Altirra and jsA8E externally match for that field, validating PF1/PF2 as
+  well as the earlier PF0 path. Added a deterministic XCOLOR diagnostic with
+  odd map entries and a state regression that verifies odd values are retained
+  when VIDEO_CONTROL enables extended color; Altirra and jsA8E also match for
+  its green/magenta result. The per-cell playfield-palette diagnostic also
+  matches externally: alternating cells select palette 0 red and palette 3
+  blue for the identical PF0 color index.
+  Headless automation now loads the VBXE device module too, so its XEX runs
+  can inspect the same VBXE configuration and render path as the browser.
+  Attribute composition now also receives the active ANTIC mode at the
+  ANTIC/VBXE boundary. This is deliberately preparatory: exact PF3-mask and
+  reverse behavior must use the source mode and raw ANTIC bits, rather than
+  incorrectly infer either from the final GTIA color. The first PF3-mask
+  subset now covers ordinary non-reversed ANTIC mode F: a set map-mask bit
+  replaces a visible PF2 source with the palette-selected GTIA PF3 color,
+  at AHRM's 1/2/4 standard-pixel mask resolutions. Reverse interpretation,
+  character sources, and GTIA-special modes remain pending.
+  `VBXE_ATTRMAP_PF3_TEST.XEX` supplies an all-PF2 mode-F field with an `$AA`
+  PF3 mask per 8-pixel cell, producing alternating green PF3 and blue PF2
+  pixels. Its ROM-backed regression verifies those two colors on all 192
+  display lines. Altirra and jsA8E externally match in the active field for
+  mask phase, density, and green/blue colors; isolated Altirra pixels below
+  the 192-line field are outside the diagnostic's active display and are
+  treated as host presentation.
+  Reverse mode now preserves the raw mode-F ANTIC bit stream through the
+  playfield scratch/copy path. For a reverse attribute cell, adjacent source
+  bits are decoded as PF0/PF1/PF2/PF3, with byte 0 again acting as PF0 and
+  PF3 coming from the shadowed GTIA register; unfetched/border positions are
+  explicitly excluded. `VBXE_ATTRMAP_REVERSE_TEST.XEX` repeats source pairs
+  `$1B` and expects doubled red/blue/green/magenta PF0-PF3 stripes. Its
+  ROM-backed 192-line assertion and the complete focused VBXE suite pass.
+  Altirra and jsA8E externally match for color order, phase, and stripe
+  width. Reverse decoding for GTIA-special modes remains pending. AHRM
+  identifies ANTIC character modes 2 and 3 as hires, so their decoded glyph
+  bits now share the mode-F PF0-PF3 pair interpretation.
+  `VBXE_ATTRMAP_REVERSE_CHAR_TEST.asm` renders a mode-2 `$1B`
+  glyph pattern and its ROM-backed regression verifies the PF0/PF1/PF2/PF3
+  sequence across all 192 scanlines. Multicolor character modes 4 and 5 use
+  two-bit lores glyph values at the same cadence as D/E, so they now use the
+  same lores-to-hires rule. `VBXE_ATTRMAP_REVERSE_LORES_CHAR_TEST.asm` covers
+  mode 4 with `00`/`01`/`10`/`11` glyph pairs and its ROM-backed assertion
+  verifies the full 192-line field. The D/E lores subset follows AHRM's rule
+  that lores data becomes
+  pairs of hires pixels: each original two-bit lores value becomes two hires
+  samples, on a PF2 base, and each set source bit substitutes PF1's luminance
+  while retaining PF2's hue. It is therefore not a PF0-PF3 lookup. Raw D/E
+  values are carried through the scratch/copy and snapshot paths; borders and
+  unrelated modes remain marked invalid. `VBXE_ATTRMAP_REVERSE_LORES_PROBE.XEX`
+  uses wide `00`/`01`/`10`/`11` source bands and distinct PF0/PF1/PF2 map
+  colors to identify the real hardware mapping without high-frequency display
+  ambiguity. It uses a narrow 32-byte ANTIC row because it divides ANTIC's
+  4 KiB display-memory window exactly; the earlier 40-byte version crossed
+  that window and therefore changed phase after its wrap. Video snapshots
+  retain raw hires bits from modes 2/3/F and raw lores values from 4-E used
+  by the reverse paths. Modes 8/A retain each repeated two-bit source value
+  so Reverse preserves its lower-resolution phase. Modes 6/7 combine the
+  glyph bit with their PF0-PF3 character selector, while binary modes 9/B/C
+  correctly collapse background and PF0 to the same hires `00` pair. Unit
+  coverage verifies each of those source encodings. Modes 2/3/F now also
+  retain their raw hires bits during the currently supported GTIA-special
+  rendering paths, so a later special-mode compositor does not lose Reverse's
+  input; special-mode composition semantics themselves remain pending.
+  External comparison then exposed that the attribute-map output was still
+  presented through the legacy 256-pixel Atari compositor aperture, shrinking
+  a normal-width 320-pixel field. Attribute-map colors now also enter the
+  640-sample presentation plane directly from ANTIC's native normal-width
+  span (physical x=96-415), with two presentation samples per ANTIC pixel.
+  This is a signal-geometry correction, not a host-window scaling change.
+  The legacy plane remains only as a compatibility mirror while standard and
+  lores overlay rendering are migrated to the same native plane.
+  The probe also exposed two independent jsA8E XDL errors before the lores
+  behavior could be compared: repeat values were consumed on their loading
+  line (so `$BF` lasted 191 rather than 192 lines), and an attribute-map-only
+  entry did not clear stale overlay RGB before playfield composition. Both are
+  now corrected and covered by device-state regressions. The reverse diagnostic now also places an explicit `AtMapOff` +
+  `End` entry immediately after its 192-line repeat: per AHRM, a repeat does
+  not terminate an XDL, so this prevents later VRAM from being interpreted as
+  more attribute-map lines.
+  `VBXE_ATTRMAP_REVERSE_GTIA9_TEST.XEX` reuses the same raw `$1B` source with
+  GTIA mode 9 enabled. Altirra shows ordinary Rev stripes only for the setup
+  frame, then its stable mode-9 background is black. As AHRM specifies the
+  individual Rev and GTIA mechanisms but not their final combined compositor.
+  The paired no-XDL baseline confirms AHRM mode-9 luminance bands in both
+  emulators; with the reversed attribute map active, Altirra instead produces
+  opaque palette color 0. jsA8E now implements that limited FX 1.26 mode-9
+  result. Other source-mode combinations remain explicitly pending.
+  `GTIA_MODE9_BASELINE_TEST.XEX` uses the same `$1B` ANTIC source but disables
+  VBXE VIDEO_CONTROL, isolating AHRM mode 9's raw-nibble luminance result from
+  any XDL or attribute-map behavior.
+  The paired mode-11 baseline/reverse diagnostics set `COLBK` to `$0E`, making
+  AHRM's raw-nibble hue selection observable before composition. Both
+  emulators show the same cyan/yellow baseline; with the reversed map,
+  Altirra's stable result is opaque palette color 0 after the setup frame.
+  jsA8E now implements that equally narrow FX 1.26 mode-11 result. The
+  validated mode-F behavior was then confirmed with both other AHRM hires
+  character sources: mode 2 in modes 9/10/11 and tall mode 3 in mode 10.
+  Other source-mode combinations remain pending.
+  `GTIA_MODE10_BASELINE_TEST.XEX` and
+  `VBXE_ATTRMAP_REVERSE_GTIA10_TEST.XEX` use the same controlled `$1B`
+  source and bright `$0E` background to isolate the remaining mode-10
+  baseline and reverse composition. Both emulators show the same grayscale
+  baseline; with Reverse, Altirra makes the 192-line active field opaque
+  palette color 0 (apart from its final presentation-edge line). jsA8E now
+  applies the same narrow FX 1.26 result to valid hires pairs in all three
+  GTIA special modes; other source-mode combinations remain pending.
+  `VBXE_ATTRMAP_REVERSE_CHAR_GTIA10_TEST.XEX` carries that check to AHRM's
+  other hires source, ANTIC mode 2, before generalizing the externally
+  established mode-F result to character data.
+  The analogous mode-4 lores probe explicitly clears all four playfield
+  registers, including `COLPF0`; its `$1B` source uses that register, so
+  omitting it makes a cold-reset color difference look like a GTIA/VBXE
+  composition difference.
+  The resulting controlled mode-10 lores probes show that `$1B` renders as
+  alternating PF0/color-0 groups; changing map PF0 changes the visible
+  Altirra group, while raw `$23` (nibbles 2 and 3) is black. jsA8E now
+  implements only that observed mode-4/GTIA-10 subset by combining each two
+  adjacent two-bit sources into one raw nibble: nibble 1 selects map PF0, and
+  measured 2, 3, and `$B` select palette color 0. Other lores special-mode
+  combinations remain pending.
+  Its stable PF0/color-0 alternation externally matches Altirra for the
+  controlled mode-4/GTIA-10 `$1B` field. Mode-4 combinations with GTIA 9 and
+  11 are separate from mode 10: both externally produce opaque palette color
+  0 for valid lores sources, which jsA8E now implements without generalizing
+  to graphics modes 6-E. Tall lores character mode 5 externally confirms the
+  same GTIA-10 PF0/color-0 pattern, so the shared mode-4/5 source path now
+  implements it; its GTIA-9 and GTIA-11 probes likewise confirm opaque color
+  0 in both emulators.
+  ANTIC modes 6/7 are separate again: their glyph-bit/PF-selector sources
+  produce opaque palette color 0 in the controlled GTIA-10 reverse probes,
+  now covered by jsA8E without extrapolating to other special modes.
+  The lores reverse rule is covered both by an isolated four-value test and by a ROM-backed
+  192-line D/E probe regression before the external probes are used for
+  full-frame comparison. `VBXE_ATTRMAP_REVERSE_LORES_GTIA10_TEST.XEX` reuses
+  the four-band D/E source with GTIA mode 10 enabled, providing the next
+  isolated reference test for graphics-mode special composition. Altirra's
+  stable result is opaque palette color 0 for every band, while the initial
+  jsA8E result incorrectly applied ordinary lores Reverse. jsA8E now matches
+  this limited GTIA-10 behavior for graphics mode E only. The separate
+  mode-D derivative then confirmed the same stable opaque result in Altirra;
+  it also exposed jsA8E alternating between the normal lores result and black
+  on lower scanlines. The mode-D diagnostic was also corrected to use 96
+  ANTIC rows (two scanlines each), matching its 192-line XDL repeat rather
+  than spilling into a second unmapped field. The D/E graphics source family
+  now takes the confirmed opaque GTIA-10 path throughout its mapped field,
+  including where the raw source capture is unavailable. The C-mode/GTIA-10
+  derivative then confirmed the same stable opaque result in Altirra, so the
+  implemented graphics subset is now C/D/E. The B-mode/GTIA-10 derivative
+  likewise produced stable opaque black in Altirra, extending the confirmed
+  graphics subset to B/C/D/E. The mode-A/GTIA-10 derivative then confirmed
+  stable opaque black in both emulators, extending the validated graphics
+  subset to A-E. The remaining mode-8/GTIA-10 derivative then confirmed the
+  same stable opaque result in Altirra, completing the validated graphics
+  8-E subset for GTIA 10. The graphics-mode-E/GTIA-9 derivative then showed
+  opaque black in Altirra; the separate mode-D probe confirmed the same
+  result. The mode-C probe did too, so jsA8E now implements C/D/E; all other
+  graphics GTIA-9/11 combinations remain pending.
+  GTIA-11 graphics modes E, D, and C were externally compared next and each
+  is stable opaque black in both jsA8E and Altirra. The remaining external
+  matrix entries are GTIA-11 graphics B, A, and 8. The implementation must
+  remain scoped to externally observed source/mode combinations; ordinary
+  AHRM lores reinterpretation is not evidence for the special compositor.
+  The vertical companion probe holds each of `00`, `01`, `10`, and `11` for
+  32 complete lines, making any hardware reinterpretation visible without
+  horizontal resampling ambiguity.
+
+- 2026-10-29: external text diagnostics exposed that the original VBXE RGB
+  plane reduced hires/text to the 256-pixel Atari compositor aperture. The
+  colors matched Altirra, but high-frequency text stripes and scroll patterns
+  did not. Hires/text now render into a 672-pixel scene-width RGB plane with a
+  centered 640-pixel normal overlay, which WebGL composites after the indexed
+  Atari plane; the 2D fallback samples that plane at its available resolution.
+  Presentation, reset, and snapshots preserve the additional plane. Focused
+  regressions cover adjacent hires nibbles and the expanded buffer. The text
+  diagnostics now match Altirra in their internal stripe/checker density and
+  phase; the remaining fullscreen height and margin difference is host
+  presentation, not emulated VBXE signal behavior.
+
+- 2026-10-29: added the first XDL hires graphics subset. The compositor now
+  projects the 640-pixel mode into the same normal 256-pixel aperture as the
+  externally validated standard/lores paths, unpacking each source byte
+  MSB-first into two 4-bit palette indices. It applies VIDEO_CONTROL color-0/
+  color-`$F` transparency to the unpacked pixel but uses the original complete
+  byte for COLMASK, as required by AHRM 12.4. Focused regressions cover nibble
+  order, palette lookup, transparency, and byte-group collision selection.
+  The shared transparency path now also distinguishes standard/lores `$xF`
+  from hires `$F`, including collision suppression for those transparent
+  pixels. XDL priority now uses the same final-contributor plane as VBXE
+  collisions, so hidden P/M graphics cannot spuriously block or admit the
+  overlay.
+- 2026-10-29: added `VBXE_XDL_HIRES_TEST.asm` and its reproducible XEX
+  artifact, an FX 1.26 diagnostic for a uniform 640x192 hires overlay. It
+  writes `$11` bytes to the 320-byte local-VRAM row and programs palette-1
+  color 1 blue, making nibble ordering and width errors immediately visible.
+  Altirra and jsA8E both display its expected centered, top-aligned uniform
+  blue field, externally validating the first hires geometry and nibble path.
+
+- 2026-10-29: extended the XDL decoder with the text-mode state that can be
+  established unambiguously from AHRM 12.4: `ChBase`, horizontal/vertical text
+  scroll offsets, and a row counter. Text lines now retain their character
+  row address for eight scanlines and advance by overlay stride only after row
+  7. This state underpins the initial text renderer; its transparency and
+  scrolling diagnostics now match Altirra. Attribute maps still await their
+  own diagnostics.
+
+- 2026-10-29: rendered the first XDL text subset: 80-column character/
+  attribute pairs reference an 8x8, 2 KiB-aligned local font through `ChBase`;
+  foreground colors and opaque or transparent backgrounds follow the text
+  attribute and VIDEO_CONTROL rules. Text collision detection, scrolling, and
+  attribute-map overrides remain excluded. Added a reproducible uniform-field
+  `VBXE_XDL_TEXT_TEST` XEX. Altirra and jsA8E both show its expected uniform
+  yellow field, externally validating this initial text geometry and `ChBase`
+  path.
+
+- 2026-10-29: implemented initial XDL text scrolling. Horizontal scroll
+  offsets the 640-pixel font stream; vertical scroll offsets the font row and
+  selects the next character row after crossing row 7. Focused tests cover
+  both axes, and `VBXE_XDL_TEXT_SCROLL_TEST` provides the first Altirra
+  differential scene. Its internal checker/stripe density and phase now
+  match Altirra; exact scroll range and edge-fetch behavior remain outside
+  this first diagnostic.
+
+- 2026-10-29: implemented the first VBXE overlay-collision subset in jsA8E.
+  Standard/lores XDL source bytes now consult `COLMASK` and accumulate the
+  PF0-3/P5 and P0-3 layer bits in `COLDETECT`; collision capture is independent
+  of XDL overlay priority, and `COLCLR` clears only the VBXE latch. GTIA now
+  records a final-contributor plane during P/M composition, so a P/M graphic
+  hidden by `PRIOR` is excluded before VBXE samples the line. The scope still
+  excludes attribute-map collisions, and complex P5/multicolor/GTIA-special
+  combinations need differential validation. Focused device and GTIA
+  regressions cover mask groups, PF/PM mapping, priority independence,
+  transparency, clearing, and a hidden-versus-visible P0 case.
+
+- 2026-10-29: synchronized the implementation documentation with the current
+  VBXE branch. `VBXE.md` now records the implemented FX 1.26 `$D600`/`$D700`
+  selection, MEMAC A/B, and initial standard/lores XDL compositor rather than
+  describing them as future work. Core, render, worker, and UI notes now
+  document the separate RGB plane and the main-thread-only limitation while
+  VBXE is enabled.
+
+- 2026-10-29: started the optional jsA8E VBXE device foundation. The new
+  `js/core/vbxe.js` models a disabled-by-default FX 1.26 board with 512 KiB
+  local VRAM, `$D640` register decoding, palette/write latches, VSync-latched
+  video/XDL controls, soft reset, MEMAC register state and CPU/ANTIC address
+  resolution, CPU RAM-window mapping, ANTIC DMA reads (with Ultimate1MB
+  precedence), and snapshot copying.
+  I/O only maps the VBXE page when enabled, so ordinary machines retain their
+  prior decode. The XDL renderer, MEMAC mapping, compositing, and blitter are
+  intentionally not claimed yet. The focused device-state test and existing
+  snapshot, ANTIC, machine-matrix, and headless automation regressions pass.
+
+- 2026-10-29: added `VBXE_MEMAC_B_TEST.asm` and its reproducible XEX artifact
+  as the first external differential diagnostic. With an FX 1.26 VBXE at
+  `$D640`, it verifies the revision registers, enables CPU+ANTIC MEMAC B bank
+  0 at `$4000-$7FFF`, tests a CPU VRAM read/write, and displays an ANTIC text
+  screen sourced from that VRAM. It is intended for Altirra comparison before
+  extending the device beyond the bus-level implementation.
+
+- 2026-10-29: corrected the first Altirra differential diagnostic after an
+  external run: Altirra's `$D600` device option places VBXE registers at
+  `$D640` (and `$D700` at `$D740`), while valid FX 1.26 cores can differ in
+  the non-major bits of `CORE_REVISION`. The XEX now probes both register
+  pages, accepts the defined FX major/minor revision fields, and writes proper
+  Atari screen-code spaces instead of displaying `@` characters.
+
+- 2026-10-29: Altirra ran `VBXE_MEMAC_B_TEST.XEX` with VBXE FX 1.26 in its
+  `$D600` device range and reported all four expected PASS lines. This is the
+  first external differential result: CPU and ANTIC both accessed MEMAC B
+  bank 0 successfully. Added a persisted, disabled-by-default VBXE selector
+  to jsA8E for FX 1.26 at `$D600`/`$D700`; changes rebuild the machine so the
+  MEMAC decode cannot be changed on a live map.
+
+- 2026-10-29: added `VBXE_MEMAC_A_TEST.asm` and its reproducible XEX artifact
+  for the next external differential case. It disables MEMAC B, configures
+  MEMAC A as the smallest 4 KiB `$6000-$6FFF` CPU+ANTIC window into local bank
+  0, then proves CPU read/write and ANTIC display-list fetching through it.
+
+- 2026-10-29: Altirra and jsA8E both ran `VBXE_MEMAC_A_TEST.XEX` with all
+  expected PASS lines, externally validating the 4 KiB `$6000-$6FFF` MEMAC A
+  window for CPU and ANTIC. Added the next differential diagnostic,
+  `VBXE_MEMAC_PRIORITY_TEST`: it overlays MEMAC A bank 0 onto MEMAC B bank 1
+  at `$6000`, verifies that disabling A exposes B's sentinel again, then
+  verifies ANTIC still fetches from the higher-priority A window.
+
+- 2026-10-29: began the XDL milestone with snapshot-safe frame state and a
+  tested per-line decoder for overlay graphics/text enable, repeat, overlay
+  address and stride, optional block skipping, and XDL termination. It does
+  not composite pixels yet; direct VBXE RGB output is the next renderer step.
+
+- 2026-10-29: added a separate 32-bit RGB plane to the software video path
+  for VBXE composition. It is copied at presentation time and takes priority
+  only when nonzero, leaving normal indexed Atari rendering unchanged. XDL
+  drawing will populate this plane rather than mutate the Atari palette.
+
+- 2026-10-29: connected the first visible XDL subset: standard-resolution,
+  normal-width graphics now draws 320 palette-1 RGB pixels per decoded XDL
+  line into the separate VBXE plane after ANTIC/GTIA. Other widths, modes,
+  transparency, and priority are intentionally pending comparison.
+
+- 2026-10-29: Altirra comparison of the first XDL XEX found the diagnostic's
+  repeated overlay row needed a zero stride; after correction it displays the
+  expected uniform red field. A jsA8E WebGL texture-allocation ordering bug
+  was also fixed: creating the VBXE RGB texture no longer redirects the Atari
+  palette upload into that texture.
+
+- 2026-10-29: made WebGL shader-source loads bypass the HTTP cache so a
+  renderer change (including the new VBXE RGB sampler) cannot silently run
+  against a stale fragment shader during visual differential testing.
+
+- 2026-10-29: the worker renderer remains disabled only while VBXE is active:
+  its frame path still loses the separate VBXE RGB plane. The main-thread
+  WebGL renderer remains enabled, preserving the original CRT postprocess
+  while XDL output is validated.
+
+- 2026-10-29: external visual validation confirmed jsA8E now matches Altirra
+  for standard and lores XDL field geometry, palette RGB output, and stable
+  frame presentation. The original WebGL CRT barrel/scanline effect also
+  works with VBXE after changing the RGB texture upload from `Uint32Array` to
+  an explicit byte view. Main-thread WebGL remains the active VBXE renderer;
+  worker VBXE presentation remains deferred.
+
+- 2026-10-29: added the initial FX 1.26 overlay-priority compositor for the
+  standard/lores subset. The XDL priority mask now gates background, PF0-3,
+  and P0-3 visibility against the existing Atari per-pixel priority plane;
+  focused tests cover priority blocking and allowing over PF0.
+
+- 2026-10-29: made the XDL priority diagnostic deterministic by clearing its
+  local VRAM row before use. Repeated Altirra runs show a valid 160-byte lores
+  row fills the full normal overlay width; jsA8E therefore scales lores 160 to
+  the same 256-pixel presentation aperture as standard graphics.
+
+- 2026-10-29: jsA8E now visually matches Altirra for the first XDL
+  standard-resolution test (a uniform 320x192 red field). VBXE currently
+  selects the software renderer while active, isolating the validated RGB
+  plane from the still-in-progress WebGL path. Added the corresponding lores
+  160-pixel renderer path with two-pixel horizontal expansion.
+
+- 2026-10-29: added tested color-0 and color-`$xF` overlay transparency for
+  the standard/lores renderer subset, gated by the VSync-latched
+  VIDEO_CONTROL transparency field. Without that field, zero remains an
+  opaque black pixel.
+
+- 2026-10-29: the XDL graphics descriptor now retains `OvMisc` overlay
+  palette and priority fields, and the separate VBXE RGB plane is cleared at
+  each frame boundary so transparent pixels cannot leave stale overlay data.
+
+- 2026-10-29: added `VBXE_XDL_LORES_TEST.asm`, the next Altirra/jsA8E visual
+  differential diagnostic. It produces a uniform 160x192 green lores overlay
+  (doubled horizontally to the normal 320-pixel output width).
+
+- 2026-10-29: rejected the experimental wider VBXE presentation viewport
+  after external visual testing: it displaced the normal Atari raster without
+  changing the overlay's relative width. Overlay geometry must instead be
+  corrected inside the VBXE compositor; the standard 336-pixel viewport was
+  restored.
+
+- 2026-10-29: adjusted normal/lores VBXE overlay geometry inside the
+  compositor from 320 to 256 presented pixels (4:5), centered at x=128. This
+  matches the observed Altirra ratio of a normal-width 320-pixel VBXE overlay
+  within the wider Atari raster while preserving jsA8E's standard viewport.
+
+- 2026-10-29: Altirra confirmed the lores XDL diagnostic as a centered,
+  top-aligned 320x192 green field over the Atari background. jsA8E's visible
+  flicker was caused by clearing the whole VBXE plane at VSync before its
+  scanlines were rebuilt; the plane now clears each composed overlay line.
+
+- 2026-10-29: added `implementation/VBXE.md`, the pre-implementation design
+  for an optional VideoBoard XE device. It defines behavior-level rather than
+  gate-level FPGA emulation, an FX 1.26 / `$D640` first target, 512 KiB VRAM,
+  MEMAC and XDL integration, staged compositor/blitter work, snapshot and
+  reset expectations, and an Altirra-based differential validation plan. No
+  production emulation behavior changed.
+
+- 2026-10-26: added the first jsA8E interface theme system on the `Themes`
+  branch. The browser UI now provides persistent presets inspired by Atari
+  400/800, 800XL, 65XE/130XE, XEGS, ST, and 2600 hardware, plus the existing
+  dark presentation. Theme variables cover the main workspace, toolbar,
+  sub-panels, and virtual keyboard without changing the emulated PAL/NTSC
+  palette or CRT renderer. The 800XL theme was reset to a white base with gray
+  text, black borders, and red/dark-gray highlights; the XEGS theme uses the sampled warm-gray,
+  red, blue, yellow, pink, and lilac colors from the supplied reference image.
+  The assembler editor and snapshot panel backgrounds now consume the active
+  theme surfaces instead of retaining fixed dark backgrounds.
+  The selector persists through `localStorage`. Visual browser verification
+  remains pending because the local Windows/browser automation runtime was not
+  available in this session. `node --check`, `git diff --check`, theme-reference
+  checks, and HTTP serving checks pass; ESLint could not run because the local
+  `jsA8E` dependency tree does not contain the `eslint` executable.
+
+- 2026-10-26: replaced the mounted-disk library's text activity marker with the
+  compact `jsA8E/assets/leds.png` sprite. Its four LED states are mapped to
+  green for reads, red for writes, yellow for media errors, and the unlit LED
+  when idle. The sprite is rendered at 18px so it fits the narrow library row;
+  the activity event handling also recognizes error/failure operation names
+  without changing emulation timing.
+
+- 2026-10-26: measured the LED sprite's visible centers at X=29, 81, 133,
+  and 186 px rather than assuming equal source cells. Adjusted each 18px
+  library crop independently so the colored and unlit indicators remain
+  visually stationary when activity changes.
+
+- 2026-10-26: renamed the visible `classic` dark theme label to `CyberDeck`;
+  its stored key remains `classic` for preference compatibility.
+
+- 2026-10-26: removed the misleading writable markers from mounted disk rows
+  and removed the `RW` column from the disk library. The UI no longer claims
+  write protection support until the emulated media path enforces it.
+
+- 2026-10-26: increased the 800XL top-bar gradient contrast and added a subtle
+  mid-tone highlight so its white surface reads more like brushed metal.
+
+- 2026-10-26: replaced the OS and BASIC ROM load-button check/cross icons with
+  the compact LED sprite. The indicator is unlit when the ROM is absent and
+  green when it is loaded; loading behavior and stored ROM handling are
+  unchanged.
+
+- 2026-10-23: fixed host `Shift+Arrow` cursor-key handling in jsA8E. The
+  keydown records whether an arrow was mapped as an Atari cursor key or a
+  joystick direction; keyup releases the same path even if Shift was released
+  first. During the cursor chord, the Atari Shift line is temporarily masked
+  so the synthetic `Ctrl`+punctuation cursor code is not reinterpreted by
+  screen editors as a Shift-modified command. The up/down codes now exactly
+  match physical `Ctrl+-` (`$8E`) and `Ctrl+=` (`$8F`) rather than their
+  ASCII-key values. This prevents stuck keys while preserving normal Shift
+  typing and unmodified arrow-as-joystick behavior.
+
+- 2026-10-23: removed the virtual-disk burst shortcut that could schedule
+  `DATA NEEDED` 50 CPU cycles after a write, before the next real POKEY serial
+  clock edge. The drive-grant state remains bounded, but both jsA8E and native
+  A8E now schedule the holding-register load only from POKEY's clock. This
+  prevents accelerated data bytes from creating guest checksum races and
+  preserves AHRM serial timing; the normal DOS retry timeout is intentionally
+  unchanged.
+
+- 2026-10-23: corrected the first automatic SIO response phase. The simplified
+  receive path delivers complete bytes directly to SERIN, so its 1530-cycle
+  first-response interval is already guest-visible. Adding another byte time
+  had shifted the input-IRQ phase and increased the older OS `CHKSUM` race;
+  JS and native paths now use the same 1530-cycle first-byte phase while
+  subsequent-byte timing, checksum validation, NAK behavior, and DOS retry
+  timing remain unchanged.
+
+- 2026-10-23: live jsA8E capture of `SAVE"D2:OTRO.BAS"` isolated the long
+  retry: sector 163 transmitted all 128 payload bytes plus checksum in order,
+  with no SEROUT holding-register overwrite, but POKEY raised the first
+  `DATA NEEDED` event only four CPU cycles after the first SEROUT store. The
+  guest then supplied `$EE` while the transmitted payload checksum was `$71`,
+  so the virtual drive correctly returned NAK and DOS waited 15.96 seconds.
+  This is the AHRM 5.10 old-OS CHKSUM race, not ATR corruption or a disk-write
+  failure. The response-phase correction above removes an erroneous extra
+  input-byte interval that was shifting this IRQ phase.
+
+- 2026-10-23: the same capture showed the serial output-ready latch was being
+  made visible on the timer edge itself: a sector could raise `DATA NEEDED`
+  five cycles after the first SEROUT store. JS and native POKEY now apply the
+  two-cycle serial-latch propagation interval after the selected clock edge.
+  This preserves the clock edge and ten-bit frame cadence, but prevents an
+  emulator-only early IRQ from preempting the following `CHKSUM` store.
+
+- 2026-10-23: corrected SIO command-line ownership in jsA8E and native A8E.
+  POKEY `SEROUT` writes no longer force PIA CB2 low or high. The command
+  frame is retained until the guest's real CB2 low-to-high transition, then
+  the disk begins validation and ACK/NAK timing. This restores the AHRM
+  command setup phase before the OS starts its first data byte and avoids
+  injecting a virtual response IRQ into the first-byte `CHKSUM` race. The
+  focused regression now verifies that no response is queued before CB2 rises
+  and that data writes do not reassert COMMAND.
+
+- 2026-10-23: added focused jsA8E SIO transmission diagnostics for the
+  `SEROUT` holding register, `DATA NEEDED`, shift-register transfer, and
+  `XMTDONE` byte delivery. The trace records pending/active values and
+  deadlines so checksum failures can be reproduced without the invasive
+  all-memory access hook; its diagnostic ring retains a complete multi-sector
+  frame, and emulation timing is unchanged.
+
+- 2026-10-23: corrected the diagnostic wire-byte index so it refers to the
+  byte currently being delivered, before the SIO data counter is incremented.
+  This changes only trace interpretation; emulation timing and data flow are
+  unchanged.
+
+- 2026-10-23: the first byte-by-byte live trace of the problematic SIO path
+  showed that CPU `SEROUT` values and transmitted values remain ordered, with
+  no holding-register overwrite in the captured command/read sequence. The
+  observed NAKs therefore came from the Atari-side checksum value already
+  written by the guest (for example, `$EE` supplied where the checksum of the
+  four transmitted command bytes was `$41`), not from the virtual-disk
+  checksum routine or ATR geometry. The diagnostic still records
+  `holdingOccupied` so a real WRITE data phase can distinguish this documented
+  guest checksum race from a POKEY overrun.
+
+- 2026-10-23: anchored queued serial-output frames to the previously scheduled
+  `XMTDONE` deadline in jsA8E and native A8E. Timed callbacks can be observed
+  a few CPU cycles late at an instruction boundary; the next ten-bit frame now
+  preserves the existing cadence instead of accumulating that dispatch delay.
+  The change does not accept invalid checksums or alter SEROUT replacement
+  semantics, and a regression covers a late callback with one queued byte.
+
+- 2026-10-22: revised virtual-disk SIO burst timing to follow the AHRM/Altirra
+  device-grant model without copying Altirra source. A write/put/verify command
+  now explicitly grants the burst only after entering its data phase; each
+  payload byte renews a bounded window, and the checksum byte revokes the
+  grant. The original implementation briefly used a 50-cycle minimum lead;
+  that shortcut was removed on 2026-10-23 because it could precede the next
+  real POKEY output-clock edge. JS and native POKEY paths now share the
+  bounded state and preserve normal timing. The regression covers the grant,
+  POKEY-clock scheduling, and closure behavior.
+
+- 2026-10-22: aligned the first virtual-disk SIO response with the AHRM
+  automatic-response minimum by reducing its delay from 3000 to 1530 CPU
+  cycles in both JS and native POKEY. This matches the reference scheduler's
+  response timing and avoids an unnecessary response-phase interval before
+  DOS prepares the next transfer.
+
 - 2026-10-22: added AHRM-aligned support for standard flat sector dumps
   without an ATR container header. The jsA8E media boundary now recognizes
   90K/130K single-density and standard double-density raw geometries and
@@ -2314,6 +4242,45 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   deadlines, and `IRQST` where available. The trace is observational only and is disabled by default; its
   purpose is to decide whether the remaining P1 mismatch is a real internal
   edge difference or merely a guest polling boundary before changing timing.
+
+## 2026-10-22 SIO disk burst scheduling
+
+- 2026-10-23: Added a 640-cycle virtual disk-controller turn-around before
+  POKEY's existing 1530-cycle first-input-byte visibility delay in both cores.
+  AHRM 9.1 permits this response interval, and it models controller work as a
+  device delay rather than altering POKEY. It breaks the artificial fixed
+  phase relationship between virtual-disk responses and the XL/XE OS VBI,
+  which was still provoking occasional AHRM 5.10 command-checksum retries
+  after the data-frame race was fixed. `pokey_sio_burst.test.js` now asserts
+  that the device turn-around and serial visibility delays are combined. Full
+  analysis, observed traces, normal DOS close activity, validation, and the
+  regression diagnostic procedure are recorded in
+  `implementation/SIO_write_timing_investigation.md`.
+
+- 2026-10-23: Fixed the JS and native SEROUT write timestamp.  The CPU core
+  evaluates a store before advancing its instruction counter, but the 6502
+  presents that store on its final bus cycle.  POKEY now schedules the first
+  SEROUT-to-shifter load from that final cycle and only from a subsequent
+  rising serial-clock edge, as required by AHRM 5.6.  This prevents a
+  phase-dependent `DATA NEEDED` IRQ from pre-empting the XL OS between
+  `STA $D20D` and its checksum update, which had created invalid SIO data
+  checksums, NAKs, and the DOS retry pause.  POKEY exposes the selected load
+  two cycles after its serial clock edge, and the JS CPU now dispatches I/O
+  deadlines only at a completed instruction boundary; an I/O deadline can
+  latch during an instruction but cannot vector the CPU halfway through it.
+  The CPU and SIO regressions cover both contracts.
+
+- Added `jsA8E/tests/pokey_sio_burst.test.js` and registered it in the
+  automation suite. It verifies final-bus-cycle `SEROUT` scheduling,
+  POKEY-clocked sector delivery, checksum closure, and response turn-around.
+  The focused SIO regressions pass; the native build remains to be checked in
+  the Windows build tree.
+
+- 2026-10-23: Removed the investigation-only SIO event buffer expansion,
+  per-byte trace records, `DBG_*` markers, and unused data-phase deadline
+  state after the timing contract was covered by regressions. The supported
+  AHRM POKEY phase trace remains available independently through its existing
+  opt-in mechanism.
 
 ## Legal / License TODO
 

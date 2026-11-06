@@ -6,6 +6,8 @@
     const PIXELS_PER_LINE = cfg.PIXELS_PER_LINE;
     const CYCLES_PER_LINE = cfg.CYCLES_PER_LINE;
     const LINES_PER_SCREEN_PAL = cfg.LINES_PER_SCREEN_PAL;
+    const FIRST_VISIBLE_LINE = cfg.FIRST_VISIBLE_LINE;
+    const LAST_VISIBLE_LINE = cfg.LAST_VISIBLE_LINE;
 
     const IO_COLBK = cfg.IO_COLBK;
     const IO_COLPM0_TRIG2 = cfg.IO_COLPM0_TRIG2;
@@ -219,9 +221,14 @@
       // AHRM 4.8: a VSCROL write affects whether the DLI fires on this
       // scanline only through cycle 5, so the exit-line DLI decision is
       // evaluated once the beam reaches cycle 6.
+      // Mode lines are not processed in vertical blank, where the row
+      // counter no longer advances and would otherwise keep matching VSCROL
+      // and raise a DLI on every line after scan line 248.
       if (
         lineCycle === 6 &&
         io.modeLineExitDli &&
+        io.video.currentDisplayLine >= FIRST_VISIBLE_LINE &&
+        io.video.currentDisplayLine <= LAST_VISIBLE_LINE &&
         (io.modeLineRowCounter & 0x0f) ===
           currentVscrolRegister(io, ctx.sram)
       ) {

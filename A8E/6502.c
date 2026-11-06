@@ -840,6 +840,16 @@ void _6502_SetIo(_6502_Context_t *pContext, u16 sAddress, u8 *(*IoAccessFunction
 	pContext->pAccessFunctionList[sAddress++] = IoAccessFunction;
 }
 
+u8 *(*_6502_GetAccess(_6502_Context_t *pContext, u16 sAddress))(_6502_Context_t *, u8 *)
+{
+	return pContext->pAccessFunctionList[sAddress];
+}
+
+u8 _6502_IsRamAccess(_6502_Context_t *pContext, u16 sAddress)
+{
+	return (u8)(pContext->pAccessFunctionList[sAddress] == _6502_RamAccess);
+}
+
 u16 _6502_Disassemble(_6502_Context_t *pContext, u16 sAddress)
 {
 	char *pMnemonic;
@@ -1167,6 +1177,10 @@ void _6502_Execute(_6502_Context_t *pContext)
 	}
 
 	pContext->sCurrentInstructionPc = CPU.pc;
+	if(pContext->pfnFetchStage)
+	{
+		pContext->pfnFetchStage(pContext, CPU.pc);
+	}
 	cCode = RAM[CPU.pc++];
 	pContext->cCurrentOpcode = cCode;
 
@@ -1181,6 +1195,11 @@ void _6502_Execute(_6502_Context_t *pContext)
 	}
 
 	m_a6502OpcodeFunctionList[m_a6502CodeTable[cCode].cOpcodeId](pContext);
+
+	if(pContext->pfnFetchRestore)
+	{
+		pContext->pfnFetchRestore(pContext, pContext->sCurrentInstructionPc);
+	}
 
 	pContext->llCycleCounter += m_a6502CodeTable[cCode].cCycles;
 }

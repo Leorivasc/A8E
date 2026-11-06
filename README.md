@@ -27,6 +27,35 @@ https://www.virtualdub.org/downloads/Altirra%20Hardware%20Reference%20Manual.pdf
 
 ## Current Emulation Status
 
+### VBXE
+
+The browser JavaScript core provides optional FX 1.20, 1.24, 1.26, and FX
+1.26r VBXE profiles. The current functional milestone covers VRAM, registers,
+both `$D640`/`$D740` pages, XDL standard/lores/hires/text paths, attribute
+maps, MEMAC, blitter operations, completion IRQs, snapshots, and the supplied
+FX 1.26 software corpus. VBXE is disabled by default and uses the worker
+OffscreenCanvas when available, with main-thread fallback.
+
+Real software running in the browser core: the Popeye game (title, menu, and
+gameplay) and the D600 blitter demo, both compared visually with Altirra 4.40
+(D600 needs BASIC off, or ENTER plus a key, exactly as in Altirra), plus
+Phoenix, Celeste, Galaga, Crysis, and Falcon, plus games such as Commando and
+Gacek. The native `A8E` implements the first two stages of the device
+(`--vbxe`); see `A8E/README.md` for its limits.
+
+**VBXE is experimental and opt-in.** It is off by default and does not change
+base Atari behavior when off. The list of known differences from Altirra,
+open validation gaps and test-infrastructure issues is kept in
+[Known issues and pending work](implementation/VBXE_ROADMAP.md#known-issues-and-pending-work).
+
+This is functional compatibility, not a claim of complete hardware or
+pixel-perfect equivalence. Mid-scanline overlay/map composition, exact local
+bus phase timing, broader GTIA-special combinations, visual Altirra capture
+comparison, automated worker/fallback regression, and the native 640-wide VBXE output plane (the native
+core already composes XDL, overlay and attribute map at 336 pixels) remain separate
+milestones. See the [VBXE technical contract](implementation/VBXE.md) and the
+[VBXE roadmap](implementation/VBXE_ROADMAP.md).
+
 Both emulator cores currently include the following raster-timing behavior:
 
 - Visible scanlines now render playfield/background state on the per-color-clock path.
@@ -56,8 +85,9 @@ The directly AHRM-based changes include:
 - POKEY serial holding/shift-register timing, `SERIN`/`SEROUT` event order,
   `DATA NEEDED`, `TRANSMISSION DONE`, and `DATA READY` handling;
 - SIO command/response phases, checksums, `ACK`/`COMPLETE`/`NAK` sequencing,
-  sector geometry, `STATUS`, `FORMAT`, write verification, and the supported
-  US Doubler timing paths (AHRM sections 5.6, 5.10, and 9–10);
+  PIA CB2/`COMMAND` control, virtual-drive response timing, sector geometry,
+  `STATUS`, `FORMAT`, write verification, and the supported US Doubler timing
+  paths (AHRM sections 5.6, 5.10, and 9–10);
 - ANTIC/GTIA scanline, DMA, `CHBASE`, player/missile priority, collision, and
   GTIA Mode 10 composition behavior (AHRM sections 4.4, 4.8, 4.11, 4.13,
   4.14, and 6.5).
@@ -95,7 +125,7 @@ The native and browser implementations support the AHRM memory-map profiles belo
 
 RAMBO and COMPY bank-bit layouts, CPU/ANTIC window behavior, BASIC/Self-Test overlays, and bank persistence are implemented and covered by native and browser regression probes. Ultimate1MB currently provides its AHRM memory mapping and core UCTL/UAUX/COLDF control-register behavior, including selectable 64K, 320K, 576K, and 1088K modes. Ultimate1MB BIOS/flash, RTC, PBI devices, and external peripheral images are not yet emulated.
 
-The repository includes two standalone Atari diagnostics for expanded-memory validation: [`U1MB_MEMORY_TEST.XEX`](implementation/U1MB_MEMORY_TEST.XEX) performs full bank, system-window, configuration, and visual ANTIC checks; [`MEMORY_STRESS_TEST.XEX`](implementation/MEMORY_STRESS_TEST.XEX) performs repeated bank-switching and PORTB-map checks. See [implementation/memory_tests.md](implementation/memory_tests.md).
+The repository includes two standalone Atari diagnostics for expanded-memory validation: [`U1MB_MEMORY_TEST.XEX`](<implementation/AHRM Validation/U1MB_MEMORY_TEST.XEX>) performs full bank, system-window, configuration, and visual ANTIC checks; [`MEMORY_STRESS_TEST.XEX`](<implementation/AHRM Validation/MEMORY_STRESS_TEST.XEX>) performs repeated bank-switching and PORTB-map checks. See the [memory-test guide](implementation/memory_tests.md) and the [AHRM validation-test catalogue](<implementation/AHRM Validation/AHRM_Validation_Tests.md>) for expected output and the complete diagnostic set.
 
 ### Browser Presentation
 
@@ -202,6 +232,26 @@ startup screens in the emulator:
 These results come from shared fixes to XEX loading, memory banking, CPU
 interrupt handling, SIO response phases, and XL/XE defaults; no title-specific
 workarounds are used.
+
+VBXE (experimental, opt-in) was also exercised with real FX 1.26 software in
+jsA8E; the native A8E core is at an earlier stage. "Compared" means a visual
+comparison against Altirra 4.40 running the same XEX:
+
+- **Popeye** is playable (title, menu, score table and gameplay with colors). Compared.
+- **Commando** is playable; the first screen and the rock plateau were checked
+  after the MEMAC A fix above `$D800`. The end-of-level bridge/portal is still
+  untested.
+- **Gacek** runs; the sprite trails were fixed by latching the first blitter
+  block on START. Start it with BASIC off (Option on start), because it keeps
+  its sprite sheet in RAM at `$A000-$BFFF`.
+- **D600 blitter demo** shows the rainbow background with 24 blitter sprites.
+  It also needs BASIC off. Compared.
+- **Galaga**, **Crysis** and **Falcon** (the last two are 320x480i) were
+  confirmed running.
+- **Phoenix** and **Celeste** reach their title screens.
+
+VBXE is not hardware-certified and not pixel- or cycle-exact; open items are in
+the [VBXE roadmap](implementation/VBXE_ROADMAP.md#known-issues-and-pending-work).
 
 ## ROM Requirements
 

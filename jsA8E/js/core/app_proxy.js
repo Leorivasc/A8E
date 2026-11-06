@@ -51,6 +51,11 @@
     diskLibraryDownload: 30000,
     diskLibraryExport: 60000,
     diskLibraryInspect: 60000,
+    diskLibraryCancel: 5000,
+    diskLibraryRenameFolder: 15000,
+    diskLibrarySelectRevision: 15000,
+    diskLibraryVerify: 30000,
+    diskLibraryStorageEstimate: 15000,
     diskLibraryPreviewImport: 60000,
     diskLibraryImport: 60000,
     diskLibraryDelete: 15000,
@@ -84,11 +89,23 @@
     );
   }
 
+  function isFirefox() {
+    return typeof navigator !== "undefined" &&
+      typeof navigator.userAgent === "string" &&
+      /\bFirefox\//.test(navigator.userAgent);
+  }
+
   function supportsWorker() {
     // WebKitGTK can expose OffscreenCanvas but return no 2D context from the
     // worker. Keep the desktop shell on the main-thread backend until the
     // native WebView worker rendering path is reliable across platforms.
     if (isTauriWebView()) return false;
+    // Firefox's OffscreenCanvas/worker path left the worker unresponsive for
+    // seconds on a real desktop session (getCounters timed out after 4 s,
+    // several seconds of input lag), while the same page with the emulator on
+    // the main thread was playable. Default Firefox to the main thread; an
+    // explicit ?a8e_worker=1 still opts in.
+    if (isFirefox() && getQueryWorkerPreference() !== true) return false;
     if (typeof window.Worker === "undefined") return false;
     if (typeof window.OffscreenCanvas === "undefined") return false;
     if (typeof window.MessageChannel === "undefined") return false;
@@ -147,6 +164,23 @@
     if (text === "1088k" || text === "1088kb" || text === "rambo-1088k") return "rambo-1088k";
     if (text === "ultimate1mb" || text === "ultimate-1mb" || text === "1mb" || text === "1088k-u1mb") return "ultimate1mb";
     return null;
+  }
+
+  function normalizeVbxeConfig(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const profileText = String(
+      typeof value === "string" ? value : (source.profile || "off"),
+    ).trim().toLowerCase();
+    const profile = profileText === "fx1.20" || profileText === "fx120" ? "fx1.20" :
+      profileText === "fx1.24" || profileText === "fx124" ? "fx1.24" :
+        profileText === "fx1.26" || profileText === "fx126" ? "fx1.26" :
+          profileText === "fx1.26r" || profileText === "fx126r" || profileText === "r" ? "fx1.26r" : "off";
+    const enabled = source.enabled === false ? false : profile !== "off" || source.enabled === true;
+    return {
+      enabled: enabled,
+      profile: enabled ? (profile !== "off" ? profile : "fx1.26") : "off",
+      page: (source.page | 0) === 0xd740 ? 0xd740 : 0xd640,
+    };
   }
 
   function getQueryWorkerPreference() {
@@ -904,9 +938,16 @@
     folders.set("root", { id: "root", name: "Library", parentId: null });
 
     const trash = new Map();
+    const revisions = new Map();
 
-    function snapshotFromWire(items, isReady, isRestored, folderItems, trashItems) {
+    function snapshotFromWire(items, isReady, isRestored, folderItems, trashItems, revisionItems) {
       files.clear();
+      revisions.clear();
+      if (revisionItems && typeof revisionItems === "object") {
+        Object.keys(revisionItems).forEach(function (id) {
+          revisions.set(id, revisionItems[id]);
+        });
+      }
       folders.clear();
       trash.clear();
       folders.set("root", { id: "root", name: "Library", parentId: null });
@@ -972,6 +1013,12 @@
         current = current.parentId ? getFolder(current.parentId) : null;
       }
       return result;
+    }
+
+    function listRevisions(id) {
+      return (revisions.get(String(id || "")) || []).map(function (revision) {
+        return Object.assign({}, revision);
+      });
     }
 
     function getFileInfo(id) {
@@ -1073,6 +1120,37 @@
       return sendRequest("diskLibraryFolderDelete", { id: String(id || "") });
     }
 
+    function renameFolder(id, name) {
+      return sendRequest("diskLibraryRenameFolder", {
+        id: String(id || ""),
+        name: String(name || ""),
+      });
+    }
+
+    function selectRevision(id, revisionId) {
+      return sendRequest("diskLibrarySelectRevision", {
+        id: String(id || ""),
+        revisionId: String(revisionId || ""),
+      });
+    }
+
+    function verifyFile(id) {
+      return sendRequest(
+        "diskLibraryVerify",
+        { id: String(id || "") },
+        null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryVerify },
+      );
+    }
+
+    function getStorageEstimate() {
+      return sendRequest("diskLibraryStorageEstimate");
+    }
+
+    function exportWorkspacePackage(options) {
+      return exportPackage(Object.assign({}, options || {}, { workspaceOnly: true }));
+    }
+
     function moveFile(id, folderId) {
       return sendRequest("diskLibraryMove", {
         id: String(id || ""),
@@ -1096,13 +1174,43 @@
       return sendRequest("diskLibraryPurgeTrashBefore", { cutoff: Number(cutoff) });
     }
 
+    // Callbacks cannot cross the Worker boundary. A long operation gets an id;
+    // the worker reports progress under that id and the proxy checks the
+    // caller's cancel flag on each report, so the UI behaves as it does
+    // without a worker.
+    let nextOperationId = 1;
+    const operations = new Map();
+
+    function runLibraryOperation(cmd, payload, transfer, config, timeoutMs) {
+      const opId = nextOperationId++;
+      let cancelSent = false;
+      operations.set(opId, function (progress) {
+        if (typeof config.onProgress === "function") config.onProgress(progress);
+        const canceled = (typeof config.isCanceled === "function" && config.isCanceled()) ||
+          (config.signal && config.signal.aborted);
+        if (canceled && !cancelSent) {
+          cancelSent = true;
+          sendRequest("diskLibraryCancel", { opId: opId }).catch(function () {});
+        }
+      });
+      const request = Object.assign({}, payload, { opId: opId });
+      return sendRequest(cmd, request, transfer, { timeoutMs: timeoutMs })
+        .finally(function () { operations.delete(opId); });
+    }
+
+    function handleProgress(opId, progress) {
+      const listener = operations.get(opId);
+      if (listener) listener(progress);
+    }
+
     function exportPackage(options) {
       const config = options && typeof options === "object" ? options : {};
-      return sendRequest(
+      return runLibraryOperation(
         "diskLibraryExport",
         cloneLibraryExportOptions(config),
         null,
-        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryExport },
+        config,
+        REQUEST_TIMEOUT_MS.diskLibraryExport,
       ).then(function (result) {
         if (result && result.buffer && isArrayBufferLike(result.buffer)) {
           result.bytes = new Uint8Array(result.buffer);
@@ -1144,28 +1252,31 @@
       });
     }
 
-    function previewImport(data) {
+    function previewImport(data, options) {
       const buffer = toArrayBuffer(data);
-      return sendRequest(
+      return runLibraryOperation(
         "diskLibraryPreviewImport",
         { buffer: buffer },
         [buffer],
-        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryPreviewImport },
+        options && typeof options === "object" ? options : {},
+        REQUEST_TIMEOUT_MS.diskLibraryPreviewImport,
       );
     }
 
-    function importPackage(data) {
+    function importPackage(data, options) {
       const buffer = toArrayBuffer(data);
-      return sendRequest(
+      return runLibraryOperation(
         "diskLibraryImport",
         { buffer: buffer },
         [buffer],
-        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryImport },
+        options && typeof options === "object" ? options : {},
+        REQUEST_TIMEOUT_MS.diskLibraryImport,
       );
     }
 
     return {
       snapshotFromWire: snapshotFromWire,
+      handleProgress: handleProgress,
       api: {
         listFiles: listFiles,
         getFolder: getFolder,
@@ -1192,6 +1303,12 @@
         purgeAllTrash: purgeAllTrash,
         purgeTrashBefore: purgeTrashBefore,
         exportPackage: exportPackage,
+        exportWorkspacePackage: exportWorkspacePackage,
+        renameFolder: renameFolder,
+        listRevisions: listRevisions,
+        selectRevision: selectRevision,
+        verifyFile: verifyFile,
+        getStorageEstimate: getStorageEstimate,
         inspectPackage: inspectPackage,
         previewImport: previewImport,
         importPackage: importPackage,
@@ -1236,6 +1353,7 @@
       optionOnStart: false,
       videoStandard: videoStandard,
       memoryExpansion: normalizeMemoryExpansion(opts && opts.memoryExpansion) || "130xe-128k",
+      vbxe: normalizeVbxeConfig(opts && opts.vbxe),
     };
 
     function applyWorkerStateSnapshot(snapshot) {
@@ -1268,6 +1386,8 @@
           {state.videoStandard = normalizeVideoStandard(snapshot.config.videoStandard) || state.videoStandard;}
         if (typeof snapshot.config.memoryExpansion === "string")
           {state.memoryExpansion = normalizeMemoryExpansion(snapshot.config.memoryExpansion) || state.memoryExpansion;}
+        if (snapshot.config.vbxe !== undefined)
+          {state.vbxe = normalizeVbxeConfig(snapshot.config.vbxe);}
       }
       if (snapshot.debug) emitDebugState(snapshot.debug);
       syncReadyFlag();
@@ -1529,6 +1649,11 @@
         return;
       }
 
+      if (data.type === "diskLibraryProgress") {
+        diskLibraryProxy.handleProgress(data.opId, data.progress);
+        return;
+      }
+
       if (data.type === "diskLibrarySnapshot") {
         diskLibraryProxy.snapshotFromWire(
           data.files || [],
@@ -1536,6 +1661,7 @@
           typeof data.restored === "boolean" ? data.restored : !!data.ready,
           data.folders || [],
           data.trash || [],
+          data.revisions || null,
         );
         return;
       }
@@ -1600,6 +1726,8 @@
         optionOnStart: !!opts.optionOnStart,
         videoStandard: videoStandard,
         memoryExpansion: state.memoryExpansion,
+        vbxe: state.vbxe,
+        renderer: opts.renderer === "2d" ? "2d" : "auto",
         pokeyTrace: opts.pokeyTrace === true,
         keyboardMappingMode: keyboardMappingMode,
       },
@@ -1628,6 +1756,9 @@
           state.memoryExpansion =
             normalizeMemoryExpansion(options.memoryExpansion) || state.memoryExpansion;
         }
+        if (options && typeof options === "object" && options.vbxe !== undefined) {
+          state.vbxe = normalizeVbxeConfig(options.vbxe);
+        }
         return sendRequest("reset", options || null);
       },
       powerCycle: function (options) {
@@ -1635,6 +1766,9 @@
         if (options && typeof options === "object" && options.memoryExpansion !== undefined) {
           state.memoryExpansion =
             normalizeMemoryExpansion(options.memoryExpansion) || state.memoryExpansion;
+        }
+        if (options && typeof options === "object" && options.vbxe !== undefined) {
+          state.vbxe = normalizeVbxeConfig(options.vbxe);
         }
         return sendRequest("powerCycle", options || null);
       },
@@ -1675,6 +1809,9 @@
       },
       getMemoryExpansion: function () {
         return state.memoryExpansion;
+      },
+      getVbxeConfig: function () {
+        return Object.assign({}, state.vbxe);
       },
       setKeyboardMappingMode: function (mode) {
         keyboardMappingMode = mode === "original" ? "original" : "translated";
@@ -1975,6 +2112,8 @@
       {app.getVideoStandard = function () { return normalizeVideoStandard(legacyOpts.videoStandard) || "ntsc"; };}
     if (app && typeof app.getMemoryExpansion !== "function")
       {app.getMemoryExpansion = function () { return normalizeMemoryExpansion(legacyOpts.memoryExpansion) || "130xe-128k"; };}
+    if (app && typeof app.getVbxeConfig !== "function")
+      {app.getVbxeConfig = function () { return normalizeVbxeConfig(legacyOpts.vbxe); };}
     if (app && typeof app.powerCycle !== "function")
       {app.powerCycle = function (options) {
         const result = app.reset(options);

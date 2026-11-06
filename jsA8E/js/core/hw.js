@@ -69,7 +69,10 @@
 
     const SERIAL_OUTPUT_DATA_NEEDED_CYCLES = 900;
     const SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES = 1500;
-    const SERIAL_INPUT_FIRST_DATA_READY_CYCLES = 3000;
+    // AHRM 9.1: delay from command-frame completion to the first input byte.
+    const SERIAL_INPUT_FIRST_DATA_READY_CYCLES = 1530;
+    // Virtual disk devices need a command-to-response turnaround before data.
+    const SIO_DISK_RESPONSE_TURNAROUND_CYCLES = 640;
     const SERIAL_INPUT_DATA_READY_CYCLES = 900;
     const SIO_TURBO_EMU_MULTIPLIER = 4.0;
     // Keep enough history to survive moderate frame delays without excessive latency.
@@ -266,10 +269,12 @@
       { addr: IO_COLPF2, write: 0x00, read: 0x0f },
       { addr: IO_COLPF3, write: 0x00, read: 0x0f },
       { addr: IO_COLBK, write: 0x00, read: 0x0f },
-      { addr: IO_PRIOR, write: 0x00, read: 0xff },
-      { addr: IO_VDELAY, write: 0x00, read: 0xff },
-      { addr: IO_GRACTL, write: 0x00, read: 0xff },
-      { addr: IO_HITCLR, write: 0x00, read: 0xff },
+      // AHRM 6.1: unassigned GTIA reads in $D015-$D01E return $0F; no data bit
+      // floats. Popeye probes $D01C/$D01D and branches on bit 7.
+      { addr: IO_PRIOR, write: 0x00, read: 0x0f },
+      { addr: IO_VDELAY, write: 0x00, read: 0x0f },
+      { addr: IO_GRACTL, write: 0x00, read: 0x0f },
+      { addr: IO_HITCLR, write: 0x00, read: 0x0f },
       { addr: IO_CONSOL, write: 0x00, read: 0x07 },
 
       // POKEY
@@ -333,6 +338,8 @@
         SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES,
       SERIAL_INPUT_FIRST_DATA_READY_CYCLES:
         SERIAL_INPUT_FIRST_DATA_READY_CYCLES,
+      SIO_DISK_RESPONSE_TURNAROUND_CYCLES:
+        SIO_DISK_RESPONSE_TURNAROUND_CYCLES,
       SERIAL_INPUT_DATA_READY_CYCLES: SERIAL_INPUT_DATA_READY_CYCLES,
       SIO_TURBO_EMU_MULTIPLIER: SIO_TURBO_EMU_MULTIPLIER,
       POKEY_AUDIO_MAX_CATCHUP_CYCLES: POKEY_AUDIO_MAX_CATCHUP_CYCLES,

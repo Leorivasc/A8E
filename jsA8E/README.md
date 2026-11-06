@@ -13,6 +13,45 @@ Browser-based Atari 800 XL emulator port of the native C/SDL `A8E` implementatio
 
 ## Current Emulation Status
 
+### VBXE
+
+VBXE is optional and disabled by default. Select FX 1.20, FX 1.24, FX 1.26,
+or FX 1.26r and either the `$D600` or `$D700` page from the machine settings.
+The selected profile is persisted and rebuilding the machine applies the
+corresponding memory map. When VBXE is enabled, jsA8E uses the worker
+OffscreenCanvas when available; main-thread WebGL and Canvas 2D remain
+supported fallbacks.
+
+The practical compatibility milestone is complete: the device covers its
+registers, 512 KiB VRAM, XDL graphics/text paths, attribute maps, MEMAC,
+blitter, completion IRQ, snapshots, and the supplied real-software gates.
+The remaining work is primarily mid-scanline overlay/map spans, broader
+GTIA-special and collision differentials, exact blitter phase timing, and
+visual Altirra comparison. Worker/fallback parity has a Chromium smoke test;
+an automated browser regression remains.
+
+VBXE is experimental: the known differences from Altirra, the open validation
+gaps and the test-infrastructure issues are listed in
+[Known issues and pending work](../implementation/VBXE_ROADMAP.md#known-issues-and-pending-work).
+`npm run test:vbxe:browser` needs Chromium over CDP on port 9222 and drives
+the page it finds there, so use a throw-away browser for it.
+
+For the implementation contract, support matrix, diagrams, test commands, and
+stage exit criteria, see [`../implementation/VBXE.md`](../implementation/VBXE.md)
+and [`../implementation/VBXE_ROADMAP.md`](../implementation/VBXE_ROADMAP.md).
+
+Notes for running VBXE software: the D600 blitter demo asks `E:` for a line
+when BASIC is enabled, so enable Option-on-Start (BASIC off) or press ENTER
+and then a key, as in Altirra. Popeye needs `START` twice (title to menu, menu
+to game). Large XEXs load at normal SIO speed and take thousands of frames.
+
+VBXE regression commands:
+
+```sh
+cd jsA8E
+npm run test:vbxe:full
+```
+
 The current JS renderer includes the raster-timing pass:
 
 - visible playfield/background rendering is on the per-color-clock path
@@ -127,6 +166,7 @@ Behavior:
 - Disk image/program load (`Open Disk`) accepts `.atr`, `.xex`, and `.zip`.
   - `.zip` archives are scanned for the first `.atr` (preferred) or `.xex` entry and loaded directly.
   - `.xex` files are converted in-memory to an ATR-compatible boot stream using the same XEX boot loader logic as the native path.
+  - Headerless, standard-geometry sector dumps described by AHRM Appendix B are accepted and normalized internally as ATR media; ambiguous raw-image sizes are rejected.
 - When D1 is empty at startup, the browser mounts and starts the built-in
   `standby.xex`, which displays disk-loading instructions through its own
   ANTIC display list. Loading a disk through **Open Disk** restarts into it.

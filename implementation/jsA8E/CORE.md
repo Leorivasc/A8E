@@ -2,9 +2,10 @@
 
 > Hardware emulation reference: Before implementing any Atari 800 XL PAL/NTSC hardware emulation, use the [AHRM](/AHRM/index.md) as reference.
 
-- Files: `jsA8E/js/core/cpu.js`, `jsA8E/js/core/cpu_tables.js`, `jsA8E/js/core/antic.js`, `jsA8E/js/core/gtia.js`, `jsA8E/js/core/pokey.js`, `jsA8E/js/core/pokey_sio.js`, `jsA8E/js/core/memory.js`, `jsA8E/js/core/io.js`, `jsA8E/js/core/atari.js`, `jsA8E/js/core/hw.js`, `jsA8E/js/core/playfield/playfield.js`, `jsA8E/js/core/playfield/renderer_base.js`, `jsA8E/js/core/state.js`, `jsA8E/js/core/snapshot_codec.js`
+- Files: `jsA8E/js/core/cpu.js`, `jsA8E/js/core/cpu_tables.js`, `jsA8E/js/core/antic.js`, `jsA8E/js/core/gtia.js`, `jsA8E/js/core/pokey.js`, `jsA8E/js/core/pokey_sio.js`, `jsA8E/js/core/vbxe.js`, `jsA8E/js/core/memory.js`, `jsA8E/js/core/io.js`, `jsA8E/js/core/atari.js`, `jsA8E/js/core/hw.js`, `jsA8E/js/core/playfield/playfield.js`, `jsA8E/js/core/playfield/renderer_base.js`, `jsA8E/js/core/state.js`, `jsA8E/js/core/snapshot_codec.js`
 - Purpose: mirror Atari hardware behavior in JavaScript with timing-compatible execution.
-- Status: updated on 2026-09-25 (`implemented`, AHRM-07 probe-validated).
+- Status: updated on 2026-10-29 (`implemented`; AHRM-07 probe-validated and
+  initial optional VBXE FX 1.26 subset implemented).
 
 ## Architecture
 
@@ -12,9 +13,43 @@ CPU/ANTIC/GTIA/POKEY execution is coordinated through shared machine state. `pla
 
 State is created up-front by `state.js` into a fixed `ioData` shape. ANTIC and the playfield renderer rely on this fixed shape — `nmiTiming`, `chbaseTiming`, and per-line DMA buffers are never rebuilt lazily in hot paths. Media state is normalized through `getMediaState()` before reset/mount/snapshot work.
 
+The optional VBXE FX 1.26 path lives in `vbxe.js`. Its disabled-by-default
+state owns local VRAM, registers, MEMAC configuration, and XDL frame state.
+`memory.js` resolves CPU and ANTIC MEMAC accesses with explicit expansion-map
+precedence; `antic.js` latches and advances XDL state at its frame/scanline
+boundaries. The implemented standard/lores/hires XDL subset writes only to
+the separate RGB overlay plane, preserving the indexed Atari framebuffer and
+its priority metadata for composition. A second per-pixel contributor plane
+  removes P/M graphics hidden by GTIA `PRIOR` before VBXE evaluates overlay
+  priority and collisions. See [`VBXE.md`](../VBXE.md) for the technical
+  contract and [`VBXE_ROADMAP.md`](../VBXE_ROADMAP.md) for the staged work,
+  diagrams, and exit criteria.
+
 ## Clock Domains
 
 `io.clock` is the display beam clock (color clocks); `ctx.cycleCounter` is the CPU cycle counter. DLI deadlines use `io.clock`; timer/SIO deadlines use `cycleCounter`. The scheduler tracks separate beam/master wake thresholds (`ioBeamTimedEventCycle` / `ioMasterTimedEventCycle`) so scanline rendering and CPU execution each poll the correct domain. During `drawLine`, `io.clock` is the authoritative reference for all timed events.
+
+SIO disk writes retain AHRM's one-byte `SEROUT` holding register and checksum
+rules. Write/Put/Verify bytes advance only at POKEY output-clock edges, and
+the checksum byte is validated before the virtual disk acknowledges the frame.
+There is no disk-specific fast path or host-time pacing.
+
+The virtual disk includes a 640-cycle controller turn-around before the first
+automatic response byte, then the 1530-cycle (approximately 850 us) AHRM
+minimum serial visibility delay. The current receive model delivers whole
+bytes to `SERIN`, so the latter interval must not gain a second byte interval.
+Subsequent response bytes use their normal interval. The independent controller
+turn-around avoids an artificial fixed phase lock between virtual-disk replies
+and the older Atari OS SIO/VBI race.
+
+The complete investigation, verification trace, and regression procedure are
+in [SIO write timing investigation](../SIO_write_timing_investigation.md).
+
+The SIO `COMMAND` wire is PIA CB2. POKEY `SEROUT` writes never change it: the
+host asserts CB2 low before the five-byte command frame and releases it high
+after the frame. The virtual disk holds the complete frame until that real
+PIA transition, then starts validation and its ACK/NAK delay. This prevents a
+response from interrupting the OS while it still prepares the first data byte.
 
 ## ANTIC / Display List
 

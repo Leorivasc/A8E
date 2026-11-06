@@ -7,6 +7,7 @@
     const CYCLE_NEVER =
       cfg.CYCLE_NEVER !== undefined ? cfg.CYCLE_NEVER : Infinity;
     const recordPmgRegisterWrite = cfg.recordPmgRegisterWrite;
+    const recordGtiaRegisterWrite = cfg.recordGtiaRegisterWrite;
     const NMI_DLI = cfg.NMI_DLI;
     const NMI_VBI = cfg.NMI_VBI;
     const NMI_RESET = cfg.NMI_RESET;
@@ -92,8 +93,15 @@
     const pokeySyncLfsr17 = cfg.pokeySyncLfsr17;
     const pokeySeroutWrite = cfg.pokeySeroutWrite;
     const pokeySerinRead = cfg.pokeySerinRead;
+    const pokeySioCommandLineChanged = cfg.pokeySioCommandLineChanged;
     const pokeyPotUpdate = cfg.pokeyPotUpdate;
     const pokeyPotReadValue = cfg.pokeyPotReadValue;
+    const vbxeAccess = cfg.vbxeAccess;
+    const vbxeSoftReset = cfg.vbxeSoftReset;
+    const vbxeStartBlitterMidLine = cfg.vbxeStartBlitterMidLine;
+    const vbxeMemacAddress = cfg.vbxeMemacAddress;
+    const vbxeRamboAddress = cfg.vbxeRamboAddress;
+    const vbxeNoteMemacAccess = cfg.vbxeNoteMemacAccess;
     const TRIG_REGS = [
       IO_GRAFP3_TRIG0,
       IO_GRAFM_TRIG1,
@@ -354,6 +362,7 @@
       const statusKey = isA ? "piaStatusA" : "piaStatusB";
       const levelKey = isA ? "piaCa2Level" : "piaCb2Level";
       const oldMode = piaControlMode(ctx.sram[address]);
+      const oldLevel = io[levelKey] ? 1 : 0;
       const newValue = value & 0x3f;
       const newMode = piaControlMode(newValue);
       ctx.sram[address] = newValue;
@@ -367,6 +376,13 @@
       if (newMode >= 4) {
         io[levelKey] = newMode === 7 ? 1 : 0;
         if (!isA) io.piaCb2WasRaisedOutput = newMode === 7 && oldMode === 6;
+        if (
+          !isA &&
+          oldLevel !== (io[levelKey] ? 1 : 0) &&
+          typeof pokeySioCommandLineChanged === "function"
+        ) {
+          pokeySioCommandLineChanged(ctx, io[levelKey] ? 1 : 0);
+        }
       }
 
       piaUpdateControlReadback(ctx, address);
@@ -428,6 +444,74 @@
       const sram = ctx.sram;
       const io = ctx.ioData;
 
+      if (
+        value != null &&
+        io && io.vbxe && io.vbxe.enabled &&
+        addr >= 0xd080 && addr <= 0xd0ff &&
+        vbxeSoftReset
+      ) {
+        vbxeSoftReset(io.vbxe);
+      }
+      if (io && io.vbxe && io.vbxe.enabled && vbxeAccess) {
+        const blitterWasIdle = value != null && (value & 1) !== 0 &&
+          addr === io.vbxe.page + 0x13 && io.vbxe.blitterBusy === 0;
+        const vbxeValue = vbxeAccess(io.vbxe, addr, value);
+        if (vbxeValue !== null && vbxeValue !== undefined) {
+          if (blitterWasIdle && vbxeStartBlitterMidLine) {
+            // Eight local-bus slots per CPU cycle remain in this scanline.
+            const lineCycle = ((io.clock | 0) +
+              Math.max((ctx.currentInstructionCycles | 0) - 1, 0)) -
+              (io.displayListFetchCycle | 0);
+            const slotsLeft = (CYCLES_PER_LINE - Math.max(lineCycle, 0)) * 8;
+            const residual = vbxeStartBlitterMidLine(io.vbxe, slotsLeft, io.drawLine.vbxeLine);
+            if (residual >= 0) {
+              io.vbxeBlitterIrqCycle = io.displayListFetchCycle +
+                CYCLES_PER_LINE - (residual >> 3);
+              cycleTimedEventUpdate(ctx);
+            }
+          }
+          if (value != null && addr === io.vbxe.page + 0x0a &&
+              io.drawLine && io.drawLine.vbxeCollisionClearCycles) {
+            const lineCycle = ((io.clock | 0) +
+              Math.max((ctx.currentInstructionCycles | 0) - 1, 0)) -
+              (io.displayListFetchCycle | 0);
+            const clearIndex = io.drawLine.vbxeCollisionClearCount | 0;
+            if (lineCycle >= 0 && lineCycle < CYCLES_PER_LINE &&
+                clearIndex < io.drawLine.vbxeCollisionClearCycles.length) {
+              io.drawLine.vbxeCollisionClearCycles[clearIndex] = lineCycle & 0xff;
+              io.drawLine.vbxeCollisionClearCount = clearIndex + 1;
+            }
+          }
+          if (value != null && addr >= io.vbxe.page + 0x1d && addr <= io.vbxe.page + 0x1f &&
+              typeof io.vbxeMapSync === "function") io.vbxeMapSync(ctx);
+          // IRQ_CONTROL both configures and acknowledges the VBXE's
+          // level-sensitive blitter-complete source. Reconcile every VBXE
+          // write so its clear takes effect before the following instruction.
+          if (value != null && CPU && typeof CPU.reconcileIrq === "function")
+            CPU.reconcileIrq(ctx);
+          return vbxeValue & 0xff;
+        }
+      }
+      if (io && io.vbxe && io.vbxe.enabled && vbxeMemacAddress) {
+        const ramboLocalAddress = vbxeRamboAddress
+          ? vbxeRamboAddress(io.vbxe, addr, sram[IO_PORTB]) : -1;
+        if (ramboLocalAddress >= 0) {
+          if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe,
+            value == null ? "cpu-read" : "cpu-write",
+            ctx.cycleCounter, io.displayListFetchCycle);
+          if (value != null) io.vbxe.vram[ramboLocalAddress] = value & 0xff;
+          return io.vbxe.vram[ramboLocalAddress] & 0xff;
+        }
+        const localAddress = vbxeMemacAddress(io.vbxe, addr, false);
+        if (localAddress >= 0) {
+          if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe,
+            value == null ? "cpu-read" : "cpu-write",
+            ctx.cycleCounter, io.displayListFetchCycle);
+          if (value != null) io.vbxe.vram[localAddress] = value & 0xff;
+          return io.vbxe.vram[localAddress] & 0xff;
+        }
+      }
+
       if (value != null) {
         const v = value & 0xff;
 
@@ -460,6 +544,7 @@
           case IO_VDELAY:
             sram[addr] = v;
             if (recordPmgRegisterWrite) recordPmgRegisterWrite(ctx, addr, v);
+            if (recordGtiaRegisterWrite) recordGtiaRegisterWrite(ctx, addr, v);
             break;
 
           case IO_GRACTL: {
@@ -483,6 +568,7 @@
           case IO_COLPF3:
           case IO_COLBK:
             sram[addr] = v & 0xfe;
+            if (recordGtiaRegisterWrite) recordGtiaRegisterWrite(ctx, addr, sram[addr]);
             break;
 
           case IO_HITCLR:
@@ -576,7 +662,19 @@
               pokeyTraceEvent(ctx, "SEROUT_WRITE", { value: v });
             }
             ram[IO_IRQEN_IRQST] |= 0x10;
-            pokeySeroutWrite(ctx, v);
+            // A store reaches the peripheral on the final bus cycle of the
+            // 6502 instruction.  The CPU core executes an instruction as an
+            // atomic operation, so its cycle counter still names the first
+            // cycle here.  Giving POKEY that early timestamp can make it see
+            // an output-clock edge before the write could physically occur,
+            // producing a spurious DATA NEEDED IRQ between SEROUT and the
+            // OS checksum update.  AHRM 5.6 specifies that SEROUT transfers
+            // only on the *next* rising output-clock edge.
+            pokeySeroutWrite(
+              ctx,
+              v,
+              ctx.cycleCounter + Math.max((ctx.currentInstructionCycles | 0) - 1, 0),
+            );
             break;
 
           case IO_IRQEN_IRQST:

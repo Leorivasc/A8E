@@ -347,6 +347,7 @@
       "js/core/keys.js",
       "js/core/input.js",
       "js/core/hw.js",
+      "js/core/vbxe.js",
       "js/core/state.js",
       "js/core/snapshot_codec.js",
       "js/core/memory.js",
@@ -422,6 +423,33 @@
     return app.diskLibrary;
   }
 
+  // Progress and cancel for long library operations (see app_proxy.js).
+  const canceledLibraryOps = new Set();
+
+  function libraryOperationOptions(data) {
+    const opId = data && data.opId;
+    if (!opId) return {};
+    return {
+      onProgress: function (progress) {
+        self.postMessage({ type: "diskLibraryProgress", opId: opId, progress: progress });
+      },
+      isCanceled: function () { return canceledLibraryOps.has(opId); },
+    };
+  }
+
+  function finishLibraryOperation(data) {
+    if (data && data.opId) canceledLibraryOps.delete(data.opId);
+  }
+
+  function collectDiskLibraryRevisions(diskLibrary) {
+    const revisions = {};
+    if (typeof diskLibrary.listRevisions !== "function") return revisions;
+    diskLibrary.listFiles().forEach(function (file) {
+      revisions[file.id] = diskLibrary.listRevisions(file.id);
+    });
+    return revisions;
+  }
+
   function postDiskLibrarySnapshot() {
     const diskLibrary = getDiskLibrary();
     if (!diskLibrary || typeof diskLibrary.listFiles !== "function") {
@@ -435,6 +463,7 @@
       files: diskLibrary.listFiles(),
       folders: typeof diskLibrary.listAllFolders === "function" ? diskLibrary.listAllFolders() : [],
       trash: typeof diskLibrary.listTrash === "function" ? diskLibrary.listTrash() : [],
+      revisions: collectDiskLibraryRevisions(diskLibrary),
     });
   }
 
@@ -518,6 +547,10 @@
           app && typeof app.getMemoryExpansion === "function"
             ? app.getMemoryExpansion()
             : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.memoryExpansion) || "130xe-128k",
+        vbxe:
+          app && typeof app.getVbxeConfig === "function"
+            ? app.getVbxeConfig()
+            : (self.A8E_BOOT_OPTIONS && self.A8E_BOOT_OPTIONS.vbxe) || { enabled: false, profile: "off", page: 0xd640 },
       },
       debug:
         app && typeof app.getDebugState === "function" ? app.getDebugState() : null,
@@ -542,6 +575,7 @@
       {
         videoStandard: normalizeVideoStandard(msg.videoStandard) || "ntsc",
         memoryExpansion: normalizeMemoryExpansion(msg.memoryExpansion) || "130xe-128k",
+        vbxe: msg.vbxe || { enabled: false, profile: "off", page: 0xd640 },
         pokeyTrace: !!msg.pokeyTrace,
       },
     );
@@ -561,7 +595,7 @@
     if (initH > 0) screenCanvas.height = initH;
 
     let gl = null;
-    try {
+    if (msg.renderer !== "2d") try {
       gl =
         screenCanvas.getContext("webgl2", {
           alpha: true,
@@ -589,11 +623,10 @@
           premultipliedAlpha: false,
           preserveDrawingBuffer: false,
         });
-    } catch {
-      gl = null;
-    }
+    } catch { gl = null; }
 
     let ctx2d = null;
+    if (!gl) ctx2d = screenCanvas.getContext("2d", { alpha: false });
     if (gl && self.A8EGlRenderer && self.A8EGlRenderer.loadShaderSources) {
       try {
         await self.A8EGlRenderer.loadShaderSources();
@@ -615,6 +648,7 @@
         optionOnStart: !!msg.optionOnStart,
         videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
         memoryExpansion: self.A8E_BOOT_OPTIONS.memoryExpansion,
+        vbxe: self.A8E_BOOT_OPTIONS.vbxe,
         pokeyTrace: !!msg.pokeyTrace,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
@@ -640,6 +674,7 @@
         optionOnStart: !!msg.optionOnStart,
         videoStandard: self.A8E_BOOT_OPTIONS.videoStandard,
         memoryExpansion: self.A8E_BOOT_OPTIONS.memoryExpansion,
+        vbxe: self.A8E_BOOT_OPTIONS.vbxe,
         pokeyTrace: !!msg.pokeyTrace,
         onDebugState: function (state) {
           const force = !state || state.reason !== "frame";
@@ -1027,7 +1062,38 @@
       }
       case "diskLibraryExport": {
         const library = requireDiskLibrary();
-        return library.exportPackage(data || {});
+        try {
+          return await library.exportPackage(Object.assign({}, data, libraryOperationOptions(data)));
+        } finally {
+          finishLibraryOperation(data);
+        }
+      }
+      case "diskLibraryCancel": {
+        if (data.opId) canceledLibraryOps.add(data.opId);
+        return { ok: true };
+      }
+      case "diskLibraryRenameFolder": {
+        const library = requireDiskLibrary();
+        const result = await library.renameFolder(data.id || "", data.name || "");
+        postDiskLibrarySnapshot();
+        return result;
+      }
+      case "diskLibrarySelectRevision": {
+        const library = requireDiskLibrary();
+        const result = await library.selectRevision(data.id || "", data.revisionId || "");
+        postDiskLibrarySnapshot();
+        postState();
+        return result;
+      }
+      case "diskLibraryVerify": {
+        const library = requireDiskLibrary();
+        const result = await library.verifyFile(data.id || "");
+        postDiskLibrarySnapshot();
+        return result;
+      }
+      case "diskLibraryStorageEstimate": {
+        const library = requireDiskLibrary();
+        return library.getStorageEstimate();
       }
       case "diskLibraryInspect": {
         const library = requireDiskLibrary();
@@ -1035,11 +1101,22 @@
       }
       case "diskLibraryPreviewImport": {
         const library = requireDiskLibrary();
-        return library.previewImport(data.buffer || new ArrayBuffer(0));
+        try {
+          return await library.previewImport(
+            data.buffer || new ArrayBuffer(0), libraryOperationOptions(data));
+        } finally {
+          finishLibraryOperation(data);
+        }
       }
       case "diskLibraryImport": {
         const library = requireDiskLibrary();
-        const result = await library.importPackage(data.buffer || new ArrayBuffer(0));
+        let result;
+        try {
+          result = await library.importPackage(
+            data.buffer || new ArrayBuffer(0), libraryOperationOptions(data));
+        } finally {
+          finishLibraryOperation(data);
+        }
         postDiskLibrarySnapshot();
         postState();
         return result;

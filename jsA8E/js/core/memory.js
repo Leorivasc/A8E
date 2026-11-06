@@ -1243,6 +1243,12 @@
       const getTurbo = opts.getTurbo;
       const pokeyAudioResetState = opts.pokeyAudioResetState;
       const pokeyAudioSetTurbo = opts.pokeyAudioSetTurbo;
+      const createVbxeState =
+        typeof opts.createVbxeState === "function" ? opts.createVbxeState : null;
+      const cloneVbxeState =
+        typeof opts.cloneVbxeState === "function" ? opts.cloneVbxeState : null;
+      const restoreVbxeState =
+        typeof opts.restoreVbxeState === "function" ? opts.restoreVbxeState : null;
       const diskMediaChangeObserver =
         typeof opts.onDiskMediaChanged === "function"
           ? opts.onDiskMediaChanged
@@ -1250,6 +1256,12 @@
       const diskActivityObserver =
         typeof opts.onDiskActivity === "function" ? opts.onDiskActivity : null;
       let memoryWriteHook = null;
+
+      function attachVbxeState(io) {
+        if (io && createVbxeState) io.vbxe = createVbxeState();
+        if (io) io.vbxeMapSync = syncVbxeWindows;
+        return io;
+      }
       machine.memoryExpansion = createMemoryExpansionState(
         opts && opts.memoryExpansion !== undefined ? opts.memoryExpansion : "none",
       );
@@ -1517,9 +1529,44 @@
         }
       }
 
+      // The VBXE module loads after this one, so resolve it on first use. ANTIC
+      // calls the reader for every DMA byte; repeated `window` property
+      // lookups were the dominant cost of running with VBXE enabled.
+      let vbxeApi = null;
+      function getVbxeApi() {
+        if (vbxeApi === null) vbxeApi = window.A8EVbxe || null;
+        return vbxeApi;
+      }
+
       function readExpansionMemoryByte(ctx, address, isAnticRead) {
         const addr = address & 0xffff;
         const mem = getMemoryExpansionState();
+        const vbxe = ctx.ioData && ctx.ioData.vbxe;
+        const api = vbxe && vbxe.enabled ? getVbxeApi() : null;
+        const vbxeLocalAddress =
+          isAnticRead && api && api.memacAddress
+            ? api.memacAddress(vbxe, addr, true)
+            : -1;
+        const vbxeRamboAddress =
+          api && api.ramboAddress
+            ? api.ramboAddress(vbxe, addr, ctx.sram[IO_PORTB]) : -1;
+        if (vbxeRamboAddress >= 0) {
+          if (typeof api.noteMemacAccess === "function")
+            api.noteMemacAccess(vbxe,
+              isAnticRead ? "antic-read" : "cpu-read",
+              ctx.cycleCounter, ctx.ioData.displayListFetchCycle);
+          return vbxe.vram[vbxeRamboAddress] & 0xff;
+        }
+        const u1mbWindowOwnsAddress =
+          mem.ultimate1mb && addr >= 0x4000 && addr < 0x8000 &&
+          (mem.sharedWindow ? mem.cpuWindowEnabled : mem.anticWindowEnabled);
+        if (vbxeLocalAddress >= 0 && !u1mbWindowOwnsAddress) {
+          if (typeof api.noteMemacAccess === "function")
+            api.noteMemacAccess(vbxe,
+              isAnticRead ? "antic-read" : "cpu-read",
+              ctx.cycleCounter, ctx.ioData.displayListFetchCycle);
+          return vbxe.vram[vbxeLocalAddress] & 0xff;
+        }
         if (!mem.enabled || addr < 0x4000 || addr > 0x7fff) {
           return ctx.ram[addr] & 0xff;
         }
@@ -1824,6 +1871,13 @@
         syncMemoryExpansionWindow(ctx, portB, portB);
       }
 
+      // MEMAC register writes only move the VBXE windows. Rebuilding the whole
+      // map here would reload RAM hidden under ROM from sram, which is stale
+      // while that RAM is visible, and discard bytes the CPU just wrote there.
+      function syncVbxeWindows() {
+        installIoHandlers(machine.ctx, ioAccess, true);
+      }
+
       function applyResetOverrides(options) {
         if (!options || typeof options !== "object") return;
         if (options.memoryExpansion !== undefined && options.memoryExpansion !== null) {
@@ -1853,7 +1907,7 @@
         machine.ctx.nmiPending = 0;
         machine.ctx.nmiActive = 0;
         machine.ctx.irqPending = 0;
-        machine.ctx.ioData = makeIoData(video);
+        machine.ctx.ioData = attachVbxeState(makeIoData(video));
         machine.ctx.ioData.optionOnStart = !!getOptionOnStart();
         machine.ctx.ioData.sioTurbo = !!getSioTurbo();
         machine.ctx.ioData.piaSetControlLine = piaSetControlLine;
@@ -2144,6 +2198,9 @@
           sioBuffer: new Uint8Array(io.sioBuffer || 0),
           sioOutIndex: io.sioOutIndex | 0,
           sioOutPhase: io.sioOutPhase | 0,
+          sioCommandLineControlled: !!io.sioCommandLineControlled,
+          sioCommandLineAsserted: !!io.sioCommandLineAsserted,
+          sioCommandFrameReady: !!io.sioCommandFrameReady,
           sioDataIndex: io.sioDataIndex | 0,
           sioPendingDevice: io.sioPendingDevice | 0,
           sioPendingCmd: io.sioPendingCmd | 0,
@@ -2237,12 +2294,13 @@
           optionOnStart: !!io.optionOnStart,
           sioTurbo: !!io.sioTurbo,
           memoryExpansion: cloneMemoryExpansionState(io.memoryExpansion),
+          vbxe: cloneVbxeState && io.vbxe ? cloneVbxeState(io.vbxe) : null,
         };
       }
 
       function createIoDataFromSnapshot(snapshot) {
         const state = snapshot && typeof snapshot === "object" ? snapshot : {};
-        const io = makeIoData(video);
+        const io = attachVbxeState(makeIoData(video));
         if (state.video && typeof state.video === "object") {
           io.video.currentDisplayLine = state.video.currentDisplayLine | 0;
         }
@@ -2279,6 +2337,12 @@
         copyBytesTo(io.sioBuffer, state.sioBuffer);
         io.sioOutIndex = state.sioOutIndex | 0;
         io.sioOutPhase = state.sioOutPhase | 0;
+        if (state.sioCommandLineControlled !== undefined)
+          io.sioCommandLineControlled = !!state.sioCommandLineControlled;
+        if (state.sioCommandLineAsserted !== undefined)
+          io.sioCommandLineAsserted = !!state.sioCommandLineAsserted;
+        if (state.sioCommandFrameReady !== undefined)
+          io.sioCommandFrameReady = !!state.sioCommandFrameReady;
         io.sioDataIndex = state.sioDataIndex | 0;
         io.sioPendingDevice = state.sioPendingDevice | 0;
         io.sioPendingCmd = state.sioPendingCmd | 0;
@@ -2390,6 +2454,10 @@
         io.optionOnStart = !!state.optionOnStart;
         io.sioTurbo = !!state.sioTurbo;
         io.memoryExpansion = cloneMemoryExpansionState(state.memoryExpansion);
+        if (state.vbxe && restoreVbxeState) {
+          io.vbxe = restoreVbxeState(state.vbxe);
+        }
+        io.vbxeMapSync = syncVbxeWindows;
         return io;
       }
 
@@ -2512,6 +2580,7 @@
         writeMemory: writeMemory,
         writeRange: writeRange,
         setMemoryWriteHook: setMemoryWriteHook,
+        syncVbxeWindows: syncVbxeWindows,
         getBankState: getBankState,
         exportSnapshotState: exportSnapshotState,
         importSnapshotState: importSnapshotState,

@@ -122,6 +122,39 @@
       );
     }
 
+    function gtiaSpanRegisterIndex(address) {
+      switch (address) {
+        case IO_COLPM0_TRIG2: return 0;
+        case IO_COLPM1_TRIG3: return 1;
+        case IO_COLPM2_PAL: return 2;
+        case IO_COLPM3: return 3;
+        case cfg.IO_COLPF0: return 4;
+        case cfg.IO_COLPF1: return 5;
+        case cfg.IO_COLPF2: return 6;
+        case IO_COLPF3: return 7;
+        case cfg.IO_COLBK: return 8;
+        case IO_PRIOR: return 9;
+        default: return -1;
+      }
+    }
+
+    function recordGtiaRegisterWrite(ctx, address, value) {
+      const io = ctx.ioData;
+      const drawLine = io.drawLine;
+      const registerIndex = gtiaSpanRegisterIndex(address);
+      const lineCycle = ((io.clock | 0) + Math.max((ctx.currentInstructionCycles | 0) - 1, 0)) -
+        (io.displayListFetchCycle | 0);
+      if (!drawLine || registerIndex < 0 || lineCycle < 0 || lineCycle >= CYCLES_PER_LINE) return;
+      if (drawLine.gtiaEventCount >= drawLine.gtiaEventRegisters.length) {
+        drawLine.gtiaEventOverflow = true;
+        return;
+      }
+      const eventIndex = drawLine.gtiaEventCount++;
+      drawLine.gtiaEventRegisters[eventIndex] = registerIndex;
+      drawLine.gtiaEventValues[eventIndex] = value & 0xff;
+      drawLine.gtiaEventCycles[eventIndex] = lineCycle & 0xff;
+    }
+
     const PRIO_PF0 = cfg.PRIO_PF0;
     const PRIO_PF1 = cfg.PRIO_PF1;
     const PRIO_PF2 = cfg.PRIO_PF2;
@@ -135,6 +168,19 @@
     const PRIO_M10_PM1 = cfg.PRIO_M10_PM1;
     const PRIO_M10_PM2 = cfg.PRIO_M10_PM2;
     const PRIO_M10_PM3 = cfg.PRIO_M10_PM3;
+    const VBXE_CONTRIBUTOR_VALID = 0x8000;
+
+    function visibleContributors(buffer, index, activeLayers) {
+      if (!buffer) return activeLayers & 0x7fff;
+      const stored = buffer[index] & 0xffff;
+      return (stored & VBXE_CONTRIBUTOR_VALID) !== 0
+        ? stored & 0x7fff
+        : activeLayers & 0x7fff;
+    }
+
+    function setVisibleContributors(buffer, index, layers) {
+      if (buffer) buffer[index] = (VBXE_CONTRIBUTOR_VALID | layers) & 0xffff;
+    }
 
     function drawPlayer(
       color,
@@ -143,6 +189,7 @@
       priorityMask,
       priorityBit,
       prio,
+      contributors,
       dst,
       startIndex,
       special,
@@ -181,6 +228,17 @@
               }
             }
 
+            const visible = visibleContributors(contributors, pi, p);
+            let nextVisible = visible;
+            if (special && (p & PRIO_PF1)) {
+              nextVisible = (visible & PRIO_PF1) | cPriorityBit;
+            } else if (!(p & cPriorityMask)) {
+              nextVisible = (cOverlap && (p & cOverlap))
+                ? visible | cPriorityBit
+                : cPriorityBit;
+            }
+            setVisibleContributors(contributors, pi, nextVisible);
+
             prio[pi] = (prio[pi] | cPriorityBit) & 0xffff;
             collision |= prio[pi] & 0xffff;
           }
@@ -206,10 +264,12 @@
       data,
       priorityMask,
       prio,
+      contributors,
       dst,
       startIndex,
       special,
       prior,
+      priorityBit,
     ) {
       let collision = 0;
       const cColor = color & 0xff;
@@ -240,6 +300,11 @@
             dst[pi] = cColor;
           }
         }
+        const visible = visibleContributors(contributors, pi, p);
+        const nextVisible = special && (p & PRIO_PF1)
+          ? (visible & PRIO_PF1) | priorityBit
+          : (!(p & cPriorityMask) ? priorityBit : visible);
+        setVisibleContributors(contributors, pi, nextVisible);
         collision |= p;
       }
 
@@ -284,6 +349,46 @@
       return (((hpos & 0xff) << 1) + PMG_POSITION_BIAS_PIXELS) | 0;
     }
 
+    // True when a player or missile with graphics data starts inside
+    // [from, to). Conservative: it ignores the two-pixel stepping of the draw
+    // loop, so it may say yes for a position the loop never lands on.
+    function pmgMayReloadInSpan(sram, from, to) {
+      let hpos;
+      if (sram[IO_GRAFP3_TRIG0] & 0xff) {
+        hpos = pmgStartX(sram[IO_HPOSP3_M3PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (sram[IO_GRAFP2_P3PL] & 0xff) {
+        hpos = pmgStartX(sram[IO_HPOSP2_M2PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (sram[IO_GRAFP1_P2PL] & 0xff) {
+        hpos = pmgStartX(sram[IO_HPOSP1_M1PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (sram[IO_GRAFP0_P1PL] & 0xff) {
+        hpos = pmgStartX(sram[IO_HPOSP0_M0PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      const missiles = sram[IO_GRAFM_TRIG1] & 0xff;
+      if (missiles & 0xc0) {
+        hpos = pmgStartX(sram[IO_HPOSM3_P3PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (missiles & 0x30) {
+        hpos = pmgStartX(sram[IO_HPOSM2_P2PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (missiles & 0x0c) {
+        hpos = pmgStartX(sram[IO_HPOSM1_P1PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      if (missiles & 0x03) {
+        hpos = pmgStartX(sram[IO_HPOSM0_P0PF]);
+        if (hpos >= from && hpos < to) return true;
+      }
+      return false;
+    }
     function reloadPlayerShift(shiftState, stateState, index, data) {
       shiftState[index] = (shiftState[index] | data) & 0xff;
       stateState[index] = 0;
@@ -316,6 +421,7 @@
       priorityMask,
       priorityBit,
       prio,
+      contributors,
       dst,
       startIndex,
       special,
@@ -346,6 +452,16 @@
             dst[pi] = cColor;
           }
         }
+        const visible = visibleContributors(contributors, pi, p);
+        let nextVisible = visible;
+        if (special && (p & PRIO_PF1)) {
+          nextVisible = (visible & PRIO_PF1) | cPriorityBit;
+        } else if (!(p & cPriorityMask)) {
+          nextVisible = (cOverlap && (p & cOverlap))
+            ? visible | cPriorityBit
+            : cPriorityBit;
+        }
+        setVisibleContributors(contributors, pi, nextVisible);
         prio[pi] = (p | cPriorityBit) & 0xffff;
         collision |= prio[pi] & 0xffff;
       }
@@ -363,9 +479,11 @@
       color,
       priorityMask,
       prio,
+      contributors,
       dst,
       startIndex,
       special,
+      priorityBit,
     ) {
       const cColor = color & 0xff;
       const cPriorityMask = priorityMask & 0xffff;
@@ -378,6 +496,11 @@
         } else if (!(p & cPriorityMask)) {
           dst[pi] = cColor;
         }
+        const visible = visibleContributors(contributors, pi, p);
+        const nextVisible = special && (p & PRIO_PF1)
+          ? (visible & PRIO_PF1) | priorityBit
+          : (!(p & cPriorityMask) ? priorityBit : visible);
+        setVisibleContributors(contributors, pi, nextVisible);
         collision |= p;
       }
 
@@ -751,8 +874,28 @@
       const spanPixelEnd = (spanPixelStart + 4) | 0;
       if (spanPixelEnd <= 0 || spanPixelStart >= PIXELS_PER_LINE) return;
 
+      // Nothing to draw: no shift register holds bits, nothing can load in this
+      // span, and no catch-up of earlier spans is pending. The per-pixel loop
+      // and the collision merge would change nothing, and this runs for every
+      // color clock of every line even with no player/missile in use, so it
+      // is checked before any per-call setup.
+      {
+        const drawState = io.drawLine;
+        const pShift = drawState.playerPmgShift;
+        const mShift = drawState.missilePmgShift;
+        if (
+          !drawState.pmgFirstVisibleSpan &&
+          (pShift[0] | pShift[1] | pShift[2] | pShift[3] |
+            mShift[0] | mShift[1] | mShift[2] | mShift[3]) === 0 &&
+          !pmgMayReloadInSpan(sram, spanPixelStart > 0 ? spanPixelStart : 0, spanPixelEnd)
+        ) {
+          return;
+        }
+      }
+
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const contributors = io.videoOut.vbxeCollisionPriority || null;
       const prior = sram[IO_PRIOR] & 0xff;
       const mode = io.currentDisplayListCommand & 0x0f;
       const special =
@@ -843,6 +986,7 @@
             playerPriorityMask(prior, 3),
             PRIO_PM3,
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
@@ -863,6 +1007,7 @@
             playerPriorityMask(prior, 2),
             PRIO_PM2,
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
@@ -883,6 +1028,7 @@
             playerPriorityMask(prior, 1),
             PRIO_PM1,
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
@@ -903,6 +1049,7 @@
             playerPriorityMask(prior, 0),
             PRIO_PM0,
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
@@ -922,9 +1069,11 @@
             prior & 0x10 ? sram[IO_COLPF3] : sram[IO_COLPM3],
             missilePriorityMask(prior, 3),
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
+            prior & 0x10 ? PRIO_PF3 : PRIO_PM3,
           );
         }
         advanceMissileShift(missileShift, missileState, 3, size);
@@ -937,9 +1086,11 @@
             prior & 0x10 ? sram[IO_COLPF3] : sram[IO_COLPM2_PAL],
             missilePriorityMask(prior, 2),
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
+            prior & 0x10 ? PRIO_PF3 : PRIO_PM2,
           );
         }
         advanceMissileShift(missileShift, missileState, 2, size);
@@ -952,9 +1103,11 @@
             prior & 0x10 ? sram[IO_COLPF3] : sram[IO_COLPM1_TRIG3],
             missilePriorityMask(prior, 1),
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
+            prior & 0x10 ? PRIO_PF3 : PRIO_PM1,
           );
         }
         advanceMissileShift(missileShift, missileState, 1, size);
@@ -967,9 +1120,11 @@
             prior & 0x10 ? sram[IO_COLPF3] : sram[IO_COLPM0_TRIG2],
             missilePriorityMask(prior, 0),
             prio,
+            contributors,
             dst,
             lineBase + x,
             special,
+            prior & 0x10 ? PRIO_PF3 : PRIO_PM0,
           );
         }
         advanceMissileShift(missileShift, missileState, 0, size);
@@ -1023,6 +1178,7 @@
 
       const dst = io.videoOut.pixels;
       const prio = io.videoOut.priority;
+      const contributors = io.videoOut.vbxeCollisionPriority || null;
       const prior = sram[IO_PRIOR] & 0xff;
       const mode = io.currentDisplayListCommand & 0x0f;
       const special =
@@ -1059,6 +1215,7 @@
           mask,
           PRIO_PM3,
           prio,
+          contributors,
           dst,
           start,
           special,
@@ -1091,6 +1248,7 @@
           mask,
           PRIO_PM2,
           prio,
+          contributors,
           dst,
           start2,
           special,
@@ -1122,6 +1280,7 @@
           mask,
           PRIO_PM1,
           prio,
+          contributors,
           dst,
           start1,
           special,
@@ -1153,6 +1312,7 @@
           mask,
           PRIO_PM0,
           prio,
+          contributors,
           dst,
           start0,
           special,
@@ -1182,10 +1342,12 @@
           data,
           mask,
           prio,
+          contributors,
           dst,
           startM3,
           special,
           prior,
+          prior & 0x10 ? PRIO_PF3 : PRIO_PM3,
         );
 
         ram[IO_HPOSP3_M3PF] |= colM3 & 0x0f;
@@ -1205,10 +1367,12 @@
           data,
           mask,
           prio,
+          contributors,
           dst,
           startM2,
           special,
           prior,
+          prior & 0x10 ? PRIO_PF3 : PRIO_PM2,
         );
 
         ram[IO_HPOSP2_M2PF] |= colM2 & 0x0f;
@@ -1228,10 +1392,12 @@
           data,
           mask,
           prio,
+          contributors,
           dst,
           startM1,
           special,
           prior,
+          prior & 0x10 ? PRIO_PF3 : PRIO_PM1,
         );
 
         ram[IO_HPOSP1_M1PF] |= colM1 & 0x0f;
@@ -1251,10 +1417,12 @@
           data,
           mask,
           prio,
+          contributors,
           dst,
           startM0,
           special,
           prior,
+          prior & 0x10 ? PRIO_PF3 : PRIO_PM0,
         );
 
         ram[IO_HPOSP0_M0PF] |= colM0 & 0x0f;
@@ -1269,6 +1437,7 @@
       drawPlayerMissiles: drawPlayerMissiles,
       recordPmgRegisterEvent: recordPmgRegisterEvent,
       recordPmgRegisterWrite: recordPmgRegisterWrite,
+      recordGtiaRegisterWrite: recordGtiaRegisterWrite,
     };
   }
 

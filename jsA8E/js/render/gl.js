@@ -103,7 +103,7 @@
   let shaderSourcePromise = null;
 
   function fetchShaderText(url) {
-    return fetch(url).then(function (resp) {
+    return fetch(url, { cache: "no-store" }).then(function (resp) {
       if (!resp.ok)
         {throw new Error(
           "A8EGlRenderer: failed to fetch shader: " +
@@ -203,6 +203,8 @@
     let crtProgram = null;
     let indexTex = null;
     let paletteTex = null;
+    let vbxeTex = null;
+    let vbxeHiresTex = null;
     let sceneTex = null;
     let sceneFbo = null;
     let decodeBuf = null;
@@ -228,6 +230,8 @@
         if (crtBuf) gl.deleteBuffer(crtBuf);
         if (indexTex) gl.deleteTexture(indexTex);
         if (paletteTex) gl.deleteTexture(paletteTex);
+        if (vbxeTex) gl.deleteTexture(vbxeTex);
+        if (vbxeHiresTex) gl.deleteTexture(vbxeHiresTex);
         if (sceneTex) gl.deleteTexture(sceneTex);
         if (sceneFbo) gl.deleteFramebuffer(sceneFbo);
         if (decodeProgram) gl.deleteProgram(decodeProgram);
@@ -239,6 +243,8 @@
       crtBuf = null;
       indexTex = null;
       paletteTex = null;
+      vbxeTex = null;
+      vbxeHiresTex = null;
       sceneTex = null;
       sceneFbo = null;
       decodeProgram = null;
@@ -252,6 +258,18 @@
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, indexTex);
       const srcPixels = video.presentPixels || video.pixels;
+      const vbxePixels = video.presentVbxeRgb || video.vbxeRgb;
+      const vbxeHiresPixels = video.presentVbxeHiresRgb || video.vbxeHiresRgb;
+      const vbxeBytes = new Uint8Array(
+        vbxePixels.buffer,
+        vbxePixels.byteOffset,
+        vbxePixels.byteLength,
+      );
+      const vbxeHiresBytes = new Uint8Array(
+        vbxeHiresPixels.buffer,
+        vbxeHiresPixels.byteOffset,
+        vbxeHiresPixels.byteLength,
+      );
       if (gl2)
         {gl.texSubImage2D(
           gl.TEXTURE_2D,
@@ -276,6 +294,12 @@
           gl.UNSIGNED_BYTE,
           srcPixels,
         );}
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, vbxeTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texW, texH, gl.RGBA, gl.UNSIGNED_BYTE, vbxeBytes);
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D, vbxeHiresTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, sceneW, sceneH, gl.RGBA, gl.UNSIGNED_BYTE, vbxeHiresBytes);
 
       // Decode to the CRT scene texture, or directly to the display when disabled.
       gl.bindFramebuffer(gl.FRAMEBUFFER, crtEnabled ? sceneFbo : null);
@@ -288,6 +312,10 @@
       setupQuad(gl, decodeBuf, decodePosLoc, decodeUvLoc);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, indexTex);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, vbxeTex);
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D, vbxeHiresTex);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, paletteTex);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -376,6 +404,10 @@
         gl.UNSIGNED_BYTE,
         buildPaletteRgba(paletteRgb),
       );
+      vbxeTex = createTexture(gl, gl.TEXTURE3, gl.NEAREST, gl.NEAREST, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, texW, texH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      vbxeHiresTex = createTexture(gl, gl.TEXTURE4, gl.NEAREST, gl.NEAREST, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, sceneW, sceneH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
 
       // Offscreen scene texture (RGB after palette pass, at internal sceneScaleX/sceneScaleY resolution).
       sceneTex = createTexture(
@@ -457,6 +489,10 @@
       decodeUvLoc = gl.getAttribLocation(decodeProgram, "a_uv");
       decodeIndexLoc = gl.getUniformLocation(decodeProgram, "u_indexTex");
       decodePaletteLoc = gl.getUniformLocation(decodeProgram, "u_paletteTex");
+      const decodeVbxeLoc = gl.getUniformLocation(decodeProgram, "u_vbxeTex");
+      const decodeVbxeHiresLoc = gl.getUniformLocation(decodeProgram, "u_vbxeHiresTex");
+      const decodeViewOriginLoc = gl.getUniformLocation(decodeProgram, "u_viewOrigin");
+      const decodeViewSizeLoc = gl.getUniformLocation(decodeProgram, "u_viewSize");
 
       crtPosLoc = gl.getAttribLocation(crtProgram, "a_pos");
       crtUvLoc = gl.getAttribLocation(crtProgram, "a_uv");
@@ -468,6 +504,10 @@
       gl.useProgram(decodeProgram);
       if (decodeIndexLoc !== null) gl.uniform1i(decodeIndexLoc, 0);
       if (decodePaletteLoc !== null) gl.uniform1i(decodePaletteLoc, 1);
+      if (decodeVbxeLoc !== null) gl.uniform1i(decodeVbxeLoc, 3);
+      if (decodeVbxeHiresLoc !== null) gl.uniform1i(decodeVbxeHiresLoc, 4);
+      if (decodeViewOriginLoc !== null) gl.uniform2f(decodeViewOriginLoc, u0, v0);
+      if (decodeViewSizeLoc !== null) gl.uniform2f(decodeViewSizeLoc, u1 - u0, v1 - v0);
 
       gl.useProgram(crtProgram);
       if (crtSceneLoc !== null) gl.uniform1i(crtSceneLoc, 2);

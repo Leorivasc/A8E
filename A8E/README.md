@@ -48,6 +48,30 @@ manager on Linux.
 
 ## Current Emulation Status
 
+### VBXE scope
+
+The native C/SDL core implements stages 1 and 2 of the VBXE device (`Vbxe.c`
+and `VbxeVideo.c`), enabled with `--vbxe[=fx1.20|fx1.24|fx1.26]` (add `--vbxe-d7` for the `$D740`
+page): the register bank and configuration latch, 512 KiB VRAM, palette
+latches, MEMAC A/B windows for the CPU, ANTIC and instruction fetch, the
+blitter with its collision code and completion IRQ, the `$D080-$D0FF`
+reset strobe, the XDL parser, the standard/lores/hires/text overlay with its
+priority and collisions, playfield palettes, the attribute map and the
+XDL/overlay local-bus slots. Output limits: the picture is the 336-pixel
+native window, so hires and text overlays (640 pixels) average each pixel
+pair into one standard pixel; a line is composed once when it closes (mid-line
+GTIA changes are not replayed); reverse attribute-map cells are handled for
+plain ANTIC hires and lores lines (the raw source bits are rebuilt from the GTIA
+layer of each pixel), while the GTIA special-mode combinations use the plain
+playfield selection. The FX 1.26r RAMBO
+profile, snapshots and a UI selector are not available. The complete device
+is the optional JavaScript browser core (`jsA8E/`). The shared target, pending work, and
+validation gates are documented in the [VBXE roadmap](../implementation/VBXE_ROADMAP.md);
+the native probe is `tests/vbxe_probe.c`. VBXE is experimental and off by
+default; the known differences and pending work are listed in
+[Known issues and pending work](../implementation/VBXE_ROADMAP.md#known-issues-and-pending-work).
+`ctest` must run with `ATARIBAS.ROM` and `ATARIXL.ROM` in the repository root.
+
 The native core includes the current raster-timing pass:
 
 - visible scanlines draw playfield/background state on the per-color-clock path
@@ -318,7 +342,7 @@ If CMake is unavailable, you can compile all sources directly in a Unix-like she
 # from the A8E source directory
 clang -std=c99 -O2 -Wall \
       -I. $(sdl2-config --cflags) \
-      6502.c A8E.c Antic.c AtariIo.c Gtia.c Pia.c Pokey.c \
+      6502.c A8E.c Antic.c AtariIo.c Gtia.c Pia.c Pokey.c Vbxe.c VbxeVideo.c \
       -o A8E \
       $(sdl2-config --libs) -lm
 ```
@@ -328,7 +352,7 @@ If `sdl2-config` is not on your path, spell the flags out manually (macOS exampl
 ```sh
 clang -std=c99 -O2 -Wall \
       -I. -I/usr/local/include -I/usr/local/include/SDL2 \
-      6502.c A8E.c Antic.c AtariIo.c Gtia.c Pia.c Pokey.c \
+      6502.c A8E.c Antic.c AtariIo.c Gtia.c Pia.c Pokey.c Vbxe.c VbxeVideo.c \
       -o A8E \
       -L/usr/local/lib -lSDL2main -lSDL2 -lm -framework Cocoa
 ```

@@ -36,6 +36,7 @@ u8 *Pia_PBCTL(_6502_Context_t *pContext, u8 *pValue);
 u8 *Pia_U1mbRegister(_6502_Context_t *pContext, u8 *pValue);
 
 u8 Pia_IrqAsserted(_6502_Context_t *pContext);
+void Pia_ReconcileIrq(_6502_Context_t *pContext);
 void Pia_SetCa1Line(_6502_Context_t *pContext, u8 cLevel);
 void Pia_SetCa2Line(_6502_Context_t *pContext, u8 cLevel);
 void Pia_SetCb1Line(_6502_Context_t *pContext, u8 cLevel);

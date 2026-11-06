@@ -92,11 +92,35 @@ static int TestOptionBootPath(void)
 	return 1;
 }
 
+static int TestUnassignedReadsReturnF(void)
+{
+	/* AHRM 6.1: every unassigned GTIA read in $D015-$D01E returns $0F; software
+	 * such as Popeye probes $D01C/$D01D and branches on bit 7.
+	 */
+	_6502_Context_t *pContext = _6502_Open();
+	u16 sAddress;
+
+	REQUIRE(pContext != NULL, "6502 open failed");
+	AtariIoOpenWithMemory(pContext, 0, NULL, ATARI_VIDEO_PAL, ATARI_MEMORY_NONE);
+
+	for(sAddress = IO_COLPM3; sAddress <= IO_HITCLR; sAddress++)
+	{
+		u8 cValue = pContext->pMemory[sAddress];
+		REQUIRE(cValue == 0x0f, "$%04X reads %02X instead of 0F", sAddress, cValue);
+	}
+
+	AtariIoClose(pContext);
+	_6502_Close(pContext);
+	return 1;
+}
+
 int main(void)
 {
 	if(!TestConsolReadContract())
 		return 1;
 	if(!TestOptionBootPath())
+		return 1;
+	if(!TestUnassignedReadsReturnF())
 		return 1;
 
 	printf("gtia_consol_probe passed\n");

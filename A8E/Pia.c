@@ -17,6 +17,7 @@
 #include "AtariIo.h"
 #include "Pia.h"
 #include "Pokey.h"
+#include "Vbxe.h"
 
 #define PIA_IRQ1_STATUS 0x80
 #define PIA_IRQ2_STATUS 0x40
@@ -41,10 +42,12 @@ u8 Pia_IrqAsserted(_6502_Context_t *pContext)
 	u8 bIrqB = (u8)(((pIoData->cPiaStatusB & PIA_IRQ1_STATUS) && (SRAM[IO_PBCTL] & 0x01)) ||
 		((pIoData->cPiaStatusB & PIA_IRQ2_STATUS) && cModeB < 4 && (cModeB & 0x01)));
 
-	return (u8)(bIrqA || bIrqB);
+	/* VBXE blitter completion is an external, level-sensitive IRQ source
+	 * (AHRM 5.7 / 12.4). */
+	return (u8)(bIrqA || bIrqB || Vbxe_IrqAsserted(pIoData->pVbxe));
 }
 
-static void Pia_ReconcileIrq(_6502_Context_t *pContext)
+void Pia_ReconcileIrq(_6502_Context_t *pContext)
 {
 	_6502_ReconcileIrq(pContext, (u8)(Pia_PokeyIrqAsserted(pContext) ||
 		Pia_IrqAsserted(pContext)));
@@ -97,6 +100,7 @@ static void Pia_WriteControl(_6502_Context_t *pContext, u16 sAddress, u8 cValue)
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
 	u8 *pStatus = sAddress == IO_PACTL ? &pIoData->cPiaStatusA : &pIoData->cPiaStatusB;
 	u8 *pLevel = sAddress == IO_PACTL ? &pIoData->cPiaCa2Level : &pIoData->cPiaCb2Level;
+	u8 cOldLevel = *pLevel;
 	u8 cOldControl = SRAM[sAddress];
 	u8 cOldMode = Pia_ControlMode(cOldControl);
 	u8 cNewMode = Pia_ControlMode(cValue);
@@ -117,7 +121,11 @@ static void Pia_WriteControl(_6502_Context_t *pContext, u16 sAddress, u8 cValue)
 	{
 		*pLevel = (u8)(cNewMode == 7);
 		if(sAddress != IO_PACTL)
+		{
 			pIoData->bPiaCb2WasRaisedOutput = (u8)(cNewMode == 7 && cOldMode == 6);
+			if(cOldLevel != *pLevel)
+				Pokey_SioCommandLineChanged(pContext, *pLevel);
+		}
 	}
 
 	Pia_UpdateControlReadback(pContext, sAddress);
@@ -215,6 +223,7 @@ static void Pia_ApplyPortBValue(_6502_Context_t *pContext, u8 cEffectivePortB)
 	u8 bOldSelfTest;
 	u8 bNewBasic;
 	u8 bNewSelfTest;
+	u8 bMapChanged;
 	AtariMemoryExpansion_t eProfile = pIoData->eMemoryExpansion;
 
 	/* Before the first expansion write, the persistent ROM state is the
@@ -321,6 +330,11 @@ static void Pia_ApplyPortBValue(_6502_Context_t *pContext, u8 cEffectivePortB)
 					   pIoData->eMemoryExpansion == ATARI_MEMORY_RAMBO_1088K))
 			bNewSelfTest = 0;
 	}
+	/* A change of the OS/BASIC/Self-test mapping replaces the access
+	 * handlers VBXE installed for its MEMAC windows, so they must be rebuilt
+	 * afterwards. */
+	bMapChanged = (u8)(((SRAM[IO_PORTB] & 0x01) != (cEffectivePortB & 0x01)) ||
+		bOldBasic != bNewBasic || bOldSelfTest != bNewSelfTest);
 #ifdef VERBOSE_ROM_SWITCH
 	printf("$%04X: PORTB ", pContext->tCpu.pc);
 #endif
@@ -401,6 +415,7 @@ static void Pia_ApplyPortBValue(_6502_Context_t *pContext, u8 cEffectivePortB)
 	printf("\n");
 #endif
 	RAM[IO_PORTB] = SRAM[IO_PORTB] = cNewPortB;
+	if(bMapChanged && pIoData->pVbxe) Vbxe_RebuildWindows(pContext);
 #ifdef VERBOSE_REGISTER
 	printf("             [%16llu]", pContext->llCycleCounter);
 	printf(" PORTB: %02X\n", cEffectivePortB);

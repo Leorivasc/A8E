@@ -161,9 +161,33 @@ function testPokeyIrqReconciliationTracksActiveSource() {
   assert.equal(ctx.irqPending, 0, "cleared POKEY source should release IRQ");
 }
 
+function testIoEventDoesNotSplitStoreInstruction() {
+  const { cpuApi, ctx } = makeContext();
+
+  // STA absolute is four cycles. The I/O deadline occurs during it, but the
+  // device event must observe the completed store at the next CPU boundary.
+  ctx.cpu.a = 0x5a;
+  ctx.ram[0x2000] = 0x8d; // STA $0010
+  ctx.ram[0x2001] = 0x10;
+  ctx.ram[0x2002] = 0x00;
+  ctx.ram[0x2003] = 0xea;
+  ctx.ioCycleTimedEventCycle = 2;
+  let observed = -1;
+  ctx.ioCycleTimedEventFunction = function (state) {
+    observed = state.ram[0x0010];
+    state.ioCycleTimedEventCycle = Infinity;
+  };
+
+  cpuApi.run(ctx, 5);
+
+  assert.equal(ctx.ram[0x0010], 0x5a, "store must complete before I/O dispatch");
+  assert.equal(observed, 0x5a, "I/O event must observe the completed store");
+}
+
 testPendingNmiConsumesOnlyInterruptEntryStep();
 testPendingIrqConsumesOnlyInterruptEntryStep();
 testNmiCanNestWhilePreviousHandlerIsActive();
 testCycle4IrqCanLoseAnticNmi();
 testIrqOutsideCycle4KeepsAnticNmi();
 testPokeyIrqReconciliationTracksActiveSource();
+testIoEventDoesNotSplitStoreInstruction();

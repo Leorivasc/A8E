@@ -301,6 +301,8 @@ function loadRendererBaseApi() {
     PIXELS_PER_LINE: 456,
     CYCLES_PER_LINE: 114,
     LINES_PER_SCREEN_PAL: 312,
+    FIRST_VISIBLE_LINE: 8,
+    LAST_VISIBLE_LINE: 247,
     IO_COLBK: IO_COLBK,
     IO_COLPM0_TRIG2: IO_COLPM0_TRIG2,
     IO_PRIOR: IO_PRIOR,
@@ -450,10 +452,32 @@ function testVscrolDeadlineUsesAtomicInstructionWriteCycle() {
   assert.equal(late.ioData.modeLineEndsThisLine, false);
 }
 
+function testExitDliIsNotArmedInVerticalBlank() {
+  const api = loadRendererBaseApi();
+  const ctx = makeClockCtx();
+
+  // A scrolled-region exit line that is still open when vertical blank starts
+  // leaves the row counter parked on VSCROL. ANTIC processes no mode lines
+  // after scan line 247, so no DLI may be raised for those scan lines.
+  ctx.ioData.modeLineScrollExit = true;
+  ctx.ioData.modeLineExitDli = true;
+  ctx.ioData.modeLineRowCounter = 3;
+  ctx.sram[IO_VSCROL] = 3;
+  ctx.ioData.video.currentDisplayLine = 250;
+
+  api.stepClockActions(ctx, 8); // through cycle 7
+  assert.equal(
+    ctx.ioData.dliCycle,
+    CYCLE_NEVER,
+    "a stale exit-line DLI must not be armed after scan line 247",
+  );
+}
+
 testVscrolEntryWrapExtendsModeLine();
 testVscrolExitLineFollowsLiveVscrol();
 testExitDliArmedAtCycle6OnMatchingRow();
 testExitDliIgnoresVscrolWrittenAfterCycle5();
 testExitEndLatchIgnoresVscrolWrittenAfterCycle108();
 testVscrolDeadlineUsesAtomicInstructionWriteCycle();
+testExitDliIsNotArmedInVerticalBlank();
 console.log("antic_vscrol_timing tests passed");

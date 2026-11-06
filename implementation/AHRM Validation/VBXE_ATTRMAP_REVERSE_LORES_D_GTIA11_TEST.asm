@@ -1,0 +1,5 @@
+.define ANTIC_MODE $0D
+.define DISPLAY_ROWS 96
+.define GTIA_MODE $C0
+.define GTIA_ENABLED
+.include "VBXE_ATTRMAP_REVERSE_LORES_PROBE.asm"

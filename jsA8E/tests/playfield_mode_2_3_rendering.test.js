@@ -293,6 +293,51 @@ function testMode2BlankAndInvertProducesInvertedSpace() {
   ]);
 }
 
+function testMode2PreservesDecodedHiresBitsForVbxeReverse() {
+  const api = loadMode23Api({
+    fetchUnbufferedDisplayByte: function () {
+      return 0xa0;
+    },
+  });
+
+  const ctx = createCtx();
+  ctx.sram[IO_PRIOR] = 0x00;
+  ctx.sram[IO_COLPF1] = 0x0b;
+  ctx.sram[IO_COLPF2] = 0xa0;
+  ctx.ioData.videoOut.anticSourceBits = new Uint8Array(64);
+  ctx.ioData.videoOut.anticSourceBits.fill(0xff);
+  ctx.ram[0] = 0x00;
+
+  api.drawLineMode2(ctx);
+
+  assert.deepEqual(
+    Array.from(ctx.ioData.videoOut.anticSourceBits.slice(0, 8)),
+    [1, 0, 1, 0, 0, 0, 0, 0],
+    "mode 2 must preserve its decoded hires bit stream",
+  );
+}
+
+function testMode2PreservesHiresBitsInGtiaSpecialMode() {
+  const api = loadMode23Api({
+    fetchUnbufferedDisplayByte: function () {
+      return 0x1b;
+    },
+  });
+  const ctx = createCtx();
+  ctx.sram[IO_PRIOR] = 0x80;
+  ctx.ioData.videoOut.anticSourceBits = new Uint8Array(64);
+  ctx.ioData.videoOut.anticSourceBits.fill(0xff);
+  ctx.ram[0] = 0x00;
+
+  api.drawLineMode2(ctx);
+
+  assert.deepEqual(
+    Array.from(ctx.ioData.videoOut.anticSourceBits.slice(0, 8)),
+    [0, 0, 0, 1, 1, 0, 1, 1],
+    "mode 2 special output must retain its original hires source bits",
+  );
+}
+
 function testMode2ExtendedRowsFollowAhrmMapping() {
   // AHRM 4.7: on vertically extended mode 2 lines, rows 8-9 blank
   // non-descender characters (descenders show glyph rows 0-1) and rows
@@ -363,5 +408,7 @@ testMode2Mode3Prior0OutputParity();
 testMode2Mode3Prior0WidthIsNotDoubled();
 testMode2LatchesChactlForWholeScanline();
 testMode2BlankAndInvertProducesInvertedSpace();
+testMode2PreservesDecodedHiresBitsForVbxeReverse();
+testMode2PreservesHiresBitsInGtiaSpecialMode();
 testMode2ExtendedRowsFollowAhrmMapping();
 console.log("playfield_mode_2_3_rendering tests passed");

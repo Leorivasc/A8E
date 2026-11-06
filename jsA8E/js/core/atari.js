@@ -24,6 +24,16 @@
   const hwApi =
     window.A8EHw && window.A8EHw.createApi ? window.A8EHw.createApi() : null;
   if (!hwApi) throw new Error("A8EHw is not loaded");
+  const vbxeApi = window.A8EVbxe || {
+    normalizeConfig: function () { return { enabled: false, profile: "off", page: 0xd640 }; },
+    createState: function () { return { enabled: false, profile: "off", page: 0xd640 }; },
+    cloneState: function (state) { return Object.assign({}, state); },
+    restoreState: function (state) { return Object.assign({}, state || {}); },
+    access: function () { return null; },
+    softReset: function () {},
+    verticalSync: function () {},
+    advanceBlitter: function () {},
+  };
 
   const PIXELS_PER_LINE = hwApi.PIXELS_PER_LINE;
   const LINES_PER_SCREEN_PAL = hwApi.LINES_PER_SCREEN_PAL;
@@ -38,6 +48,8 @@
     hwApi.SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES;
   const SERIAL_INPUT_FIRST_DATA_READY_CYCLES =
     hwApi.SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+  const SIO_DISK_RESPONSE_TURNAROUND_CYCLES =
+    hwApi.SIO_DISK_RESPONSE_TURNAROUND_CYCLES;
   const SERIAL_INPUT_DATA_READY_CYCLES = hwApi.SERIAL_INPUT_DATA_READY_CYCLES;
   const SIO_TURBO_EMU_MULTIPLIER = hwApi.SIO_TURBO_EMU_MULTIPLIER;
   const POKEY_AUDIO_MAX_CATCHUP_CYCLES = hwApi.POKEY_AUDIO_MAX_CATCHUP_CYCLES;
@@ -253,6 +265,8 @@
           CYCLES_PER_FRAME: CYCLES_PER_FRAME,
           CYCLE_NEVER: CYCLE_NEVER,
           IO_INIT_VALUES: IO_INIT_VALUES,
+          vbxeMemacAddress: vbxeApi.memacAddress,
+          vbxeRamboAddress: vbxeApi.ramboAddress,
         })
       : null;
   if (!stateApi) throw new Error("A8EState is not loaded");
@@ -307,6 +321,8 @@
             SERIAL_OUTPUT_TRANSMISSION_DONE_CYCLES,
           SERIAL_INPUT_FIRST_DATA_READY_CYCLES:
             SERIAL_INPUT_FIRST_DATA_READY_CYCLES,
+          SIO_DISK_RESPONSE_TURNAROUND_CYCLES:
+            SIO_DISK_RESPONSE_TURNAROUND_CYCLES,
           SERIAL_INPUT_DATA_READY_CYCLES: SERIAL_INPUT_DATA_READY_CYCLES,
           IO_AUDF1_POT0: IO_AUDF1_POT0,
           IO_AUDC1_POT1: IO_AUDC1_POT1,
@@ -357,6 +373,7 @@
     pokeyAudioApi.serialOutputTransmissionDone;
   const pokeySerialInputReady = pokeyAudioApi.serialInputReady;
   const pokeySerinRead = pokeyAudioApi.serinRead;
+  const pokeySioCommandLineChanged = pokeyAudioApi.sioCommandLineChanged;
 
   const ioApi =
     window.A8EIo && window.A8EIo.createApi
@@ -452,10 +469,20 @@
           pokeySerialOutputTransmissionDone: pokeySerialOutputTransmissionDone,
           pokeySerialInputReady: pokeySerialInputReady,
           pokeySerinRead: pokeySerinRead,
+          pokeySioCommandLineChanged: pokeySioCommandLineChanged,
+          vbxeAccess: vbxeApi.access,
+          vbxeSoftReset: vbxeApi.softReset,
+          vbxeStartBlitterMidLine: vbxeApi.startBlitterMidLine,
+          vbxeMemacAddress: vbxeApi.memacAddress,
+          vbxeRamboAddress: vbxeApi.ramboAddress,
+          vbxeNoteMemacAccess: vbxeApi.noteMemacAccess,
           pokeyPotUpdate: pokeyPotUpdate,
           pokeyPotReadValue: pokeyPotReadValue,
           recordPmgRegisterWrite: function (ctx, address, value) {
             return gtiaApi.recordPmgRegisterWrite(ctx, address, value);
+          },
+          recordGtiaRegisterWrite: function (ctx, address, value) {
+            return gtiaApi.recordGtiaRegisterWrite(ctx, address, value);
           },
         })
       : null;
@@ -466,6 +493,10 @@
       ? window.A8EGtia.createApi({
           PIXELS_PER_LINE: PIXELS_PER_LINE,
           CYCLES_PER_LINE: CYCLES_PER_LINE,
+          IO_COLPF0: IO_COLPF0,
+          IO_COLPF1: IO_COLPF1,
+          IO_COLPF2: IO_COLPF2,
+          IO_COLBK: IO_COLBK,
           IO_COLPF3: IO_COLPF3,
           IO_COLPM0_TRIG2: IO_COLPM0_TRIG2,
           IO_COLPM1_TRIG3: IO_COLPM1_TRIG3,
@@ -560,6 +591,10 @@
             IO_GRAFP0_P1PL, IO_GRAFP1_P2PL, IO_GRAFP2_P3PL, IO_GRAFP3_TRIG0,
             IO_GRAFM_TRIG1,
           ],
+          GTIA_SPAN_REGISTER_ADDRESSES: [
+            IO_COLPM0_TRIG2, IO_COLPM1_TRIG3, IO_COLPM2_PAL, IO_COLPM3,
+            IO_COLPF0, IO_COLPF1, IO_COLPF2, IO_COLPF3, IO_COLBK, IO_PRIOR,
+          ],
           ANTIC_MODE_INFO: ANTIC_MODE_INFO,
           drawPlayerMissilesClock: drawPlayerMissilesClock,
           fetchPmgDmaCycle: gtiaApi.fetchPmgDmaCycle,
@@ -572,6 +607,15 @@
           pokeyApplyTimerReset: pokeyApplyTimerReset,
           pokeyTraceEvent: pokeyTraceEvent,
           cycleTimedEventUpdate: cycleTimedEventUpdate,
+          vbxeVerticalSync: vbxeApi.verticalSync,
+          vbxeAdvanceBlitter: vbxeApi.advanceBlitter,
+          vbxeScheduleBlitterIrq: vbxeApi.scheduleBlitterIrq,
+          vbxeRaiseScheduledBlitterIrq: vbxeApi.raiseScheduledBlitterIrq,
+          vbxeLocalBusBudget: vbxeApi.localBusBudget,
+          vbxeNextXdlLine: vbxeApi.nextXdlLine,
+          vbxeRenderXdlLine: vbxeApi.renderXdlLine,
+          vbxeApplyPlayfieldAttributes: vbxeApi.applyPlayfieldAttributes,
+          vbxeApplyGtiaSpans: vbxeApi.applyGtiaSpans,
           PRIO_BKG: PRIO_BKG,
           PRIO_PF0: PRIO_PF0,
           PRIO_PF1: PRIO_PF1,
@@ -632,12 +676,14 @@
     const skipRendering = !!opts.skipRendering;
     let optionOnStart = !!opts.optionOnStart;
     let memoryExpansion = normalizeMemoryExpansion(opts.memoryExpansion) || "130xe-128k";
+    let vbxeConfig = vbxeApi.normalizeConfig(opts.vbxe);
     let keyboardMappingMode =
       opts.keyboardMappingMode === "original" ? "original" : "translated";
     if (setKeysKeyboardMappingMode)
       {setKeysKeyboardMappingMode(keyboardMappingMode);}
 
     const video = makeVideo();
+    video.crtEnabled = opts.crtEnabled !== false;
     let renderer = null;
     let imageData = null;
     if (gl && window.A8EGlRenderer && window.A8EGlRenderer.create) {
@@ -664,6 +710,7 @@
           ctx2d.putImageData(imageData, 0, 0);
         },
         dispose: function () {},
+        setCrtEnabled: function (value) { video.crtEnabled = !!value; },
         backend: "2d",
       };
     }
@@ -869,6 +916,11 @@
       onDiskMediaChanged: onDiskMediaChanged,
       onDiskActivity: notifyDiskActivity,
       memoryExpansion: memoryExpansion,
+      createVbxeState: function () {
+        return vbxeApi.createState(vbxeConfig, video.paletteRgb);
+      },
+      cloneVbxeState: vbxeApi.cloneState,
+      restoreVbxeState: vbxeApi.restoreState,
     });
     const memoryHardReset = memoryRuntime.hardReset;
     const memoryPowerCycle = memoryRuntime.powerCycle;
@@ -1020,8 +1072,15 @@
       memoryHardReset(options || null);
       video.pixels.fill(0);
       video.priority.fill(0);
+      if (video.vbxeCollisionPriority) video.vbxeCollisionPriority.fill(0);
+      if (video.anticSourceBits) video.anticSourceBits.fill(0xff);
+      if (video.anticSourceLores) video.anticSourceLores.fill(0xff);
+      if (video.vbxeRgb) video.vbxeRgb.fill(0);
       if (video.presentPixels) video.presentPixels.fill(0);
       if (video.presentPriority) video.presentPriority.fill(0);
+      if (video.presentVbxeRgb) video.presentVbxeRgb.fill(0);
+      if (video.vbxeHiresRgb) video.vbxeHiresRgb.fill(0);
+      if (video.presentVbxeHiresRgb) video.presentVbxeHiresRgb.fill(0);
       debugRuntime.resetExecutionState();
       if (hDevice) {
         hDevice.resetChannels();
@@ -1061,6 +1120,8 @@
     const syncAudioTurboMode = audioRuntime.syncAudioTurboMode;
 
     machine.ctx.ioData = makeIoData(video);
+    machine.ctx.ioData.vbxe = vbxeApi.createState(vbxeConfig, video.paletteRgb);
+    machine.ctx.ioData.vbxeMapSync = memoryRuntime.syncVbxeWindows;
     machine.ctx.ioData.optionOnStart = optionOnStart;
     machine.ctx.ioData.sioTurbo = sioTurbo;
     machine.ctx.ioData.piaSetControlLine = ioApi.piaSetControlLine;
@@ -1094,6 +1155,13 @@
       }
       if (video.presentPriority && video.presentPriority !== video.priority) {
         video.presentPriority.set(video.priority);
+      }
+      if (video.presentVbxeRgb && video.vbxeRgb && video.presentVbxeRgb !== video.vbxeRgb) {
+        video.presentVbxeRgb.set(video.vbxeRgb);
+      }
+      if (video.presentVbxeHiresRgb && video.vbxeHiresRgb &&
+          video.presentVbxeHiresRgb !== video.vbxeHiresRgb) {
+        video.presentVbxeHiresRgb.set(video.vbxeHiresRgb);
       }
     }
 
@@ -1143,6 +1211,7 @@
         sioTurbo: !!sioTurbo,
         optionOnStart: !!optionOnStart,
         memoryExpansion: memoryExpansion,
+        vbxe: Object.assign({}, vbxeConfig),
         keyboardMappingMode: keyboardMappingMode,
       };
     }
@@ -1164,6 +1233,9 @@
       }
       if (config.memoryExpansion !== undefined) {
         memoryExpansion = normalizeMemoryExpansion(config.memoryExpansion) || "130xe-128k";
+      }
+      if (config.vbxe !== undefined) {
+        vbxeConfig = vbxeApi.normalizeConfig(config.vbxe);
       }
       if (config.keyboardMappingMode !== undefined) {
         keyboardMappingMode =
@@ -1397,6 +1469,9 @@
       if (options && typeof options === "object" && options.memoryExpansion !== undefined) {
         memoryExpansion = normalizeMemoryExpansion(options.memoryExpansion) || memoryExpansion;
       }
+      if (options && typeof options === "object" && options.vbxe !== undefined) {
+        vbxeConfig = vbxeApi.normalizeConfig(options.vbxe);
+      }
       hardResetWithInputRelease(options || null);
       publishVideoFrame();
       if (!skipRendering) paint();
@@ -1409,6 +1484,9 @@
       if (options && typeof options === "object" && options.memoryExpansion !== undefined) {
         memoryExpansion = normalizeMemoryExpansion(options.memoryExpansion) || memoryExpansion;
       }
+      if (options && typeof options === "object" && options.vbxe !== undefined) {
+        vbxeConfig = vbxeApi.normalizeConfig(options.vbxe);
+      }
       pauseInternal("powercycle");
       if (releaseAllKeys) releaseAllKeys();
       machine.cycleAccum = 0;
@@ -1416,8 +1494,15 @@
       memoryPowerCycle(options || null);
       video.pixels.fill(0);
       video.priority.fill(0);
+      if (video.vbxeCollisionPriority) video.vbxeCollisionPriority.fill(0);
+      if (video.anticSourceBits) video.anticSourceBits.fill(0xff);
+      if (video.anticSourceLores) video.anticSourceLores.fill(0xff);
+      if (video.vbxeRgb) video.vbxeRgb.fill(0);
       if (video.presentPixels) video.presentPixels.fill(0);
       if (video.presentPriority) video.presentPriority.fill(0);
+      if (video.presentVbxeRgb) video.presentVbxeRgb.fill(0);
+      if (video.vbxeHiresRgb) video.vbxeHiresRgb.fill(0);
+      if (video.presentVbxeHiresRgb) video.presentVbxeHiresRgb.fill(0);
       publishVideoFrame();
       if (!skipRendering) paint();
       updateDebug("powercycle");
@@ -1498,6 +1583,7 @@
       getSioTurbo: function () { return sioTurbo; },
       getSkipRendering: function () { return skipRendering; },
       getMemoryExpansion: function () { return memoryExpansion; },
+      getVbxeConfig: function () { return Object.assign({}, vbxeConfig); },
       setCrtEnabled: function (value) {
         if (renderer.setCrtEnabled) renderer.setCrtEnabled(value);
         paint();

@@ -2166,6 +2166,9 @@ static u8 sSioPendingWriteResult = 0;
 /* SIO data phase state (for WRITE/PUT/VERIFY commands) */
 #define SIO_DATA_OFFSET 32
 static u8 cSioOutPhase = 0;
+static u8 bSioCommandLineAsserted = 0;
+static u8 bSioCommandFrameReady = 0;
+static u8 bSioReplayingCommandFrame = 0;
 static u16 sSioDataIndex = 0;
 static u8 cSioPendingCmd = 0;
 static u16 sSioPendingSector = 0;
@@ -2181,11 +2184,46 @@ static void Pokey_ResetSioState(void)
 	sSioPendingReadSize = 0;
 	sSioPendingWriteResult = 0;
 	cSioOutPhase = 0;
+	bSioCommandLineAsserted = 0;
+	bSioCommandFrameReady = 0;
+	bSioReplayingCommandFrame = 0;
 	sSioDataIndex = 0;
 	cSioPendingCmd = 0;
 	sSioPendingSector = 0;
 	sSioPendingBytes = 0;
 	sSerialOutputBusTransmission = 0;
+}
+
+void Pokey_SioCommandLineChanged(_6502_Context_t *pContext, u8 cLevel)
+{
+	u8 cWasAsserted = bSioCommandLineAsserted;
+
+	bSioCommandLineAsserted = cLevel ? 0u : 1u;
+	if(bSioCommandLineAsserted)
+	{
+		/* CB2 low begins a new command frame. A partial previous frame is
+		 * electrically incomplete and must not produce a response. */
+		if(cSioOutPhase == 0)
+		{
+			cSioOutIndex = 0;
+			bSioCommandFrameReady = 0;
+		}
+		return;
+	}
+
+	/* AHRM 9.1: the peripheral starts command validation only after the host
+	 * raises COMMAND. Replay the already transmitted checksum through the
+	 * command-complete path without adding another byte to the bus. */
+	if(cWasAsserted && bSioCommandFrameReady)
+	{
+		u8 cChecksum = aSioBuffer[4];
+		bSioCommandFrameReady = 0;
+		cSioOutIndex = 4;
+		bSioReplayingCommandFrame = 1;
+		sSerialOutputBusTransmission = 1;
+		Pokey_SEROUT_SERIN(pContext, &cChecksum);
+		sSerialOutputBusTransmission = 0;
+	}
 }
 
 /* AHRM 10.5: drive transmit timing is independent from the computer's POKEY
@@ -2355,7 +2393,10 @@ static u64 Pokey_SerialOutputClockNextCycle(
 	{
 		llNext += period;
 	}
-	return llNext;
+	/* llNext is strictly after the SEROUT write cycle, so the holding register
+	 * cannot be consumed by a timer edge that preceded that bus write. The
+	 * serial output latch then becomes CPU-visible two cycles later. */
+	return llNext + SERIAL_OUTPUT_LATCH_LATENCY_CYCLES;
 }
 
 static u8 AtariIo_SioChecksum(u8 *pBuffer, u32 lSize)
@@ -2380,14 +2421,14 @@ static void Pokey_SioQueueSerinResponse(_6502_Context_t *pContext, u16 size)
 	sSioInSize = size;
 	sSioInIndex = 0;
 	sSioInReady = 0;
+	/* The simplified receive path exposes complete bytes directly. Its
+	 * 1530-cycle value is the guest-visible serial delay; a virtual drive has
+	 * a separate, finite controller turn-around before that byte is visible.
+	 * This keeps the peripheral cadence from locking to the OS VBI while
+	 * remaining inside AHRM 9.1 response limits. */
 	pIoData->llSerialInputDataReadyCycle =
-		llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
-	#ifdef SIO_DIAG
-	fprintf(stderr, "DBG_QUEUE_IN cycle=%llu size=%u first=%llu pendingRead=%u pendingWrite=%02X\\n",
-		(unsigned long long)llNow, size,
-		(unsigned long long)pIoData->llSerialInputDataReadyCycle,
-		sSioPendingReadSize, sSioPendingWriteResult);
-	#endif
+		llNow + SIO_DISK_RESPONSE_TURNAROUND_CYCLES +
+		SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
 	AtariIoCycleTimedEventUpdate(pContext);
 }
 
@@ -2414,7 +2455,8 @@ static void Pokey_SioQueuePendingReadData(_6502_Context_t *pContext)
 	sSioInReady = 0;
 	sSioInSize = sBytesToRead + 2;
 	pIoData->llSerialInputDataReadyCycle =
-		llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
+		llNow + SIO_DISK_RESPONSE_TURNAROUND_CYCLES +
+		SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
 	AtariIoCycleTimedEventUpdate(pContext);
 }
 
@@ -2427,11 +2469,6 @@ void Pokey_SerialInputReady(_6502_Context_t *pContext)
 	RAM[IO_SEROUT_SERIN] = aSioBuffer[sSioInIndex++];
 	sSioInSize--;
 	sSioInReady = 1;
-	#ifdef SIO_DIAG
-	fprintf(stderr, "DBG_IN_READY cycle=%llu value=%02X remaining=%u\\n",
-		(unsigned long long)PokeyMasterReferenceCycle(pContext),
-		RAM[IO_SEROUT_SERIN], sSioInSize);
-	#endif
 }
 
 void Pokey_SerialOutputDataNeeded(_6502_Context_t *pContext)
@@ -2449,6 +2486,7 @@ u8 Pokey_SerialOutputTransmissionDone(_6502_Context_t *pContext,
 									  u64 llEventCycle)
 {
 	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u64 llScheduledDoneCycle = pIoData->llSerialOutputTransmissionDoneCycle;
 	if(!pIoData->bSerialOutputShiftActive)
 	{
 		return 0;
@@ -2463,7 +2501,6 @@ u8 Pokey_SerialOutputTransmissionDone(_6502_Context_t *pContext,
 		Pokey_SEROUT_SERIN(pContext, &cValue);
 	}
 	sSerialOutputBusTransmission = 0;
-
 	if(!pIoData->bSerialOutputBytePending)
 	{
 		pIoData->bSerialOutputShiftActive = 0;
@@ -2475,8 +2512,20 @@ u8 Pokey_SerialOutputTransmissionDone(_6502_Context_t *pContext,
 	pIoData->cSerialOutputShiftValue = pIoData->cSerialOutputRegisterValue;
 	pIoData->bSerialOutputBytePending = 0;
 	pIoData->bSerialOutputShiftActive = 1;
-	pIoData->llSerialOutputTransmissionDoneCycle =
-		llEventCycle + Pokey_SerialOutputClockPeriod(pContext) * 20;
+	{
+		u64 llFrameCycles = Pokey_SerialOutputClockPeriod(pContext) * 20;
+		u64 llScheduledNext = llScheduledDoneCycle != CYCLE_NEVER
+			? llScheduledDoneCycle + llFrameCycles
+			: llEventCycle + llFrameCycles;
+
+		/* Timed events are observed at CPU instruction boundaries.  Preserve
+		 * the serial frame cadence when the callback is a few cycles late, but
+		 * never schedule the next frame in the past. */
+		pIoData->llSerialOutputTransmissionDoneCycle =
+			llScheduledNext > llEventCycle
+				? llScheduledNext
+				: llEventCycle + llFrameCycles;
+	}
 	AtariIoCycleTimedEventUpdate(pContext);
 	return 1;
 }
@@ -2525,14 +2574,17 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 	Pokey_Sync(pContext, pContext->llCycleCounter);
 	if(pValue)
 	{
-		/* AHRM 2.5: CB2 is the active-low SIO command line. Keep the
-		 * electrical transition separate from the response-byte model. */
-		Pia_SetCb2Line(pContext, 0);
 		u64 llNow = PokeyMasterReferenceCycle(pContext);
 		u8 cClockAvailable = Pokey_SerialOutputClockAvailable(pContext);
 		u64 llSerialClockPeriod = Pokey_SerialOutputClockPeriod(pContext);
 		if(!sSerialOutputBusTransmission)
 		{
+			/* The 6502 access callback runs while the instruction is being
+			 * evaluated, but a store reaches POKEY on its final bus cycle.
+			 * AHRM 5.6 requires the SEROUT-to-shift-register transfer to use a
+			 * subsequent rising serial-clock edge. */
+			if(pContext->cCurrentInstructionCycles > 0)
+				llNow += pContext->cCurrentInstructionCycles - 1;
 			pIoData->cSerialOutputRegisterValue = *pValue;
 #ifdef VERBOSE_SIO
 		printf("POKEY_TRACE SEROUT_WRITE cycle=%llu pc=%04X opcode=%02X value=%02X audctl=%02X audf4=%02X skctl=%02X timer=%u timer2=%llu timer4=%llu level=%u\n",
@@ -2548,18 +2600,12 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 		printf("(%02X)!\n", *pValue);
 #endif
 		pIoData->bSerialOutputBytePending = 1;
-	#ifdef VERBOSE_SIO
-		fprintf(stderr, "DBG_WRITE cycle=%llu pc=%04X value=%02X ram=%02X en=%02X pending=%u shift=%u\\n",
-			(unsigned long long)llNow, pContext->tCpu.pc, *pValue,
-			RAM[IO_IRQEN_IRQST], SRAM[IO_IRQEN_IRQST],
-			pIoData->bSerialOutputBytePending,
-			pIoData->bSerialOutputShiftActive);
-	#endif
 		if(cClockAvailable && !pIoData->bSerialOutputShiftActive &&
 		   (pIoData->llSerialOutputNeedDataCycle == CYCLE_NEVER ||
 		    pIoData->llSerialOutputNeedDataCycle <= llNow))
 		{
-			u64 llNeedDataCycle = Pokey_SerialOutputClockNextCycle(pContext, llNow);
+			u64 llNeedDataCycle =
+				Pokey_SerialOutputClockNextCycle(pContext, llNow);
 			pIoData->llSerialOutputNeedDataCycle =
 				llNeedDataCycle;
 			pIoData->llSerialOutputTransmissionDoneCycle =
@@ -2701,13 +2747,16 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 				sSioPendingSector = 0;
 				sSioPendingBytes = 0;
 				cSioOutIndex = 0;
-				Pia_SetCb2Line(pContext, 1);
 			}
 
 			return &RAM[IO_SEROUT_SERIN];
 		}
 
 		/* --- Command phase --- */
+		if(cSioOutIndex == 0 && !bSioCommandLineAsserted)
+		{
+			return &RAM[IO_SEROUT_SERIN];
+		}
 		if(cSioOutIndex == 0 && *pValue > 0 && *pValue < 255)
 		{
 			aSioBuffer[cSioOutIndex++] = *pValue;
@@ -2718,18 +2767,15 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 
 			if(cSioOutIndex == 5)
 			{
-				/* AHRM 9.1: the host deasserts the command line before the
-				 * peripheral validates the frame and emits ACK/NAK. Keep this
-				 * transition ahead of device handling, matching the JS core and
-				 * allowing the PIA bus state to observe the response phase. */
+				/* The command bytes are complete, but a real SIO device must
+				 * wait for PIA CB2/COMMAND to rise before issuing ACK or NAK. */
+				if(!bSioReplayingCommandFrame)
+				{
+					bSioCommandFrameReady = 1;
+					return &RAM[IO_SEROUT_SERIN];
+				}
+				bSioReplayingCommandFrame = 0;
 				cSioOutIndex = 0;
-				Pia_SetCb2Line(pContext, 1);
-			#ifdef SIO_DIAG
-				fprintf(stderr, "DBG_CMD cycle=%llu device=%02X cmd=%02X aux1=%02X aux2=%02X checksum=%02X valid=%u\\n",
-					(unsigned long long)llNow, aSioBuffer[0], aSioBuffer[1],
-					aSioBuffer[2], aSioBuffer[3], aSioBuffer[4],
-					AtariIo_SioChecksum(aSioBuffer, 4) == aSioBuffer[4]);
-			#endif
 				if(AtariIo_SioChecksum(aSioBuffer, 4) == aSioBuffer[4])
 				{
 					char aCaption[100];
@@ -2768,13 +2814,6 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 					if(!sSerialOutputBusTransmission)
 						AtariIoCycleTimedEventUpdate(pContext);
 
-					#ifdef SIO_DIAG
-					fprintf(stderr, "DBG_SPEED cycle=%llu device=%02X disk=%p audctl=%02X au3=%02X au4=%02X supported=%u\\n",
-						(unsigned long long)llNow, aSioBuffer[0], (void *)pDisk,
-						SRAM[IO_AUDCTL_ALLPOT], SRAM[IO_AUDF3_POT4],
-						SRAM[IO_AUDF4_POT6],
-						Pokey_SioCommandSpeedSupported(pContext));
-					#endif
 					if(pIoData->cSioDriveIndex >= 8u || !pDisk ||
 					   Pokey_SioCommandSpeedSupported(pContext))
 					switch(aSioBuffer[1])
@@ -2854,8 +2893,6 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 									printf("\n");
 								}
 #endif
-								pIoData->llSerialInputDataReadyCycle =
-									llNow + SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
 							}
 						}
 
@@ -2864,11 +2901,6 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 						break;
 
 					case 0x53: /* STATUS */
-					#ifdef SIO_DIAG
-						fprintf(stderr, "DBG_STATUS cycle=%llu aux2=%02X sectorSize=%u disk0=%02X\\n",
-							(unsigned long long)llNow, aSioBuffer[3], sSectorSize,
-							pDisk ? pDisk[0] : 0u);
-					#endif
 						SDL_SetWindowTitle(g_pSdlWindow, APPLICATION_CAPTION "  [-]");
 #ifdef VERBOSE_SIO
 						printf("SIO get status\n");
@@ -2952,7 +2984,6 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 								sSioPendingSector = sSectorIndex;
 								sSioPendingBytes = sBytesToRead;
 								sSioPendingWriteResult = 0;
-
 								aSioBuffer[0] = 'A';
 								Pokey_SioQueueSerinResponse(pContext, 1);
 							}
@@ -3050,12 +3081,6 @@ u8 *Pokey_SEROUT_SERIN(_6502_Context_t *pContext, u8 *pValue)
 			return &RAM[IO_SEROUT_SERIN];
 
 		sSioInReady = 0;
-	#ifdef SIO_DIAG
-		fprintf(stderr, "DBG_IN_READ cycle=%llu value=%02X remaining=%u pendingRead=%u pendingWrite=%02X\\n",
-			(unsigned long long)PokeyMasterReferenceCycle(pContext),
-			RAM[IO_SEROUT_SERIN], sSioInSize, sSioPendingReadSize,
-			sSioPendingWriteResult);
-	#endif
 #ifdef VERBOSE_SIO
 		printf("             [%16llu] SERIN ", pContext->llCycleCounter);
 		printf("(%02X, %d bytes left)!\n", RAM[IO_SEROUT_SERIN], sSioInSize);

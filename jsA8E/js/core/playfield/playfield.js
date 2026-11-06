@@ -35,7 +35,7 @@
       );
     }
 
-    function copyScratchLine(video, y, width, dstPixels, dstPriority) {
+    function copyScratchLine(video, y, width, dstPixels, dstPriority, dstCollisionPriority, dstAnticSourceBits, dstAnticSourceLores) {
       const srcBase = y * width + PLAYFIELD_SCRATCH_VIEW_X;
       const dstBase = y * PIXELS_PER_LINE;
       dstPixels.set(
@@ -52,6 +52,33 @@
         ),
         dstBase,
       );
+      if (dstCollisionPriority && video.playfieldScratchVbxeCollisionPriority) {
+        dstCollisionPriority.set(
+          video.playfieldScratchVbxeCollisionPriority.subarray(
+            srcBase,
+            srcBase + PIXELS_PER_LINE,
+          ),
+          dstBase,
+        );
+      }
+      if (dstAnticSourceBits && video.playfieldScratchAnticSourceBits) {
+        dstAnticSourceBits.set(
+          video.playfieldScratchAnticSourceBits.subarray(
+            srcBase,
+            srcBase + PIXELS_PER_LINE,
+          ),
+          dstBase,
+        );
+      }
+      if (dstAnticSourceLores && video.playfieldScratchAnticSourceLores) {
+        dstAnticSourceLores.set(
+          video.playfieldScratchAnticSourceLores.subarray(
+            srcBase,
+            srcBase + PIXELS_PER_LINE,
+          ),
+          dstBase,
+        );
+      }
     }
 
     function computeActiveLineGeometry(cmd, pfWidth, ppb, hscroll) {
@@ -165,6 +192,9 @@
       const video = io.videoOut;
       const screenPixels = video.pixels;
       const screenPriority = video.priority;
+      const screenCollisionPriority = video.vbxeCollisionPriority || null;
+      const screenAnticSourceBits = video.anticSourceBits || null;
+      const screenAnticSourceLores = video.anticSourceLores || null;
 
       const y = io.video.currentDisplayLine | 0;
 
@@ -172,6 +202,18 @@
       if (io.clock < lineStartClock) io.clock = lineStartClock;
       io.drawLine.playerMissileClockActive = false;
       io.drawLine.playerMissileInterleaved = false;
+      if (screenCollisionPriority) {
+        const lineStart = y * PIXELS_PER_LINE;
+        screenCollisionPriority.fill(0, lineStart, lineStart + PIXELS_PER_LINE);
+      }
+      if (screenAnticSourceBits) {
+        const lineStart = y * PIXELS_PER_LINE;
+        screenAnticSourceBits.fill(0xff, lineStart, lineStart + PIXELS_PER_LINE);
+      }
+      if (screenAnticSourceLores) {
+        const lineStart = y * PIXELS_PER_LINE;
+        screenAnticSourceLores.fill(0xff, lineStart, lineStart + PIXELS_PER_LINE);
+      }
 
       if (y < FIRST_VISIBLE_LINE || y > LAST_VISIBLE_LINE) {
         rendererApi.stepClockActions(ctx, CYCLES_PER_LINE);
@@ -224,6 +266,15 @@
         const scratchWidth = video.playfieldScratchWidth | 0;
         video.pixels = video.playfieldScratchPixels;
         video.priority = video.playfieldScratchPriority;
+        if (video.playfieldScratchVbxeCollisionPriority) {
+          video.vbxeCollisionPriority = video.playfieldScratchVbxeCollisionPriority;
+        }
+        if (video.playfieldScratchAnticSourceBits) {
+          video.anticSourceBits = video.playfieldScratchAnticSourceBits;
+        }
+        if (video.playfieldScratchAnticSourceLores) {
+          video.anticSourceLores = video.playfieldScratchAnticSourceLores;
+        }
         io.drawLine.playerMissileClockActive = true;
         io.drawLine.playerMissileInterleaved = true;
 
@@ -232,6 +283,15 @@
         const basePrio = rendererApi.currentBackgroundPriority(sram);
         video.playfieldScratchPixels.fill(baseColor, lineBase, lineBase + PIXELS_PER_LINE);
         video.playfieldScratchPriority.fill(basePrio, lineBase, lineBase + PIXELS_PER_LINE);
+        if (video.playfieldScratchVbxeCollisionPriority) {
+          video.playfieldScratchVbxeCollisionPriority.fill(0, lineBase, lineBase + PIXELS_PER_LINE);
+        }
+        if (video.playfieldScratchAnticSourceBits) {
+          video.playfieldScratchAnticSourceBits.fill(0xff, lineBase, lineBase + PIXELS_PER_LINE);
+        }
+        if (video.playfieldScratchAnticSourceLores) {
+          video.playfieldScratchAnticSourceLores.fill(0xff, lineBase, lineBase + PIXELS_PER_LINE);
+        }
 
         io.drawLine.bytesPerLine = geometry.bytesPerLine;
         io.drawLine.destIndex = lineBase + geometry.playfieldStartX;
@@ -317,10 +377,16 @@
           scratchWidth,
           screenPixels,
           screenPriority,
+          screenCollisionPriority,
+          screenAnticSourceBits,
+          screenAnticSourceLores,
         );
         io.drawLine.playerMissileClockActive = false;
         video.pixels = screenPixels;
         video.priority = screenPriority;
+        video.vbxeCollisionPriority = screenCollisionPriority;
+        video.anticSourceBits = screenAnticSourceBits;
+        video.anticSourceLores = screenAnticSourceLores;
       } else {
         rendererApi.drawInterleavedVisibleBlankLine(
           ctx,

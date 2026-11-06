@@ -12,6 +12,7 @@
     const FIRST_VISIBLE_LINE = cfg.FIRST_VISIBLE_LINE;
     const LAST_VISIBLE_LINE = cfg.LAST_VISIBLE_LINE;
     const PMG_REGISTER_ADDRESSES = cfg.PMG_REGISTER_ADDRESSES || [];
+    const GTIA_SPAN_REGISTER_ADDRESSES = cfg.GTIA_SPAN_REGISTER_ADDRESSES || [];
 
     const NMI_DLI = cfg.NMI_DLI;
     const NMI_VBI = cfg.NMI_VBI;
@@ -57,6 +58,15 @@
       cfg.pokeySerialOutputClockTimerExpired;
     const pokeyApplyTimerReset = cfg.pokeyApplyTimerReset;
     const cycleTimedEventUpdate = cfg.cycleTimedEventUpdate;
+    const vbxeVerticalSync = cfg.vbxeVerticalSync;
+    const vbxeAdvanceBlitter = cfg.vbxeAdvanceBlitter;
+    const vbxeScheduleBlitterIrq = cfg.vbxeScheduleBlitterIrq;
+    const vbxeRaiseScheduledBlitterIrq = cfg.vbxeRaiseScheduledBlitterIrq;
+    const vbxeLocalBusBudget = cfg.vbxeLocalBusBudget;
+    const vbxeNextXdlLine = cfg.vbxeNextXdlLine;
+    const vbxeRenderXdlLine = cfg.vbxeRenderXdlLine;
+    const vbxeApplyPlayfieldAttributes = cfg.vbxeApplyPlayfieldAttributes;
+    const vbxeApplyGtiaSpans = cfg.vbxeApplyGtiaSpans;
     const PRIO_BKG = cfg.PRIO_BKG;
     const PRIO_PF0 = cfg.PRIO_PF0;
     const PRIO_PF1 = cfg.PRIO_PF1;
@@ -150,6 +160,12 @@
       drawLine.pmgEventOverflow = false;
       for (let i = 0; i < PMG_REGISTER_ADDRESSES.length; i++) {
         drawLine.pmgInitialRegisters[i] = sram[PMG_REGISTER_ADDRESSES[i]] & 0xff;
+      }
+      drawLine.gtiaEventCount = 0;
+      drawLine.gtiaEventOverflow = false;
+      drawLine.vbxeCollisionClearCount = 0;
+      for (let i = 0; i < GTIA_SPAN_REGISTER_ADDRESSES.length; i++) {
+        drawLine.gtiaInitialRegisters[i] = sram[GTIA_SPAN_REGISTER_ADDRESSES[i]] & 0xff;
       }
       drawLine.playerPmgShift.fill(0);
       drawLine.playerPmgState.fill(0);
@@ -395,6 +411,7 @@
 
       if (io.video.currentDisplayLine >= LINES_PER_SCREEN_PAL) {
         io.video.currentDisplayLine = 0;
+        if (io.vbxe && vbxeVerticalSync) vbxeVerticalSync(io.vbxe);
         io.nextDisplayListLine = 8;
         io.currentDisplayListCommand = 0;
         io.modeLineRowCounter = 0;
@@ -432,6 +449,12 @@
       if (typeof io.piaCycleTimedEvent === "function") io.piaCycleTimedEvent(ctx);
 
       if (!io.inDrawLine && ctx.cycleCounter >= io.displayListFetchCycle) {
+        if (io.drawLine.vbxeLine && vbxeApplyGtiaSpans) {
+          vbxeApplyGtiaSpans(io.vbxe, io.videoOut, io.drawLine.vbxeScanline,
+            io.drawLine.vbxeLine, io.drawLine);
+        }
+        io.drawLine.vbxeLine = null;
+        io.drawLine.vbxeScanline = -1;
         if (io.video.currentDisplayLine === 0) {
           io.clock = io.displayListFetchCycle;
         }
@@ -442,8 +465,63 @@
         cycleTimedEventUpdate(ctx);
 
         try {
+          // The VBXE collision-priority plane is a per-scanline view of the
+          // current GTIA contributors. Unlike the ordinary priority plane,
+          // it is only written where a player/missile renderer visits a
+          // pixel, so stale valid entries must not survive when the same
+          // scanline is rendered in the next frame.
+          if (io.videoOut.vbxeCollisionPriority) {
+            const lineBase = (io.video.currentDisplayLine | 0) * PIXELS_PER_LINE;
+            io.videoOut.vbxeCollisionPriority.fill(0, lineBase,
+              Math.min(lineBase + PIXELS_PER_LINE,
+                io.videoOut.vbxeCollisionPriority.length));
+          }
           drawLine(ctx);
           if (!io.drawLine.playerMissileInterleaved) drawPlayerMissiles(ctx);
+          let xdlLine = null;
+          if (io.vbxe && vbxeNextXdlLine) {
+            xdlLine = vbxeNextXdlLine(io.vbxe, io.video.currentDisplayLine);
+            // Attribute-map PF3 and reverse interpretation depend on the
+            // source ANTIC mode, not merely on the composited GTIA color.
+            // Preserve that context at the ANTIC/VBXE boundary for the
+            // attribute compositor.
+            if (xdlLine) {
+              xdlLine.anticMode = io.currentDisplayListCommand & 0x0f;
+              xdlLine.anticPf3 = sram[IO_COLPF3] & 0xff;
+              xdlLine.anticGtiaMode = (sram[IO_PRIOR] >>> 6) & 0x03;
+            }
+            if (vbxeRenderXdlLine)
+              vbxeRenderXdlLine(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
+            if (xdlLine && vbxeApplyPlayfieldAttributes)
+              vbxeApplyPlayfieldAttributes(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
+            io.drawLine.vbxeLine = xdlLine;
+            io.drawLine.vbxeScanline = io.video.currentDisplayLine;
+          }
+          // AHRM 12.4 gives the 14MHz local bus 912 slots per scanline. The
+          // The blitter consumes its documented per-byte local-cycle cost
+          // from the local-bus residue after display/XDL/MEMAC reservation.
+          if (io.vbxe && vbxeAdvanceBlitter) {
+            const blitterBudget = vbxeLocalBusBudget
+              ? vbxeLocalBusBudget(io.vbxe, xdlLine, io.displayListFetchCycle) : 912;
+            // A blit started earlier in this line already ran its share.
+            if (io.vbxe.blitterEarlyRun) io.vbxe.blitterEarlyRun = false;
+            else vbxeAdvanceBlitter(io.vbxe, blitterBudget, true);
+            if (vbxeScheduleBlitterIrq) {
+              const residual = vbxeScheduleBlitterIrq(io.vbxe);
+              if (residual >= 0) {
+                // Eight local slots map to one CPU cycle.  This is the same
+                // aggregate completion placement used by the reference FX
+                // model, and lets guest IRQ code observe a stable in-line
+                // phase rather than an artificial scanline-start edge.
+                io.vbxeBlitterIrqCycle = io.displayListFetchCycle +
+                  CYCLES_PER_LINE - (residual >> 3);
+                cycleTimedEventUpdate(ctx);
+              }
+            }
+            // AHRM 5.7 / 12.4: an enabled completed blit is an external,
+            // level-sensitive CPU IRQ source until IRQ_CONTROL is written.
+            if (CPU && typeof CPU.reconcileIrq === "function") CPU.reconcileIrq(ctx);
+          }
           evaluateModeLineEnd(ctx);
           io.pmgPhantomMissileDmaPending =
             (sram[IO_DMACTL] & 0x2c) === 0x20 &&
@@ -458,6 +536,14 @@
 
       const masterEff = ctx.cycleCounter;
       const beamEff = io.clock;
+
+      if (masterEff >= io.vbxeBlitterIrqCycle) {
+        if (vbxeRaiseScheduledBlitterIrq && vbxeRaiseScheduledBlitterIrq(io.vbxe) &&
+            CPU && typeof CPU.reconcileIrq === "function") {
+          CPU.reconcileIrq(ctx);
+        }
+        io.vbxeBlitterIrqCycle = CYCLE_NEVER;
+      }
 
       if (masterEff >= io.pokeyTimerResetCycle) {
         if (typeof pokeyApplyTimerReset === "function")
