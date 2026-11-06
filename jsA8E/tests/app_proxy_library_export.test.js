@@ -62,6 +62,7 @@ async function main() {
               files: [],
               folders: [],
               trash: [{ id: "deleted", name: "DELETED.ATR", deletedAt: 1 }],
+              revisions: { disk1: [{ id: "r1", size: 3, preferred: true }] },
             },
           });
         }, 0);
@@ -77,11 +78,31 @@ async function main() {
         }, 0);
         return;
       }
+      if (message.cmd === "diskLibraryRenameFolder" ||
+          message.cmd === "diskLibrarySelectRevision" ||
+          message.cmd === "diskLibraryVerify" ||
+          message.cmd === "diskLibraryStorageEstimate" ||
+          message.cmd === "diskLibraryCancel") {
+        setTimeout(() => {
+          this.onmessage({
+            data: { type: "response", id: message.id, ok: true, result: { cmd: message.cmd, payload: message.payload } },
+          });
+        }, 0);
+        return;
+      }
       if (message.cmd !== "diskLibraryExport") return;
       assert.equal(typeof message.payload.onProgress, "undefined");
       assert.equal(typeof message.payload.isCanceled, "undefined");
       assert.equal(typeof message.payload.signal, "undefined");
+      assert.equal(typeof message.payload.opId, "number");
       setTimeout(() => {
+        this.onmessage({
+          data: {
+            type: "diskLibraryProgress",
+            opId: message.payload.opId,
+            progress: { phase: "export", completed: 1, total: 2, current: "A.ATR" },
+          },
+        });
         this.onmessage({
           data: {
             type: "response",
@@ -126,15 +147,33 @@ async function main() {
   assert.equal(trash[0].deletedAt, 1);
   assert.equal(await app.diskLibrary.restoreTrash("deleted"), true);
 
+  const progress = [];
+  let cancelRequested = true;
   const result = await app.diskLibrary.exportPackage({
     fileName: "library.a8e",
-    onProgress: function () {},
-    isCanceled: function () { return false; },
+    onProgress: function (p) { progress.push(p); },
+    isCanceled: function () { return cancelRequested; },
     signal: { aborted: false },
   });
+  assert.equal(progress.length, 1);
+  assert.equal(progress[0].current, "A.ATR");
+  assert.ok(workers[0].messages.some((m) => m.cmd === "diskLibraryCancel" && m.payload.opId > 0));
+  cancelRequested = false;
   assert.equal(result.fileName, "library.a8e");
   assert.equal(result.bytes.byteLength, 1);
   assert.equal(workers.length, 1);
+
+  const workspace = await app.diskLibrary.exportWorkspacePackage({ fileName: "workspace.a8e" });
+  assert.equal(workspace.fileName, "workspace.a8e");
+  assert.equal(workspace.bytes.byteLength, 1);
+  const revisions = app.diskLibrary.listRevisions("disk1");
+  assert.equal(revisions.length, 1);
+  assert.equal(revisions[0].id, "r1");
+  assert.equal(app.diskLibrary.listRevisions("missing").length, 0);
+  assert.equal((await app.diskLibrary.renameFolder("f", "New")).payload.name, "New");
+  assert.equal((await app.diskLibrary.selectRevision("disk1", "r1")).payload.revisionId, "r1");
+  assert.equal((await app.diskLibrary.verifyFile("disk1")).cmd, "diskLibraryVerify");
+  assert.equal((await app.diskLibrary.getStorageEstimate()).cmd, "diskLibraryStorageEstimate");
 
   app.dispose();
   console.log("app_proxy_library_export.test.js passed");

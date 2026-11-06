@@ -29,41 +29,21 @@ default and, when enabled, deliberately selects the main runtime.
 
 ## Architecture and data flow
 
-```text
-                   CPU / ANTIC / GTIA
-                           |
-                 registers, VRAM, MEMAC, IRQ
-                           v
-                    +-------------+
-                    | vbxe.js     |
-                    | FX state    |
-                    +------+------+ 
-                           |
-             VSync latch  |  XDL + per-line map
-                           v
-        +------------------+------------------+
-        |                                     |
-        v                                     v
-  GTIA event queue                    VBXE line state
-  colors + PRIOR                      overlay + attributes
-        |                                     |
-        +------------------+------------------+
-                           v
-                  span compositor
-          priority / transparency / collisions
-                           |
-              +------------+------------+
-              |                         |
-              v                         v
-       indexed Atari plane       VBXE RGB plane
-              |                         |
-              +------------+------------+
-                           v
-                 main-thread renderer
-                    (WebGL or Canvas 2D)
-
-       worker: OffscreenCanvas composes the VBXE plane; the comparative regression is missing
+```mermaid
+flowchart TD
+    SRC["CPU / ANTIC / GTIA"] -->|"registers, VRAM, MEMAC, IRQ"| FX["vbxe.js<br/>FX state"]
+    FX -->|"VSync latch, XDL + per-line map"| GTIA["GTIA event queue<br/>colors + PRIOR"]
+    FX --> LINE["VBXE line state<br/>overlay + attributes"]
+    GTIA --> COMP["Span compositor<br/>priority / transparency / collisions"]
+    LINE --> COMP
+    COMP --> IDX["Indexed Atari plane"]
+    COMP --> RGB["VBXE RGB plane"]
+    IDX --> REN["Main-thread renderer<br/>(WebGL or Canvas 2D)"]
+    RGB --> REN
 ```
+
+Worker: OffscreenCanvas composes the VBXE plane; the comparative regression is
+missing.
 
 The important rule is that VBXE does not replace ANTIC or GTIA. The
 compositor must keep the layer identifiers — background, PF0–PF3/P5 and
@@ -71,23 +51,17 @@ P0–P3 — and must not try to rebuild priority from final RGB colors alone.
 
 ## Scanline execution order
 
-```text
-line start
-      |
-      +--> ANTIC/GTIA generate pixels and priority metadata
-      |
-      +--> CPU may write GTIA/VBXE
-      |       `-> events are queued with their horizontal cycle
-      |
-      +--> VBXE advances XDL, repeat, scroll, map and fetches
-      |
-      +--> the line is closed
-              |
-              +--> split into [x0,x1) according to events
-              +--> select PF/background from the GTIA state of the span
-              +--> apply overlay, map, transparency and priority
-              +--> update COLDETECT
-              `--> publish presentation planes
+```mermaid
+flowchart TD
+    S["Line start"] --> A["ANTIC/GTIA generate pixels<br/>and priority metadata"]
+    A --> C["CPU may write GTIA/VBXE<br/>(events queued with their horizontal cycle)"]
+    C --> V["VBXE advances XDL, repeat,<br/>scroll, map and fetches"]
+    V --> E["The line is closed"]
+    E --> E1["Split into [x0,x1) according to events"]
+    E1 --> E2["Select PF/background from the<br/>GTIA state of the span"]
+    E2 --> E3["Apply overlay, map,<br/>transparency and priority"]
+    E3 --> E4["Update COLDETECT"]
+    E4 --> E5["Publish presentation planes"]
 ```
 
 The local schedule already exists and keeps a compatible aggregate output for
@@ -307,27 +281,19 @@ selecting the main runtime.
 
 ## Dependencies between stages
 
-```text
-baseline/contract
-        |
-        v
-GTIA spans -----------+
-        |              |
-        v              v
-overlay spans ---> maps per span ---> modes/collisions
-        |                    |              |
-        +--------------------+--------------+
-                             v
-                  registers/MEMAC/snapshots
-                             |
-                             v
-                    blitter phase timing
-                             |
-                             v
-                 software + visual comparison
-                             |
-                             v
-                         worker/UI
+```mermaid
+flowchart TD
+    BASE["baseline/contract"] --> GS["GTIA spans"]
+    GS --> OS["overlay spans"]
+    OS --> MS["maps per span"]
+    MS --> MC["modes/collisions"]
+    GS --> REG
+    OS --> REG
+    MS --> REG
+    MC --> REG["registers/MEMAC/snapshots"]
+    REG --> BL["blitter phase timing"]
+    BL --> SW["software + visual comparison"]
+    SW --> UI["worker/UI"]
 ```
 
 Stages 4 and 5 can advance in parallel after the base. Stage 6 must consume

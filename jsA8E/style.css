@@ -3024,6 +3024,7 @@ canvas.crtEnabled {
   color: var(--text);
 }
 .disklib-col-actions {
+  width: 11em;
 }
 .disklib-type {
   min-width: 28px;

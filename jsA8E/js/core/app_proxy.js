@@ -51,6 +51,11 @@
     diskLibraryDownload: 30000,
     diskLibraryExport: 60000,
     diskLibraryInspect: 60000,
+    diskLibraryCancel: 5000,
+    diskLibraryRenameFolder: 15000,
+    diskLibrarySelectRevision: 15000,
+    diskLibraryVerify: 30000,
+    diskLibraryStorageEstimate: 15000,
     diskLibraryPreviewImport: 60000,
     diskLibraryImport: 60000,
     diskLibraryDelete: 15000,
@@ -933,9 +938,16 @@
     folders.set("root", { id: "root", name: "Library", parentId: null });
 
     const trash = new Map();
+    const revisions = new Map();
 
-    function snapshotFromWire(items, isReady, isRestored, folderItems, trashItems) {
+    function snapshotFromWire(items, isReady, isRestored, folderItems, trashItems, revisionItems) {
       files.clear();
+      revisions.clear();
+      if (revisionItems && typeof revisionItems === "object") {
+        Object.keys(revisionItems).forEach(function (id) {
+          revisions.set(id, revisionItems[id]);
+        });
+      }
       folders.clear();
       trash.clear();
       folders.set("root", { id: "root", name: "Library", parentId: null });
@@ -1001,6 +1013,12 @@
         current = current.parentId ? getFolder(current.parentId) : null;
       }
       return result;
+    }
+
+    function listRevisions(id) {
+      return (revisions.get(String(id || "")) || []).map(function (revision) {
+        return Object.assign({}, revision);
+      });
     }
 
     function getFileInfo(id) {
@@ -1102,6 +1120,37 @@
       return sendRequest("diskLibraryFolderDelete", { id: String(id || "") });
     }
 
+    function renameFolder(id, name) {
+      return sendRequest("diskLibraryRenameFolder", {
+        id: String(id || ""),
+        name: String(name || ""),
+      });
+    }
+
+    function selectRevision(id, revisionId) {
+      return sendRequest("diskLibrarySelectRevision", {
+        id: String(id || ""),
+        revisionId: String(revisionId || ""),
+      });
+    }
+
+    function verifyFile(id) {
+      return sendRequest(
+        "diskLibraryVerify",
+        { id: String(id || "") },
+        null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryVerify },
+      );
+    }
+
+    function getStorageEstimate() {
+      return sendRequest("diskLibraryStorageEstimate");
+    }
+
+    function exportWorkspacePackage(options) {
+      return exportPackage(Object.assign({}, options || {}, { workspaceOnly: true }));
+    }
+
     function moveFile(id, folderId) {
       return sendRequest("diskLibraryMove", {
         id: String(id || ""),
@@ -1125,13 +1174,43 @@
       return sendRequest("diskLibraryPurgeTrashBefore", { cutoff: Number(cutoff) });
     }
 
+    // Callbacks cannot cross the Worker boundary. A long operation gets an id;
+    // the worker reports progress under that id and the proxy checks the
+    // caller's cancel flag on each report, so the UI behaves as it does
+    // without a worker.
+    let nextOperationId = 1;
+    const operations = new Map();
+
+    function runLibraryOperation(cmd, payload, transfer, config, timeoutMs) {
+      const opId = nextOperationId++;
+      let cancelSent = false;
+      operations.set(opId, function (progress) {
+        if (typeof config.onProgress === "function") config.onProgress(progress);
+        const canceled = (typeof config.isCanceled === "function" && config.isCanceled()) ||
+          (config.signal && config.signal.aborted);
+        if (canceled && !cancelSent) {
+          cancelSent = true;
+          sendRequest("diskLibraryCancel", { opId: opId }).catch(function () {});
+        }
+      });
+      const request = Object.assign({}, payload, { opId: opId });
+      return sendRequest(cmd, request, transfer, { timeoutMs: timeoutMs })
+        .finally(function () { operations.delete(opId); });
+    }
+
+    function handleProgress(opId, progress) {
+      const listener = operations.get(opId);
+      if (listener) listener(progress);
+    }
+
     function exportPackage(options) {
       const config = options && typeof options === "object" ? options : {};
-      return sendRequest(
+      return runLibraryOperation(
         "diskLibraryExport",
         cloneLibraryExportOptions(config),
         null,
-        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryExport },
+        config,
+        REQUEST_TIMEOUT_MS.diskLibraryExport,
       ).then(function (result) {
         if (result && result.buffer && isArrayBufferLike(result.buffer)) {
           result.bytes = new Uint8Array(result.buffer);
@@ -1173,28 +1252,31 @@
       });
     }
 
-    function previewImport(data) {
+    function previewImport(data, options) {
       const buffer = toArrayBuffer(data);
-      return sendRequest(
+      return runLibraryOperation(
         "diskLibraryPreviewImport",
         { buffer: buffer },
         [buffer],
-        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryPreviewImport },
+        options && typeof options === "object" ? options : {},
+        REQUEST_TIMEOUT_MS.diskLibraryPreviewImport,
       );
     }
 
-    function importPackage(data) {
+    function importPackage(data, options) {
       const buffer = toArrayBuffer(data);
-      return sendRequest(
+      return runLibraryOperation(
         "diskLibraryImport",
         { buffer: buffer },
         [buffer],
-        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryImport },
+        options && typeof options === "object" ? options : {},
+        REQUEST_TIMEOUT_MS.diskLibraryImport,
       );
     }
 
     return {
       snapshotFromWire: snapshotFromWire,
+      handleProgress: handleProgress,
       api: {
         listFiles: listFiles,
         getFolder: getFolder,
@@ -1221,6 +1303,12 @@
         purgeAllTrash: purgeAllTrash,
         purgeTrashBefore: purgeTrashBefore,
         exportPackage: exportPackage,
+        exportWorkspacePackage: exportWorkspacePackage,
+        renameFolder: renameFolder,
+        listRevisions: listRevisions,
+        selectRevision: selectRevision,
+        verifyFile: verifyFile,
+        getStorageEstimate: getStorageEstimate,
         inspectPackage: inspectPackage,
         previewImport: previewImport,
         importPackage: importPackage,
@@ -1561,6 +1649,11 @@
         return;
       }
 
+      if (data.type === "diskLibraryProgress") {
+        diskLibraryProxy.handleProgress(data.opId, data.progress);
+        return;
+      }
+
       if (data.type === "diskLibrarySnapshot") {
         diskLibraryProxy.snapshotFromWire(
           data.files || [],
@@ -1568,6 +1661,7 @@
           typeof data.restored === "boolean" ? data.restored : !!data.ready,
           data.folders || [],
           data.trash || [],
+          data.revisions || null,
         );
         return;
       }
