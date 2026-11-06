@@ -233,6 +233,26 @@ These results come from shared fixes to XEX loading, memory banking, CPU
 interrupt handling, SIO response phases, and XL/XE defaults; no title-specific
 workarounds are used.
 
+VBXE (experimental, opt-in) was also exercised with real FX 1.26 software in
+jsA8E; the native A8E core is at an earlier stage. "Compared" means a visual
+comparison against Altirra 4.40 running the same XEX:
+
+- **Popeye** is playable (title, menu, score table and gameplay with colors). Compared.
+- **Commando** is playable; the first screen and the rock plateau were checked
+  after the MEMAC A fix above `$D800`. The end-of-level bridge/portal is still
+  untested.
+- **Gacek** runs; the sprite trails were fixed by latching the first blitter
+  block on START. Start it with BASIC off (Option on start), because it keeps
+  its sprite sheet in RAM at `$A000-$BFFF`.
+- **D600 blitter demo** shows the rainbow background with 24 blitter sprites.
+  It also needs BASIC off. Compared.
+- **Galaga**, **Crysis** and **Falcon** (the last two are 320x480i) were
+  confirmed running.
+- **Phoenix** and **Celeste** reach their title screens.
+
+VBXE is not hardware-certified and not pixel- or cycle-exact; open items are in
+the [VBXE roadmap](implementation/VBXE_ROADMAP.md#known-issues-and-pending-work).
+
 ## ROM Requirements
 
 Both implementations require the following ROM dumps (not included):

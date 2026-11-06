@@ -1,5 +1,38 @@
 # NOTES.md
 
+- 2026-11-06 (jsA8E: Disk Library parity with and without the worker): the
+  library UI talks to either the core `disk_library.js` (main thread) or the
+  proxy in `app_proxy.js` (worker). Comparing both APIs showed that the proxy
+  lacked `exportWorkspacePackage`, `renameFolder`, `listRevisions`,
+  `selectRevision`, `verifyFile` and `getStorageEstimate`. With the worker the
+  "export mounted workspace" button was not wired at all, folder rename threw
+  a TypeError, and revision info, ATR verification and the storage estimate
+  were missing. Added the proxy methods, the matching worker commands
+  (`diskLibraryRenameFolder`, `...SelectRevision`, `...Verify`,
+  `...StorageEstimate`; workspace export reuses `diskLibraryExport` with
+  `workspaceOnly`), and a `revisions` map in the `diskLibrarySnapshot` message so
+  `listRevisions` stays synchronous. `app_proxy_library_export.test.js` covers the
+  new proxy calls. Not verified in a browser with the worker. Progress and
+  cancel of export, import preview and import now work with the worker too:
+  the proxy tags the request with an `opId`, the worker posts
+  `diskLibraryProgress` messages with that id, and the proxy sends
+  `diskLibraryCancel` when the caller's `isCanceled` or `signal` is set
+  (checked on each progress report, so a cancel takes effect at the next step).
+  `disk_library_api_parity.test.js` (in `test:automation`) fails if the UI calls
+  a library method that is missing from either the core or the proxy. Root
+  cause of the whole group: the two paths (worker proxy and main-thread core)
+  are selected at runtime (Firefox and Tauri use the main thread) and had
+  drifted apart since the Full Library work of 2026-10-09/16; the Firefox
+  main-thread default of 2026-11-04 only exposed it.
+- 2026-11-06 (jsA8E: "Export the complete library" downloaded the text
+  `undefined`): the UI read `result.bytes`, but only the worker proxy
+  (`app_proxy.js`) converts the export's `buffer` into `bytes`. The main-thread
+  library (`atari.js` -> `disk_library.js`) returns `{ buffer, manifest,
+  fileName }`, so `new Blob([undefined])` produced a file containing
+  "undefined". `disk_library_ui.js` now uses a `packageBytes(result)` helper
+  (accepts `bytes` or `buffer`, throws if neither) for both the library and the
+  mounted-workspace export. Not verified in a browser; the main-thread path
+  was inferred from the code. No automated test covers the UI handler.
 - 2026-11-06 (VBXE merge readiness and Altirra source audit): prepared the
   `VBXE` branch for merging into `main` as an experimental, opt-in feature (the
   merge itself is done by the maintainer). Results: jsA8E 59 of 59 VBXE tests

@@ -1179,6 +1179,13 @@
       });
     }
 
+    // The worker proxy returns `bytes`; the main-thread library returns `buffer`.
+    function packageBytes(result) {
+      if (result && result.bytes) return result.bytes;
+      if (result && result.buffer) return new Uint8Array(result.buffer);
+      throw new Error("Library export returned no data");
+    }
+
     if (exportBtn) {
       exportBtn.addEventListener("click", function () {
         const operation = beginOperation();
@@ -1189,7 +1196,7 @@
           isCanceled: function () { return operation.canceled; },
         })
           .then(function (result) {
-            const blob = new Blob([result.bytes], { type: "application/zip" });
+            const blob = new Blob([packageBytes(result)], { type: "application/zip" });
             const url = URL.createObjectURL(blob);
             const anchor = document.createElement("a");
             anchor.href = url;
@@ -1218,7 +1225,7 @@
           isCanceled: function () { return operation.canceled; },
         })
           .then(function (result) {
-            const blob = new Blob([result.bytes], { type: "application/zip" });
+            const blob = new Blob([packageBytes(result)], { type: "application/zip" });
             const url = URL.createObjectURL(blob);
             const anchor = document.createElement("a");
             anchor.href = url;

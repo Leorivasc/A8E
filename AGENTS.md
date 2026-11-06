@@ -9,3 +9,4 @@
 - Read `implementation/NOTES.md` before planning any improvement.
 - Keep `implementation/NOTES.md` updated after each code improvement.
 - Use the `AHRM` as a reference before implementing any Atari 800 XL PAL/NTSC machine related hardware emulation.
+- For any fixes related to software compatibility, make sure to use generic fixes that benefit the emulator, never patch for a particular application or game
