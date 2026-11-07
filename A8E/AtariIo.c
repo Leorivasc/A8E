@@ -988,6 +988,7 @@ static void AtariIoQueueKeyCode(_6502_Context_t *pContext, IoData_t *pIoData, u8
 static void AtariIoResetJoystickArrowState(_6502_Context_t *pContext, IoData_t *pIoData)
 {
 	pIoData->cJoystickArrowMask = 0;
+	pIoData->cGamepadDirections = 0;
 	RAM[IO_PORTA] |= 0x0f;
 }
 
@@ -6704,6 +6705,24 @@ void AtariIoStatus(_6502_Context_t *pContext)
 		   RAM[IO_PBCTL] & 0x80 ? "pending" : "not pending");
 
 	printf("\n");
+}
+
+void AtariIoGamepadState(_6502_Context_t *pContext, u8 cDirections, u8 bFire)
+{
+	IoData_t *pIoData = (IoData_t *)pContext->pIoData;
+	u8 cPressed = (u8)(cDirections & 0x0f);
+	u8 cReleased = (u8)(pIoData->cGamepadDirections & ~cPressed);
+
+	pIoData->cGamepadDirections = cPressed;
+	RAM[IO_PORTA] &= (u8)~cPressed;
+	RAM[IO_PORTA] |= (u8)(cReleased & ~pIoData->cJoystickArrowMask);
+
+	bFire = bFire ? 1 : 0;
+	if(bFire != pIoData->bGamepadFire)
+	{
+		pIoData->bGamepadFire = bFire;
+		RAM[IO_GRAFP3_TRIG0] = bFire ? 0 : 1;
+	}
 }
 
 void AtariIoKeyboardEvent(_6502_Context_t *pContext, SDL_KeyboardEvent *pKeyboardEvent)

@@ -2,10 +2,20 @@
 
 > Hardware emulation reference: Before implementing any Atari 800 XL PAL/NTSC hardware emulation, use the [AHRM](/AHRM/index.md) as reference.
 
-- Files: `jsA8E/index.html`, `jsA8E/style.css`, `jsA8E/js/app/ui.js`, `jsA8E/js/app/hostfs_ui.js`, `jsA8E/js/app/assembler_ui.js`, `jsA8E/js/app/snapshot_ui.js`, `jsA8E/js/core/assembler_core.js`, `jsA8E/js/core/assembler/shared.js`, `jsA8E/js/core/assembler/lexer.js`, `jsA8E/js/core/assembler/preprocessor.js`, `jsA8E/js/core/assembler/parser.js`, `jsA8E/js/core/assembler/object_writer.js`, `jsA8E/js/core/assembler/assembler.js`, `jsA8E/js/app/a8e.js`, `jsA8E/js/app/version.js`
+- Files: `jsA8E/index.html`, `jsA8E/style.css`, `jsA8E/js/app/ui.js`, `jsA8E/js/app/gamepad.js`, `jsA8E/js/app/hostfs_ui.js`, `jsA8E/js/app/assembler_ui.js`, `jsA8E/js/app/snapshot_ui.js`, `jsA8E/js/core/assembler_core.js`, `jsA8E/js/core/assembler/shared.js`, `jsA8E/js/core/assembler/lexer.js`, `jsA8E/js/core/assembler/preprocessor.js`, `jsA8E/js/core/assembler/parser.js`, `jsA8E/js/core/assembler/object_writer.js`, `jsA8E/js/core/assembler/assembler.js`, `jsA8E/js/app/a8e.js`, `jsA8E/js/app/version.js`
 - Purpose: provide browser controls and status for emulator operation.
 - Status: updated on 2026-10-29 (`implemented`, including optional VBXE FX
   1.26 configuration).
+- 2026-11-07: physical gamepad support. `jsA8E/js/app/gamepad.js`
+  (`window.A8EGamepad`, loaded before `ui.js`) polls `navigator.getGamepads()`
+  once per animation frame while a pad is connected and reports the merged
+  joystick state (d-pad buttons 12-15 or left stick axes 0/1 with a 0.5
+  threshold; face buttons 0-3 fire; opposite directions cancel). `ui.js` feeds
+  changes to `setJoystickDirection` and `setJoystickFire`, the same path as the
+  on-screen stick, so the core and the worker proxy are untouched. Only changes
+  are reported, so an idle pad never overrides the keyboard or the on-screen
+  stick; unplugging a pad releases held inputs. Polling starts on
+  `gamepadconnected` and stops when no pad is left.
 - 2026-11-03: VBXE-enabled UI startup now prefers the worker OffscreenCanvas
   when available; the main-thread WebGL/Canvas 2D path remains the fallback.
 - This supersedes the older worker/VBXE note in the long runtime description
