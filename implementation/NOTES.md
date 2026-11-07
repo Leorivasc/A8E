@@ -12,12 +12,28 @@
   `...StorageEstimate`; workspace export reuses `diskLibraryExport` with
   `workspaceOnly`), and a `revisions` map in the `diskLibrarySnapshot` message so
   `listRevisions` stays synchronous. `app_proxy_library_export.test.js` covers the
-  new proxy calls. Not verified in a browser with the worker. Progress and
+  new proxy calls. Progress and
   cancel of export, import preview and import now work with the worker too:
   the proxy tags the request with an `opId`, the worker posts
   `diskLibraryProgress` messages with that id, and the proxy sends
   `diskLibraryCancel` when the caller's `isCanceled` or `signal` is set
-  (checked on each progress report, so a cancel takes effect at the next step).
+  (checked on each progress report and on a 50 ms timer; a
+  cancel already set when the call starts rejects immediately with
+  `a8e_library_canceled`, as in the main-thread core). Verified in Chromium over
+  CDP in an isolated browser context (the real profile's library was not
+  touched), with and without `?a8e_no_worker=1`, after loading `ATARIXL.ROM` and
+  `ATARIBAS.ROM` into the page (jsA8E is not fully usable before the ROMs):
+  add, create/rename folder, revisions, verify, storage estimate, export (6
+  progress events), workspace export, import preview and cancel give identical
+  results in both modes. Also verified in the user's test Chromium tab (worker,
+  73 MB library, 43 files): export, workspace export, rename, verify, revisions
+  and storage estimate work. Cancel limit, same with and without the worker:
+  the worker only sees a cancel when its event loop is free, and a 73 MB export
+  spends about 4 s building the manifest and 2.5 s writing the archive in
+  synchronous code (measured from progress timestamps), so a cancel issued
+  during those stages is ignored until the next yield. Making export/import
+  truly interruptible would need yielding inside `library_package.js`
+  (manifest hashing and archive writing); not done.
   `disk_library_api_parity.test.js` (in `test:automation`) fails if the UI calls
   a library method that is missing from either the core or the proxy. Root
   cause of the whole group: the two paths (worker proxy and main-thread core)

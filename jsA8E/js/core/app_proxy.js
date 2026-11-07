@@ -1181,21 +1181,38 @@
     let nextOperationId = 1;
     const operations = new Map();
 
+    function isOperationCanceled(config) {
+      return !!((typeof config.isCanceled === "function" && config.isCanceled()) ||
+        (config.signal && config.signal.aborted));
+    }
+
     function runLibraryOperation(cmd, payload, transfer, config, timeoutMs) {
+      if (isOperationCanceled(config)) {
+        const error = new Error("A8E library operation canceled");
+        error.code = "a8e_library_canceled";
+        return Promise.reject(error);
+      }
       const opId = nextOperationId++;
       let cancelSent = false;
+      // The caller's cancel flag is polled on a timer as well as on each
+      // progress report: the UI cancel button does not talk to the proxy, and
+      // progress can arrive in one burst at the end of the operation.
+      function sendCancelIfNeeded() {
+        if (cancelSent || !isOperationCanceled(config)) return;
+        cancelSent = true;
+        sendRequest("diskLibraryCancel", { opId: opId }).catch(function () {});
+      }
       operations.set(opId, function (progress) {
         if (typeof config.onProgress === "function") config.onProgress(progress);
-        const canceled = (typeof config.isCanceled === "function" && config.isCanceled()) ||
-          (config.signal && config.signal.aborted);
-        if (canceled && !cancelSent) {
-          cancelSent = true;
-          sendRequest("diskLibraryCancel", { opId: opId }).catch(function () {});
-        }
+        sendCancelIfNeeded();
       });
+      const poll = setInterval(sendCancelIfNeeded, 50);
       const request = Object.assign({}, payload, { opId: opId });
       return sendRequest(cmd, request, transfer, { timeoutMs: timeoutMs })
-        .finally(function () { operations.delete(opId); });
+        .finally(function () {
+          clearInterval(poll);
+          operations.delete(opId);
+        });
     }
 
     function handleProgress(opId, progress) {
