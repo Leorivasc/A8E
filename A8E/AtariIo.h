@@ -258,6 +258,8 @@ typedef struct
 
 	u32 lKeyPressCounter;
 	u8 cJoystickArrowMask;
+	u8 cGamepadDirections; /* PORTA bits currently held by a gamepad */
+	u8 bGamepadFire;
 
 	/* POKEY pot scan state */
 	u8 cPotScanActive;
@@ -341,6 +343,11 @@ void AtariIoDrawScreen(
 	u32 lScreenHeight);
 
 void AtariIoKeyboardEvent(_6502_Context_t *pContext, SDL_KeyboardEvent *pKeyboardEvent);
+
+/* Applies the combined gamepad state: cDirections uses the PORTA bit layout
+ * (1 = up, 2 = down, 4 = left, 8 = right) and bFire drives TRIG0. Safe to
+ * call every frame. A direction still held on the keyboard stays pressed. */
+void AtariIoGamepadState(_6502_Context_t *pContext, u8 cDirections, u8 bFire);
 
 /* Mounts a caller-owned copy of an ATR/XEX image in D1:-D8:. */
 int AtariIoMountDisk(

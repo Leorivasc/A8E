@@ -2240,6 +2240,15 @@
       else app.onKeyUp(ev);
     }
 
+    // Physical gamepads drive the same joystick path as the on-screen stick.
+    // The poller only reports changes, so an idle pad never overrides it.
+    if (window.A8EGamepad) {
+      window.A8EGamepad.install(function (state) {
+        setJoystickDirection(state.up, state.down, state.left, state.right);
+        setJoystickFire(state.fire);
+      });
+    }
+
     function getJoystickStickCenter() {
       if (!joystickArea) return { x: 0, y: 0 };
       const boot = joystickArea.querySelector(".cx40-boot");

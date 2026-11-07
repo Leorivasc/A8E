@@ -50,6 +50,7 @@ set(A8E_CORE_SOURCES
   6502.c
   Antic.c
   AtariIo.c
+  Gamepad.c
   Gtia.c
   LibraryArchive.c
   LibraryImage.c
@@ -291,6 +292,17 @@ if(BUILD_TESTING)
 
   add_test(NAME keyboard_irq_gate_probe COMMAND keyboard_irq_gate_probe)
   set_tests_properties(keyboard_irq_gate_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
+
+  add_executable(gamepad_probe
+    tests/gamepad_probe.c
+    ${A8E_CORE_SOURCES}
+  )
+
+  target_compile_definitions(gamepad_probe PRIVATE A8E_ENABLE_TEST_PROBES=1)
+  a8e_configure_target(gamepad_probe)
+
+  add_test(NAME gamepad_probe COMMAND gamepad_probe)
+  set_tests_properties(gamepad_probe PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ENVIRONMENT "SDL_AUDIODRIVER=dummy;SDL_VIDEODRIVER=dummy")
 
   add_executable(memory_expansion_probe
     tests/memory_expansion_probe.c
