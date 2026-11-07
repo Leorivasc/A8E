@@ -19,6 +19,7 @@
 
 #include "6502.h"
 #include "AtariIo.h"
+#include "Gamepad.h"
 #include "LibraryRepository.h"
 #include "LibraryWindow.h"
 #include "Pokey.h"
@@ -187,6 +188,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "SDL_Init() failed: %s\n", SDL_GetError());
 		return -1;
 	}
+	Gamepad_Init();
 
 	for(lIndex = 1; lIndex < argc; lIndex++)
 	{
@@ -446,6 +448,8 @@ int main(int argc, char *argv[])
 				goto Exit;
 			}
 
+			Gamepad_HandleEvent(&tEvent);
+
 			if(tEvent.type == SDL_KEYDOWN)
 			{
 				if(tEvent.key.keysym.sym == SDLK_F9 && tEvent.key.repeat == 0)
@@ -491,6 +495,13 @@ int main(int argc, char *argv[])
 			{
 				AtariIoKeyboardEvent(pAtariContext, &tEvent.key);
 			}
+		}
+
+		{
+			u8 cGamepadFire;
+			u8 cGamepadDirections = Gamepad_Poll(&cGamepadFire);
+
+			AtariIoGamepadState(pAtariContext, cGamepadDirections, cGamepadFire);
 		}
 
 		if(!cTurboFlag)
@@ -540,6 +551,7 @@ Exit:
 	SDL_DestroyTexture(pScreenTexture);
 	SDL_DestroyRenderer(pRenderer);
 	SDL_DestroyWindow(pWindow);
+	Gamepad_Shutdown();
 	SDL_Quit();
 
 	return 0;

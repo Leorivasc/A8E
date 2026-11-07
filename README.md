@@ -327,6 +327,14 @@ Type normally on the emulated Atari keyboard. **Ctrl** and **Shift** work as mod
 | **Shift** + Arrow Keys | Atari cursor keys (↑ ↓ ← →) |
 | Left Control | Fire button |
 
+**Gamepad (jsA8E and A8E):** a connected gamepad drives the joystick as well.
+The left stick or the d-pad moves, and any of the first four buttons fires
+(A, B, X, Y on an Xbox-style pad). In jsA8E the browser only exposes a gamepad
+after a button has been pressed on it, so press one if it is not detected. The
+native build opens joysticks through SDL, handles hot-plugging, and also works
+with plain USB joysticks that have no SDL controller mapping. A direction held
+on the keyboard stays pressed while the gamepad is idle or released.
+
 Shift + Arrow is a convenience shortcut — it sends the same key codes as **Ctrl + − / = / + / \*** on the Atari keyboard (the original cursor controls).
 
 ### Console Keys

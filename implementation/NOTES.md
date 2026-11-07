@@ -1,5 +1,56 @@
 # NOTES.md
 
+- 2026-11-07 (A8E native: gamepad support): the native build now has the same
+  feature. New `A8E/Gamepad.c/.h` (in `A8E_CORE_SOURCES`) uses the SDL joystick
+  API, not SDL_GameController, so plain USB joysticks work without a mapping
+  database: hot-plug on `SDL_JOYDEVICEADDED`/`REMOVED` (up to four pads),
+  `Gamepad_Poll` once per frame after the event loop (axes 0/1 past half range
+  or the first hat; buttons 0-3 fire; pads merged; opposites cancel).
+  `AtariIoGamepadState` (new, `AtariIo.c`) applies the result to `PORTA` bits
+  0-3 and `TRIG0` while tracking its own held bits (`cGamepadDirections`,
+  `bGamepadFire` in `IoData_t`); the keyboard path and `cJoystickArrowMask` are
+  unchanged and a key-held direction stays pressed. F5 reset clears the pad
+  bits too. `SDL_InitSubSystem(SDL_INIT_JOYSTICK)` is separate from
+  `SDL_Init` so a failure cannot stop startup. Limit: pad fire and Left
+  Control share `TRIG0`, so releasing the pad button releases the trigger even
+  if Left Control is still down. New `gamepad_probe` (ctest) covers the
+  mapping, the `PORTA`/`TRIG0` effect including keyboard interplay (checked by
+  breaking the protection on purpose: it fails exactly there), and the real SDL
+  path with an SDL virtual joystick (attach, axes, hat, buttons, unplug while
+  held; skipped on SDL older than 2.0.14). Results: native `ctest` 17 of 18,
+  only `pokey_sio_contract_probe` fails, as already recorded on a clean `main`.
+  The ROM-dependent probes need `ATARIXL.ROM`/`ATARIBAS.ROM` in the repo root
+  (gitignored); I copied them there for the run and removed them afterwards.
+  Smoke run of the full `A8E` with the SDL dummy drivers: it detected the
+  Xbox 360 Controller connected to this machine and ran until the timeout.
+  Not verified: real button presses on that pad (no way to press them), the
+  window-focus behaviour of SDL joystick events, and Windows/macOS builds.
+- 2026-11-07 (jsA8E: physical gamepad support): there was none. The keyboard
+  arrows/Control and the on-screen stick were the only joystick inputs, and
+  the native A8E has no gamepad code either (no SDL, no `/dev/input`); an
+  earlier statement in this session that "the joystick is implemented in both"
+  referred to the keyboard and virtual stick only. New `js/app/gamepad.js`
+  (`window.A8EGamepad`): pure `readJoystickState(pads)` (d-pad buttons 12-15 or
+  stick axes 0/1 past 0.5; face buttons 0-3 fire; opposite directions cancel;
+  disconnected pads ignored; several pads merged) and a `createPoller` that
+  runs on `requestAnimationFrame` only while a pad is present and calls back
+  only on change. `ui.js` routes changes to the existing
+  `setJoystickDirection`/`setJoystickFire`, so the worker and main-thread
+  paths behave the same and the core is untouched. `gamepad_mapping.test.js`
+  (in `test:automation`) covers the mapping and the poller (changes only,
+  single loop, release on unplug, restart). Verified in the Chromium on port
+  9222 over CDP, in a new tab with the cache disabled and `navigator.getGamepads`
+  replaced by a fake: reading `PORTA`/`TRIG0` through `api.peek`, axis and
+  d-pad left/right/up/down, fire from two face buttons, combinations, release
+  and unplug all gave the expected active-low bits. Not tested with a physical
+  pad. Lessons: (1) a first run that "did nothing" was Chromium serving a
+  cached old `ui.js` from the 8090 static server (fetch with `no-store` saw the
+  new file while the page ran the old one), so disable the cache when
+  verifying UI changes; (2) physical keys are listened to on the canvas, not on
+  `window`. Unexplained and not investigated: in a fresh page the first
+  ArrowRight press (keyboard, also via the gamepad path) was ignored once while
+  later ones worked; left, up and down did not show it. ESLint could not run
+  (no `node_modules`); `node --check` passes.
 - 2026-11-06 (jsA8E: Disk Library parity with and without the worker): the
   library UI talks to either the core `disk_library.js` (main thread) or the
   proxy in `app_proxy.js` (worker). Comparing both APIs showed that the proxy
