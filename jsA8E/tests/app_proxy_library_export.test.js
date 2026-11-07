@@ -1,4 +1,4 @@
-/* global __dirname, console, process, setTimeout */
+/* global __dirname, console, process, setTimeout, setInterval, clearInterval, clearTimeout */
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -124,6 +124,8 @@ async function main() {
     console,
     setTimeout,
     clearTimeout,
+    setInterval,
+    clearInterval,
     Worker: FakeWorker,
     MessageChannel: FakeMessageChannel,
     OffscreenCanvas: function OffscreenCanvas() {},
@@ -148,17 +150,21 @@ async function main() {
   assert.equal(await app.diskLibrary.restoreTrash("deleted"), true);
 
   const progress = [];
-  let cancelRequested = true;
+  let cancelRequested = false;
   const result = await app.diskLibrary.exportPackage({
     fileName: "library.a8e",
-    onProgress: function (p) { progress.push(p); },
+    onProgress: function (p) { progress.push(p); cancelRequested = true; },
     isCanceled: function () { return cancelRequested; },
     signal: { aborted: false },
   });
   assert.equal(progress.length, 1);
   assert.equal(progress[0].current, "A.ATR");
   assert.ok(workers[0].messages.some((m) => m.cmd === "diskLibraryCancel" && m.payload.opId > 0));
-  cancelRequested = false;
+  cancelRequested = true;
+  await assert.rejects(
+    app.diskLibrary.exportPackage({ isCanceled: function () { return cancelRequested; } }),
+    (err) => err.code === "a8e_library_canceled",
+  );
   assert.equal(result.fileName, "library.a8e");
   assert.equal(result.bytes.byteLength, 1);
   assert.equal(workers.length, 1);
