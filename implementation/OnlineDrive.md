@@ -4,7 +4,8 @@ Estado: **Fase 1 (MVP de Workspace remoto) implementada en jsA8E y validada
 contra un Nextcloud real** (Firefox y Chromium, jsA8E servido desde el mismo
 servidor que Nextcloud; pull/push entre browsers y colisiones con sufijo `(1)`
 funcionan como se diseñó). **Fase 2a (biblioteca completa incremental, `library.json` +
-`blobs/`) implementada en jsA8E, pendiente de validar contra Nextcloud.** Fase 2b
+`blobs/`) implementada en jsA8E y validada manualmente contra Nextcloud entre
+Firefox y Chromium (2026-11-09; el proxy debe permitir `MKCOL` en CORS).** Fase 2b
 (tombstones y propagación de renombres/movimientos) y Fase 3 (automático y
 nativo) siguen en diseño. Rama de trabajo:
 `OnlineDrive`.
