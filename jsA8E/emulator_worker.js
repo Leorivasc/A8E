@@ -1095,6 +1095,14 @@
         const library = requireDiskLibrary();
         return library.getStorageEstimate();
       }
+      case "diskLibraryManifest": {
+        const library = requireDiskLibrary();
+        return library.getManifest();
+      }
+      case "diskLibraryReadBlob": {
+        const library = requireDiskLibrary();
+        return library.readBlob(data.hash || "");
+      }
       case "diskLibraryInspect": {
         const library = requireDiskLibrary();
         return library.inspectPackage(data.buffer || new ArrayBuffer(0));

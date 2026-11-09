@@ -51,6 +51,28 @@
   ArrowRight press (keyboard, also via the gamepad path) was ignored once while
   later ones worked; left, up and down did not show it. ESLint could not run
   (no `node_modules`); `node --check` passes.
+- 2026-11-08 (jsA8E: remote full-library sync, Phase 2a): new mode "Whole
+  library" next to the workspace MVP. `js/app/remote_library.js` keeps
+  `library.json` + `blobs/<sha256>.<type>` on the WebDAV folder, transfers only
+  the blobs the other side lacks (SHA-256 verified on download, `HEAD` then
+  `PUT If-None-Match: *` on upload, manifest guarded by `If-Match`), imports in
+  <=48 MiB batches through the existing `importPackage`, and does not sync
+  mounts. Needs `MKCOL` in the server's CORS methods (creates `blobs/` once).
+  New library APIs `getManifest()`/`readBlob(sha)` in `disk_library.js`,
+  `app_proxy.js` and `emulator_worker.js`; the parity test now also scans the
+  remote modules. Core fix found while testing: `planImport` treated every
+  same-id/different-hash entry as a conflict, so a plain "edit in A, sync in B"
+  produced a `(1)` copy even though the revision graph said B's copy was an
+  ancestor. It now fast-forwards (adds the new revisions, advances the working
+  content and keeps the drive) when the local content is a retained ancestor of
+  the imported entry, ignores imported content that is already a local
+  revision, and keeps copies only for diverged branches. NOT mirrored in native
+  A8E yet (parity debt). Tests: `remote_library.test.js` (shared fixtures in
+  `remote_test_support.js`: pull, incremental upload/download counts, revisions,
+  concurrent edits, vetoed first merge, corrupted blob), `remote_workspace`
+  updated (fast-forward keeps D1, merging side keeps both variants), proxy test
+  covers the new messages. Not yet validated against Nextcloud; the worker
+  handlers themselves have no automated test. ESLint could not run.
 - 2026-11-08 (jsA8E: remote workspace sync MVP, branch `OnlineDrive`): added
   optional manual synchronization of the mounted workspace with a WebDAV
   folder. `js/app/remote_workspace.js` (fetch client + sync coordinator, no

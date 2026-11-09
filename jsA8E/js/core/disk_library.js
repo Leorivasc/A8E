@@ -1436,6 +1436,72 @@
         return exportPackage(config);
       }
 
+      // Library manifest without bytes, mounts or trash, used by remote
+      // synchronization to compare against the remote `library.json`.
+      function getManifest() {
+        const packageApi = getPackageApi();
+        if (!packageApi) return Promise.reject(new Error("A8E library package support is unavailable"));
+        let pending = Promise.resolve();
+        entries.forEach(function (entry) {
+          pending = pending.then(function () { return flushEntry(entry); });
+        });
+        return pending.then(function () {
+          const records = [];
+          entries.forEach(function (entry) {
+            records.push({
+              id: entry.id,
+              name: currentName(entry),
+              format: entry.format === "xex" && entry.runtimeBytes ? "atr" : entry.format,
+              bytes: currentBytes(entry),
+              created: entry.created,
+              modified: entry.modified,
+              folderId: entry.folderId || ROOT_FOLDER_ID,
+              revisions: (entry.revisions || []).map(function (revision) {
+                return {
+                  id: revision.id,
+                  bytes: revision.bytes,
+                  created: revision.created,
+                  modified: revision.modified,
+                  parentId: revision.parentId || null,
+                };
+              }),
+              preferredRevisionId: entry.preferredRevisionId,
+            });
+          });
+          return packageApi.makeManifest(records, {
+            libraryVersion: libraryVersion,
+            folders: Array.from(folders.values()),
+            scope: "library",
+          });
+        });
+      }
+
+      // Bytes of the current or retained revision whose SHA-256 is `hash`, or
+      // null. Hashes are cached per byte array so repeated lookups are cheap.
+      const blobHashes = new WeakMap();
+      function hashOfBytes(bytes) {
+        let hash = blobHashes.get(bytes);
+        if (!hash) {
+          hash = getPackageApi().sha256(bytes);
+          blobHashes.set(bytes, hash);
+        }
+        return hash;
+      }
+
+      function readBlob(hash) {
+        const wanted = String(hash || "");
+        let found = null;
+        entries.forEach(function (entry) {
+          if (found) return;
+          const candidates = [currentBytes(entry)];
+          (entry.revisions || []).forEach(function (revision) { candidates.push(revision.bytes); });
+          for (let i = 0; i < candidates.length && !found; i++) {
+            if (hashOfBytes(candidates[i]) === wanted) found = candidates[i];
+          }
+        });
+        return Promise.resolve(found ? cloneBytes(found) : null);
+      }
+
       function inspectPackage(data) {
         const packageApi = getPackageApi();
         if (!packageApi) return Promise.reject(new Error("A8E library package support is unavailable"));
@@ -1620,9 +1686,24 @@
               }
             });
             emitChange();
+            // Fast-forwards advance the working content to the imported
+            // descendant revision and keep the disk in its drive.
+            let forwarding = Promise.resolve();
+            (plan.historyUpdates || []).forEach(function (update) {
+              if (!update.fastForward || !update.preferredRevisionId) return;
+              forwarding = forwarding.then(function () {
+                const entry = getEntry(update.id);
+                if (!entry) return undefined;
+                const slot = entry.slot | 0;
+                return selectRevision(update.id, update.preferredRevisionId).then(function () {
+                  if (slot >= 0 && mountDisk) return mountFile(update.id, slot);
+                  return undefined;
+                });
+              });
+            });
             const restored = [];
             const mountErrors = [];
-            let pending = Promise.resolve();
+            let pending = forwarding;
             plan.mounts.forEach(function (mount) {
               pending = pending.then(function () {
                 if (!mountDisk) return;
@@ -1700,6 +1781,8 @@
         purgeTrashBefore: purgeTrashBefore,
         exportPackage: exportPackage,
         exportWorkspacePackage: exportWorkspacePackage,
+        getManifest: getManifest,
+        readBlob: readBlob,
         inspectPackage: inspectPackage,
         previewImport: previewImport,
         importPackage: importPackage,

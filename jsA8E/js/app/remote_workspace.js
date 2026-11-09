@@ -97,14 +97,15 @@
 
     /* Resolves to {status:"missing"} | {status:"unchanged", etag} |
      * {status:"ok", etag, bytes}. */
-    function getFile(name, knownEtag) {
+    function getFile(name, knownEtag, getOptions) {
+      const requireEtag = !(getOptions && getOptions.requireEtag === false);
       const headers = knownEtag ? { "If-None-Match": knownEtag } : {};
       return request("GET", name, { headers: headers }).then(function (response) {
         if (response.status === 404) return { status: "missing" };
         if (response.status === 304) return { status: "unchanged", etag: knownEtag };
         if (!response.ok) throw new RemoteError("http", "Server error " + response.status + " reading " + name + ".");
         const etag = etagOf(response);
-        if (!etag) {
+        if (!etag && requireEtag) {
           throw new RemoteError("no-etag",
             "The server did not expose an ETag header (CORS must expose ETag).");
         }
@@ -116,18 +117,21 @@
 
     /* `precondition` is {ifMatch: etag} or {ifNoneMatch: "*"}.
      * Resolves to {status:"ok", etag} or {status:"conflict"} on 412/409. */
-    function putFile(name, bytes, precondition) {
+    function putFile(name, bytes, precondition, putOptions) {
+      const skipEtag = !!(putOptions && putOptions.skipEtag);
       const headers = { "Content-Type": "application/octet-stream" };
       if (precondition && precondition.ifMatch) headers["If-Match"] = precondition.ifMatch;
       if (precondition && precondition.ifNoneMatch) headers["If-None-Match"] = precondition.ifNoneMatch;
       return request("PUT", name, { headers: headers, body: bytes }).then(function (response) {
-        if (response.status === 412 || response.status === 409) return { status: "conflict" };
+        if (response.status === 412 || response.status === 409) {
+          return { status: "conflict", httpStatus: response.status };
+        }
         if (response.status === 404 || response.status === 405) {
           throw new RemoteError("missing-folder", "The WebDAV folder does not exist or does not accept uploads.");
         }
         if (!response.ok) throw new RemoteError("http", "Server error " + response.status + " writing " + name + ".");
         let etag = etagOf(response);
-        if (etag) return { status: "ok", etag: etag };
+        if (etag || skipEtag) return { status: "ok", etag: etag };
         // Some servers omit the ETag on PUT; read it back (same CORS rule).
         return request("HEAD", name).then(function (head) {
           etag = etagOf(head);
@@ -137,6 +141,26 @@
           }
           return { status: "ok", etag: etag };
         });
+      });
+    }
+
+    /* True when the file exists (HEAD), without transferring its content. */
+    function exists(name) {
+      return request("HEAD", name).then(function (response) {
+        if (response.status === 404) return false;
+        if (!response.ok) throw new RemoteError("http", "Server error " + response.status + " checking " + name + ".");
+        return true;
+      });
+    }
+
+    /* Creates a collection; an existing one (405) is fine. */
+    function mkcol(name) {
+      return request("MKCOL", name).then(function (response) {
+        if (response.status === 201 || response.status === 405) return;
+        if (response.status === 409) {
+          throw new RemoteError("missing-folder", "The WebDAV folder does not exist.");
+        }
+        throw new RemoteError("http", "Server error " + response.status + " creating " + name + " (does CORS allow MKCOL?).");
       });
     }
 
@@ -191,6 +215,8 @@
       baseUrl: baseUrl,
       getFile: getFile,
       putFile: putFile,
+      exists: exists,
+      mkcol: mkcol,
       connect: connect,
     };
   }

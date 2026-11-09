@@ -1,95 +1,10 @@
-/* global __dirname, console, process, require, setTimeout, clearTimeout */
+/* global console, process, require */
 
 // Exercises the remote workspace MVP against an in-process WebDAV-like server
 // (ETag, If-Match, If-None-Match, Basic auth) and two independent libraries
 // that stand for two browsers.
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const http = require("node:http");
-const path = require("node:path");
-const vm = require("node:vm");
-const crypto = require("node:crypto");
-
-function loadContext() {
-  const context = {
-    console, setTimeout, clearTimeout, Promise, Uint8Array, ArrayBuffer, Date, Math, Object,
-    String, Number, Boolean, TextEncoder, TextDecoder, Map, Set, Error, JSON, URL, btoa,
-    Array, RegExp, Symbol, fetch,
-  };
-  context.window = context;
-  context.self = context;
-  context.globalThis = context;
-  vm.createContext(context);
-  [["core", "library_archive.js"], ["core", "library_package.js"], ["core", "atr_inspector.js"],
-    ["core", "disk_library.js"], ["app", "remote_workspace.js"]].forEach(function (parts) {
-    vm.runInContext(
-      fs.readFileSync(path.join(__dirname, "..", "js", parts[0], parts[1]), "utf8"),
-      context, { filename: parts[1] });
-  });
-  return context;
-}
-
-function startServer(options) {
-  const files = new Map();
-  const stats = { puts: 0, gets: 0 };
-  let counter = 0;
-  const server = http.createServer(function (req, res) {
-    const name = decodeURIComponent(req.url.replace(/^\/dav\//, ""));
-    const expected = "Basic " + Buffer.from("leo:secret").toString("base64");
-    if (req.headers.authorization !== expected) { res.writeHead(401); res.end(); return; }
-    const chunks = [];
-    req.on("data", function (chunk) { chunks.push(chunk); });
-    req.on("end", function () {
-      const body = Buffer.concat(chunks);
-      const current = files.get(name);
-      const headers = options && options.hideEtag ? {} : (current ? { ETag: current.etag } : {});
-      if (req.method === "GET" || req.method === "HEAD") {
-        stats.gets++;
-        if (!current) { res.writeHead(404); res.end(); return; }
-        if (req.headers["if-none-match"] === current.etag) { res.writeHead(304, headers); res.end(); return; }
-        res.writeHead(200, headers); res.end(req.method === "GET" ? current.body : undefined); return;
-      }
-      if (req.method === "PUT") {
-        stats.puts++;
-        if (req.headers["if-match"] && (!current || req.headers["if-match"] !== current.etag)) {
-          res.writeHead(412); res.end(); return;
-        }
-        if (req.headers["if-none-match"] === "*" && current) { res.writeHead(412); res.end(); return; }
-        const etag = "\"" + (++counter) + "-" + crypto.createHash("md5").update(body).digest("hex") + "\"";
-        files.set(name, { body: body, etag: etag });
-        res.writeHead(current ? 204 : 201, options && options.hideEtag ? {} : { ETag: etag });
-        res.end(); return;
-      }
-      res.writeHead(405); res.end();
-    });
-  });
-  return new Promise(function (resolve) {
-    server.listen(0, "127.0.0.1", function () {
-      resolve({ server: server, files: files, stats: stats,
-        url: "http://127.0.0.1:" + server.address().port + "/dav/" });
-    });
-  });
-}
-
-async function makeBrowser(context) {
-  const mounted = new Map();
-  let next = 0;
-  const library = context.window.A8EDiskLibrary.createApi().create({
-    mountDisk: function (bytes, name, slot) {
-      const imageIndex = next++;
-      mounted.set(slot, { imageIndex: imageIndex, bytes: new Uint8Array(bytes) });
-      return { imageIndex: imageIndex, deviceSlot: slot };
-    },
-    unmountDisk: function (slot) { mounted.delete(slot); },
-    getDiskImageBytes: function (imageIndex) {
-      for (const item of mounted.values()) if (item.imageIndex === imageIndex) return item.bytes;
-      return null;
-    },
-  });
-  await library.init();
-  await library.restoreMounts();
-  return library;
-}
+const { loadContext, startServer, makeBrowser } = require("./remote_test_support.js");
 
 // replaceFile ejects a mounted image, so remount it like the UI flow does.
 async function edit(library, id, bytes) {
@@ -162,6 +77,10 @@ async function main() {
     report = await syncA.sync();
     assert.equal(report.pulled, true);
     assert.equal(report.pushed, false);
+    // A sequential edit fast-forwards: no conflict copy, still mounted in D1.
+    assert.equal(a.listAllFiles().length, 1);
+    assert.equal(a.listAllFiles()[0].bytes[0], 9);
+    assert.equal(a.listFiles("root")[0].mountedSlot, 0);
 
     // Concurrent edits: A publishes first, B is rejected, merges, republishes.
     await edit(a, disk.id, [5, 5, 5, 5]);
@@ -171,10 +90,12 @@ async function main() {
     assert.equal(report.pulled, true);
     assert.equal(report.pushed, true);
     await syncA.sync();
-    // The library's keep-both policy preserves the divergent variant as a
-    // separate entry on each side; nothing is lost.
-    assert.equal(a.listAllFiles().length, 2, "A keeps its own and B's divergent disk");
-    assert.equal(b.listAllFiles().length, 2, "B keeps its own and A's divergent disk");
+    // The merging side keeps both variants (its own edit and a `(1)` copy of the
+    // remote one); the remote workspace's mount wins. Only mounted disks travel,
+    // so A receives B's republished mounted copy as a duplicate of its own.
+    const bNames = b.listAllFiles().map(function (f) { return f.name + ":" + f.bytes[0]; }).sort().join(",");
+    assert.equal(bNames, "DOC(1).ATR:5,DOC.ATR:6", "B must retain its own edit and the remote one");
+    assert.equal(a.listAllFiles().length, 1);
 
     // First connection with data on both sides: a vetoed merge changes nothing.
     const putsNow = remote.stats.puts;

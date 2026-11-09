@@ -1009,7 +1009,10 @@ workspace mounted and unchanged.
 
 ### Phase 4: remote repository integration — in progress (web only)
 
-Phase 4a (remote workspace sync over WebDAV, jsA8E only) is implemented; see
+Phase 4a (remote workspace sync over WebDAV, jsA8E only) and 4b (incremental
+whole-library sync) are implemented; the browser import now fast-forwards a
+same-id entry whose local content is a retained ancestor of the imported one
+(native A8E still keeps a `(1)` copy: parity debt); see
 `implementation/OnlineDrive.md`. Native parity and the incremental repository
 with tombstones remain open.
 

@@ -82,6 +82,8 @@ async function main() {
           message.cmd === "diskLibrarySelectRevision" ||
           message.cmd === "diskLibraryVerify" ||
           message.cmd === "diskLibraryStorageEstimate" ||
+          message.cmd === "diskLibraryManifest" ||
+          message.cmd === "diskLibraryReadBlob" ||
           message.cmd === "diskLibraryCancel") {
         setTimeout(() => {
           this.onmessage({
@@ -148,6 +150,10 @@ async function main() {
   assert.equal(trash[0].name, "DELETED.ATR");
   assert.equal(trash[0].deletedAt, 1);
   assert.equal(await app.diskLibrary.restoreTrash("deleted"), true);
+  assert.equal((await app.diskLibrary.getManifest()).cmd, "diskLibraryManifest");
+  const blobRequest = await app.diskLibrary.readBlob("ab12");
+  assert.equal(blobRequest.cmd, "diskLibraryReadBlob");
+  assert.equal(blobRequest.payload.hash, "ab12");
 
   const progress = [];
   let cancelRequested = false;

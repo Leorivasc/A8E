@@ -477,6 +477,52 @@
         return;
       }
 
+      if (sameId) {
+        // Descendant / ancestor detection through the revision graph: when the
+        // local content is a retained revision of the imported entry, the
+        // import is a fast-forward (no conflict copy); when the imported
+        // content is already a retained local revision, it is older history.
+        const importedRevisions = item.revisions || [];
+        const descends = importedRevisions.some(function (revision) {
+          return revision.manifest.sha256 === sameId.sha256;
+        });
+        const knownLocal = (sameId.revisions || []).some(function (revision) {
+          return sha256(revision.bytes) === hash;
+        });
+        if (knownLocal && !descends) {
+          resolvedIds.set(manifest.id, sameId.id);
+          summary.duplicates++;
+          return;
+        }
+        if (descends) {
+          const knownIds = new Set((sameId.revisions || []).map(function (revision) { return revision.id; }));
+          const missing = importedRevisions.filter(function (revision) {
+            return !knownIds.has(revision.manifest.id);
+          }).map(function (revision) {
+            return {
+              id: revision.manifest.id,
+              bytes: cloneBytes(revision.bytes),
+              created: Date.parse(revision.manifest.createdAt),
+              modified: Date.parse(revision.manifest.modifiedAt),
+              parentId: revision.manifest.parentId || null,
+            };
+          });
+          const tip = importedRevisions.filter(function (revision) {
+            return revision.manifest.sha256 === hash;
+          }).pop();
+          resolvedIds.set(manifest.id, sameId.id);
+          historyUpdates.push({
+            id: sameId.id,
+            revisions: missing,
+            preferredRevisionId: manifest.preferredRevisionId || (tip && tip.manifest.id) || null,
+            fastForward: true,
+          });
+          summary.fastForwarded = (summary.fastForwarded || 0) + 1;
+          summary.revisions += missing.length;
+          return;
+        }
+      }
+
       let id = manifest.id;
       let name = manifest.name;
       if (sameId) {

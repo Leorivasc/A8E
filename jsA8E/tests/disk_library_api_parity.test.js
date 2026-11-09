@@ -27,7 +27,10 @@ function apiKeys(source, after, marker) {
 
 const ui = read("js", "app", "disk_library_ui.js");
 const used = new Set();
-ui.replace(/\blibrary\.([A-Za-z]\w*)\(/g, function (_, name) { used.add(name); return ""; });
+[ui, read("js", "app", "remote_workspace.js"), read("js", "app", "remote_sync_ui.js"),
+  read("js", "app", "remote_library.js")].forEach(function (source) {
+  source.replace(/\blibrary\.([A-Za-z]\w*)\(/g, function (_, name) { used.add(name); return ""; });
+});
 
 const core = apiKeys(read("js", "core", "disk_library.js"), "function createApi", "addFile: addFile");
 const proxy = apiKeys(read("js", "core", "app_proxy.js"), "function createDiskLibraryProxy", "listFiles: listFiles");

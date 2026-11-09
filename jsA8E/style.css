@@ -4383,7 +4383,8 @@ canvas.crtEnabled {
   font-size: var(--fs-xs);
   color: var(--sub-panel-dim);
 }
-.remote-form input {
+.remote-form input,
+.remote-form select {
   font: inherit;
   font-size: var(--fs-sm);
   color: var(--text);

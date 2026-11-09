@@ -58,6 +58,7 @@
     const dialog = document.querySelector(".remoteSyncDialog");
     if (!controlBtn || !dialog) return;
     const urlInput = dialog.querySelector(".remote-url");
+    const scopeSelect = dialog.querySelector(".remote-scope");
     const userInput = dialog.querySelector(".remote-user");
     const passwordInput = dialog.querySelector(".remote-password");
     const messageEl = dialog.querySelector(".remote-message");
@@ -131,6 +132,7 @@
         lastEtag: state.lastEtag,
         lastFingerprint: state.lastFingerprint,
         syncedAt: state.syncedAt,
+        remoteBlobs: state.remoteBlobs || [],
       });
       saveConfig(saved);
     }
@@ -138,6 +140,7 @@
     function openDialog() {
       urlInput.value = saved.url || "";
       userInput.value = saved.user || "";
+      scopeSelect.value = saved.scope === "library" ? "library" : "workspace";
       passwordInput.value = "";
       showMessage(phase === "error" ? errorText : "", phase === "error" ? "error" : "");
       if (typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
@@ -172,28 +175,37 @@
         showMessage(errorMessage(err), "error");
         return;
       }
+      const scope = scopeSelect.value === "library" ? "library" : "workspace";
       client.connect().then(function (identity) {
-        const sameRemote = saved.url === url && saved.user === user && saved.repoId === identity.repoId;
+        const sameRemote = saved.url === url && saved.user === user &&
+          saved.repoId === identity.repoId && (saved.scope || "workspace") === scope;
         saved = {
           url: url,
           user: user,
+          scope: scope,
           repoId: identity.repoId,
           lastEtag: sameRemote ? saved.lastEtag : "",
           lastFingerprint: sameRemote ? saved.lastFingerprint : "",
           syncedAt: sameRemote ? saved.syncedAt : 0,
+          remoteBlobs: sameRemote ? saved.remoteBlobs || [] : [],
         };
         saveConfig(saved);
         password = pass;
-        sync = remoteApi.createSync({ client: client, library: library, state: saved, save: persistState });
-        phase = "connected";
-        pending = true;
-        errorText = "";
-        passwordInput.value = "";
-        showMessage(identity.created ? "Connected. A new remote workspace was initialized." : "Connected.", "success");
-        refresh();
-        dialog.close();
-        runSync();
+        const factory = scope === "library" ? window.A8ERemoteLibrary : remoteApi;
+        if (!factory) throw new Error("Library synchronization is unavailable in this build.");
+        sync = factory.createSync({ client: client, library: library, state: saved, save: persistState });
+        return (sync.prepare ? sync.prepare() : Promise.resolve()).then(function () {
+          phase = "connected";
+          pending = true;
+          errorText = "";
+          passwordInput.value = "";
+          showMessage(identity.created ? "Connected. A new remote repository was initialized." : "Connected.", "success");
+          refresh();
+          dialog.close();
+          runSync();
+        });
       }).catch(function (err) {
+        sync = null;
         showMessage(errorMessage(err), "error");
       }).then(function () {
         connectBtn.disabled = false;
@@ -215,7 +227,13 @@
       phase = "syncing";
       refresh();
       setStatus("Syncing with remote...", "busy");
-      return sync.sync({ confirmMerge: confirmMerge }).then(function (report) {
+      return sync.sync({
+        confirmMerge: confirmMerge,
+        onProgress: function (progress) {
+          setStatus("Remote sync: " + progress.phase + " " + progress.completed + "/" +
+            (progress.total || "?") + (progress.current ? " " + progress.current : ""), "busy");
+        },
+      }).then(function (report) {
         phase = "connected";
         if (report.canceled) {
           pending = true;
@@ -223,9 +241,11 @@
         } else {
           pending = false;
           const parts = [];
-          if (report.empty) parts.push("remote is empty and no disk is mounted, nothing to publish");
+          if (report.empty) parts.push("remote is empty and there is nothing to publish");
           if (report.pulled) parts.push("pulled");
           if (report.pushed) parts.push("published");
+          if (report.downloaded) parts.push(report.downloaded + " file(s) downloaded");
+          if (report.uploaded) parts.push(report.uploaded + " file(s) uploaded");
           if (report.conflicts) parts.push(report.conflicts + " divergent copy(ies) kept");
           setStatus("Remote sync: " + (parts.length ? parts.join(", ") : "up to date"), "success");
         }

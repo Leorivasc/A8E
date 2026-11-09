@@ -51,6 +51,8 @@
     diskLibraryDownload: 30000,
     diskLibraryExport: 60000,
     diskLibraryInspect: 60000,
+    diskLibraryManifest: 60000,
+    diskLibraryReadBlob: 30000,
     diskLibraryCancel: 5000,
     diskLibraryRenameFolder: 15000,
     diskLibrarySelectRevision: 15000,
@@ -1143,6 +1145,16 @@
       );
     }
 
+    function getManifest() {
+      return sendRequest("diskLibraryManifest", {}, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryManifest });
+    }
+
+    function readBlob(hash) {
+      return sendRequest("diskLibraryReadBlob", { hash: String(hash || "") }, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryReadBlob });
+    }
+
     function getStorageEstimate() {
       return sendRequest("diskLibraryStorageEstimate");
     }
@@ -1321,6 +1333,8 @@
         purgeTrashBefore: purgeTrashBefore,
         exportPackage: exportPackage,
         exportWorkspacePackage: exportWorkspacePackage,
+        getManifest: getManifest,
+        readBlob: readBlob,
         renameFolder: renameFolder,
         listRevisions: listRevisions,
         selectRevision: selectRevision,

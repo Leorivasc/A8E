@@ -3,8 +3,10 @@
 Estado: **Fase 1 (MVP de Workspace remoto) implementada en jsA8E y validada
 contra un Nextcloud real** (Firefox y Chromium, jsA8E servido desde el mismo
 servidor que Nextcloud; pull/push entre browsers y colisiones con sufijo `(1)`
-funcionan como se diseñó). Fases 2 (repositorio incremental con
-tombstones) y 3 (automático y nativo) siguen en diseño. Rama de trabajo:
+funcionan como se diseñó). **Fase 2a (biblioteca completa incremental, `library.json` +
+`blobs/`) implementada en jsA8E, pendiente de validar contra Nextcloud.** Fase 2b
+(tombstones y propagación de renombres/movimientos) y Fase 3 (automático y
+nativo) siguen en diseño. Rama de trabajo:
 `OnlineDrive`.
 
 ## Decisiones tomadas (2026-11-08)
@@ -328,11 +330,12 @@ servidor debe responder para el origen de jsA8E:
 
 ```text
 Access-Control-Allow-Origin:   https://<origen de jsA8E>   (o http://localhost:<puerto>)
-Access-Control-Allow-Methods:  GET, HEAD, PUT, OPTIONS
+Access-Control-Allow-Methods:  GET, HEAD, PUT, MKCOL, OPTIONS
 Access-Control-Allow-Headers:  Authorization, If-Match, If-None-Match, Content-Type
 Access-Control-Expose-Headers: ETag
 ```
 
+`MKCOL` sólo lo necesita el modo «biblioteca completa» (crea `blobs/` una vez).
 No debe usarse `Allow-Credentials`: el cliente usa `credentials: "omit"` y
 envía `Authorization` manualmente. Nextcloud/ownCloud no añaden estas cabeceras
 por sí solos para un origen arbitrario: hay que añadirlas en el proxy inverso
@@ -351,7 +354,78 @@ aplicación** (Ajustes → Seguridad), nunca la contraseña principal.
 5. Segundo browser/perfil: *Connect* + *Sync*; comprobar que trae y monta el
    disco. Editar en uno, sincronizar ambos; repetir editando en los dos.
 
-## Fase 2: tombstones (diseño)
+## Fase 2a: biblioteca completa incremental (implementado)
+
+Archivos: `jsA8E/js/app/remote_library.js`, selector «What to synchronize» en el
+diálogo, `tests/remote_library.test.js` (+ `tests/remote_test_support.js` con el
+servidor simulado compartido).
+
+Se elige en el diálogo entre **Mounted disks only** (MVP) y **Whole library**.
+Cambiar de modo reinicia el estado de sincronización de esa conexión. Los dos
+modos pueden convivir en la misma carpeta remota (`workspace.a8e` vs
+`library.json` + `blobs/`; `.a8e-remote.json` es común).
+
+### Algoritmo
+
+1. `library.getManifest()` (manifiesto local sin bytes ni montajes) y
+   `GET library.json` con `If-None-Match`.
+2. Remoto ausente: se publica todo (`If-None-Match: *`). Remoto sin cambios: se
+   publica sólo si la huella local cambió (`If-Match`).
+3. Remoto cambiado: se valida el manifiesto (el mismo validador del importador),
+   se calculan las entradas que el local aún no tiene (id desconocido o
+   revisiones/hash distintos) y de ellas **sólo se descargan los blobs cuyo
+   SHA-256 falta localmente** (verificados al llegar; un blob corrupto aborta sin
+   importar nada). Las entradas se importan por lotes de ≤ 48 MiB armando un
+   `.a8e` en memoria y usando el `importPackage` existente (misma validación,
+   atomicidad y política de conflictos). Los blobs ya locales se leen con
+   `library.readBlob(sha)`.
+4. Publicar: por cada blob que el remoto no tiene, `HEAD`; si falta, `PUT` con
+   `If-None-Match: *` (inmutable e idempotente); al final `PUT library.json` con
+   `If-Match`. Un `412` reinicia el ciclo (máx. 5). El conjunto de blobs
+   conocidos del remoto se guarda en localStorage (`remoteBlobs`) para evitar
+   `HEAD`s repetidos.
+5. Los montajes **no** se sincronizan en este modo (son por browser).
+
+### Cambio en el núcleo: avance rápido (fast-forward)
+
+Al probar este modo se vio que `planImport` trataba toda entrada con el mismo id
+y distinto contenido como conflicto, aunque fuera una edición posterior del mismo
+disco; una sincronización normal (editar en A, sincronizar en B) generaba una
+copia `(1)`. `library_package.js` ahora usa el grafo de revisiones:
+
+- si el contenido local actual es una revisión retenida de la entrada importada →
+  **avance rápido**: se añaden las revisiones nuevas y el disco pasa al contenido
+  importado conservando su unidad montada (`summary.fastForwarded`);
+- si el contenido importado ya es una revisión retenida local → es historia más
+  vieja, se trata como duplicado;
+- en cualquier otro caso (ramas divergentes) → conflicto, copia `(1)` como antes.
+
+Esto realiza la regla «un descendiente se prefiere a su ancestro» de
+`full_library.md`. Afecta también al import manual y al modo workspace. **Aún no
+está replicado en A8E nativo** (queda anotado en la deuda de paridad).
+
+### Nuevas APIs de la Disk Library (núcleo y proxy del worker)
+
+`getManifest()` y `readBlob(sha256)`; mensajes del worker `diskLibraryManifest` y
+`diskLibraryReadBlob`. El test de paridad (`disk_library_api_parity`) ahora
+también revisa los métodos usados por los módulos remotos.
+
+### Comportamiento y límites de esta parte
+
+- Los modos son **aditivos**: nuevas entradas, revisiones y carpetas viajan;
+  borrados, renombres y movimientos **no** (Fase 2b). Un borrado local puede
+  «resucitar» al sincronizar con un remoto que aún conserva la entrada.
+- `getManifest()` recalcula el SHA-256 de toda la biblioteca en cada sincronización
+  (cientos de MB tardarían segundos); un caché de hash por revisión es una
+  optimización pendiente.
+- En el modo workspace, quien fusiona una rama divergente conserva su edición y
+  una copia `(1)` de la remota, y el montaje del workspace remoto prevalece; la
+  edición del otro lado sólo viaja si está montada.
+- Sin sincronización automática; sin GC de blobs remotos.
+- La ruta del worker de `getManifest`/`readBlob` está cubierta por el test del
+  proxy, pero no hay prueba automatizada del propio `emulator_worker.js`.
+
+## Fase 2b: tombstones (diseño)
 
 Problema: sin registro de borrados, un `Delete` local se «resucita» en la
 siguiente fusión con un remoto que aún conserva el elemento. Solución prevista,
@@ -387,7 +461,7 @@ Renombrar y mover entradas/carpetas se resuelven con la marca `modifiedAt` de
 la entrada (gana la más reciente; empate determinista por id), sin pérdida de
 contenido, porque identidad y bytes no cambian.
 
-## Fase 2: repositorio incremental (diseño)
+## Diseño original del repositorio incremental (referencia)
 
 `library.json` + `blobs/<sha256>.<tipo>` como describe «Formato remoto
 propuesto». Cambios respecto al MVP: subir primero los blobs ausentes

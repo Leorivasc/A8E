@@ -618,6 +618,12 @@
           <label>WebDAV folder URL
             <input type="url" class="remote-url" placeholder="https://server/remote.php/dav/files/USER/A8E/" autocomplete="off" spellcheck="false" />
           </label>
+          <label>What to synchronize
+            <select class="remote-scope">
+              <option value="workspace">Mounted disks only (one workspace.a8e file)</option>
+              <option value="library">Whole library (incremental: library.json + blobs/)</option>
+            </select>
+          </label>
           <label>User
             <input type="text" class="remote-user" autocomplete="username" spellcheck="false" />
           </label>
@@ -930,6 +936,7 @@
     <script src="js/app/hostfs_ui.js"></script>
     <script src="js/app/disk_library_ui.js"></script>
     <script src="js/app/remote_workspace.js"></script>
+    <script src="js/app/remote_library.js"></script>
     <script src="js/app/remote_sync_ui.js"></script>
     <script src="js/app/disk_activity_ui.js"></script>
     <script src="js/app/assembler_ui.js"></script>
