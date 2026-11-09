@@ -3519,6 +3519,14 @@
       });
     }
 
+    if (window.A8ERemoteSyncUI && app) {
+      window.A8ERemoteSyncUI.init({
+        app: app,
+        panel: document.getElementById("diskLibraryPanel"),
+        buttons: [btnDiskLibrary, document.querySelector('[data-mobile-button="btnDiskLibrary"]')],
+      });
+    }
+
     if (window.A8EDiskActivityUI && app) {
       window.A8EDiskActivityUI.init({
         app: app,

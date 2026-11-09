@@ -1007,7 +1007,11 @@ workspace mounted and unchanged.
   numeric naming for incoming copies. A generic three-way merge is not
   attempted for binary ATR/XEX payloads.
 
-### Phase 4: remote repository integration — deferred
+### Phase 4: remote repository integration — in progress (web only)
+
+Phase 4a (remote workspace sync over WebDAV, jsA8E only) is implemented; see
+`implementation/OnlineDrive.md`. Native parity and the incremental repository
+with tombstones remain open.
 
 - reuse `library.json` and content-addressed payloads for remote storage;
 - treat local IndexedDB or native files as a cache/local working store;

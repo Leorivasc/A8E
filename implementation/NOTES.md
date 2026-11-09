@@ -51,6 +51,33 @@
   ArrowRight press (keyboard, also via the gamepad path) was ignored once while
   later ones worked; left, up and down did not show it. ESLint could not run
   (no `node_modules`); `node --check` passes.
+- 2026-11-08 (jsA8E: remote workspace sync MVP, branch `OnlineDrive`): added
+  optional manual synchronization of the mounted workspace with a WebDAV
+  folder. `js/app/remote_workspace.js` (fetch client + sync coordinator, no
+  DOM) keeps one `workspace.a8e` plus `.a8e-remote.json`, guards every write
+  with ETag `If-Match` / `If-None-Match: *`, and merges remote content through
+  the existing non-destructive `previewImport`/`importPackage` (it only uses the
+  public library API, so worker and main-thread paths both work and
+  `emulator_worker.js`/`app_proxy.js` are untouched). `js/app/remote_sync_ui.js`
+  adds the title-bar control, the connection dialog and the LED (reuses
+  `assets/leds.png`, also as a badge on the top-bar and mobile Disks buttons).
+  The password stays in memory; only URL/user/repoId/ETag/fingerprint go to
+  localStorage. `tests/remote_workspace.test.js` (in `test:automation`) runs two
+  independent libraries against an in-process ETag-aware server: auth failure,
+  foreign folder, missing-ETag diagnosis, publish, no-op sync, pull, sequential
+  edits, concurrent edits (412 -> merge -> republish, both variants kept) and a
+  vetoed first merge. Chromium headless smoke test: page loads, control and
+  badges initialize, no console errors. Verified by the author against a real
+  Nextcloud with jsA8E served from the same server (Firefox + Chromium: pull,
+  push, collisions kept as `(1)`); a first failed attempt was a wrong URL. The
+  status text now says when the remote is empty and nothing is mounted instead
+  of a bare "up to date". Findings:
+  `libraryVersion` only increments on import, not on local edits, so pending
+  changes are detected with a manifest fingerprint instead; `replaceFile`
+  unmounts a mounted entry (tests remount it). Tombstones, the incremental
+  `library.json` + `blobs/` repository, automatic sync and native parity are
+  designed in `OnlineDrive.md` but not implemented. ESLint could not run (no
+  `node_modules`); `node --check` passes.
 - 2026-11-06 (jsA8E: Disk Library parity with and without the worker): the
   library UI talks to either the core `disk_library.js` (main thread) or the
   proxy in `app_proxy.js` (worker). Comparing both APIs showed that the proxy

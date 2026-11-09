@@ -476,6 +476,13 @@
           <span class="disklib-title-text">Disk Library</span>
           <span class="disklib-current-path" aria-live="polite">Library</span>
           <span class="disklib-status" aria-live="polite"></span>
+          <button type="button" class="disklib-btn disklib-remote-btn" title="Remote sync: not configured" aria-label="Remote sync: not configured">
+            <span class="remote-led" data-state="off" aria-hidden="true"></span>
+            <span class="disklib-remote-label">Configure</span>
+          </button>
+          <button type="button" class="disklib-btn disklib-remote-settings-btn" title="Remote sync settings" aria-label="Remote sync settings">
+            <i class="fa-solid fa-gear" aria-hidden="true"></i>
+          </button>
         </div>
         <div class="disklib-mounted-panel">
           <div class="disklib-mounted-title"><i class="fa-solid fa-plug"></i> Mounted devices</div>
@@ -605,6 +612,26 @@
           <span class="disklib-stat-total"></span>
         </div>
       </section>
+      <dialog class="remoteSyncDialog" aria-labelledby="remoteSyncTitle">
+        <form class="remote-form" method="dialog">
+          <h2 id="remoteSyncTitle">Remote workspace sync (WebDAV)</h2>
+          <label>WebDAV folder URL
+            <input type="url" class="remote-url" placeholder="https://server/remote.php/dav/files/USER/A8E/" autocomplete="off" spellcheck="false" />
+          </label>
+          <label>User
+            <input type="text" class="remote-user" autocomplete="username" spellcheck="false" />
+          </label>
+          <label>Application password (kept in memory for this session only)
+            <input type="password" class="remote-password" autocomplete="off" />
+          </label>
+          <p class="remote-message" aria-live="polite"></p>
+          <div class="remote-actions">
+            <button type="button" class="disklib-btn remote-connect">Connect</button>
+            <button type="button" class="disklib-btn remote-forget">Disconnect and forget</button>
+            <button type="button" class="disklib-btn remote-close">Close</button>
+          </div>
+        </form>
+      </dialog>
       <section id="hostfsPanel" class="hostfsPanel" hidden aria-label="H: device file manager">
         <!-- Title bar -->
         <div class="hostfs-titlebar">
@@ -902,6 +929,8 @@
     <script src="js/app/automation_api.js"></script>
     <script src="js/app/hostfs_ui.js"></script>
     <script src="js/app/disk_library_ui.js"></script>
+    <script src="js/app/remote_workspace.js"></script>
+    <script src="js/app/remote_sync_ui.js"></script>
     <script src="js/app/disk_activity_ui.js"></script>
     <script src="js/app/assembler_ui.js"></script>
     <script src="js/app/snapshot_ui.js"></script>
