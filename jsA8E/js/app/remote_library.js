@@ -104,17 +104,60 @@
     /* Merges the remote manifest into the local library, downloading only the
      * blobs that are missing. Resolves to {added, conflicts, downloaded} or
      * null when `confirmMerge` vetoed it. */
+    function tombstoneMap(manifest) {
+      const map = new Map();
+      (manifest.tombstones || []).forEach(function (item) { map.set(item.id, item); });
+      return map;
+    }
+
+    /* Applies the remote deletions after the merge; resolves to the count of
+     * entries and folders moved to the trash or removed. */
+    function applyDeletions(remoteManifest, resurrected) {
+      return Promise.resolve(resurrected.length ? library.dropTombstones(resurrected) : null).then(function () {
+        const list = (remoteManifest.tombstones || []).filter(function (item) {
+          return resurrected.indexOf(item.id) < 0;
+        });
+        return list.length ? library.applyTombstones(list) : { deleted: 0, kept: 0 };
+      }).then(function (result) { return result.deleted; });
+    }
+
     function pull(remoteManifest, localMan, opts) {
       const localEntries = new Map();
       (localMan.library || []).forEach(function (entry) { localEntries.set(entry.id, entry); });
       const localHashes = new Set(blobsOf(localMan).keys());
+      const localTombs = tombstoneMap(localMan);
+      const resurrected = [];
       const pending = (remoteManifest.library || []).filter(function (entry) {
-        return !sameContent(localEntries.get(entry.id), entry);
+        if (sameContent(localEntries.get(entry.id), entry)) return false;
+        const tomb = localTombs.get(entry.id);
+        if (!tomb) return true;
+        // A local deletion hides remote copies it covered; a newer edit wins.
+        const known = new Set(tomb.shas || []);
+        let covered = Date.parse(entry.modifiedAt) < tomb.deletedAt;
+        blobsOfEntry(entry).forEach(function (blob, sha) { if (!known.has(sha)) covered = false; });
+        if (!covered) resurrected.push(entry.id);
+        return !covered;
       });
       const added = pending.filter(function (entry) { return !localEntries.has(entry.id); }).length;
       const summary = { added: added, conflicts: pending.length - added, duplicates: 0 };
-      const result = { added: added, conflicts: summary.conflicts, downloaded: 0 };
-      if (!pending.length) return Promise.resolve(result);
+      const result = { added: added, conflicts: summary.conflicts, downloaded: 0, deleted: 0 };
+      // Remote folders the library lacks (even empty ones) are merged too.
+      const localFolders = new Set((localMan.folders || []).map(function (folder) { return folder.id; }));
+      const newFolders = (remoteManifest.folders || []).filter(function (folder) {
+        return folder.id !== "root" && !localFolders.has(folder.id) && !localTombs.has(folder.id);
+      });
+      result.folders = newFolders.length;
+      if (!pending.length) {
+        const folderImport = newFolders.length
+          ? importBatch([], remoteManifest, localHashes, new Map(), { done: 0, total: 0 }, opts)
+          : null;
+        return Promise.resolve(folderImport).then(function () {
+          return applyDeletions(remoteManifest, resurrected);
+        }).then(function (deleted) {
+          result.deleted = deleted;
+          return result;
+        });
+      }
 
       const firstSync = !state.syncedAt && (localMan.library || []).length > 0;
       const veto = typeof opts.confirmMerge === "function" && firstSync
@@ -146,12 +189,21 @@
         });
         batches.push(batch);
 
+        // Folders the local side deleted stay deleted unless a pulled entry lives in them.
+        const used = new Set(pending.map(function (entry) { return entry.folderId || "root"; }));
+        const folders = (remoteManifest.folders || []).filter(function (folder) {
+          return !localTombs.has(folder.id) || used.has(folder.id);
+        });
+        const base = Object.assign({}, remoteManifest, { folders: folders });
         let chain = Promise.resolve();
         batches.forEach(function (group) {
-          chain = chain.then(function () { return importBatch(group, remoteManifest, localHashes, wanted, counters, opts); });
+          chain = chain.then(function () { return importBatch(group, base, localHashes, wanted, counters, opts); });
         });
         return chain.then(function () {
+          return applyDeletions(remoteManifest, resurrected);
+        }).then(function (deleted) {
           result.downloaded = counters.done;
+          result.deleted = deleted;
           return result;
         });
       });
@@ -229,7 +281,7 @@
 
     function sync(syncOptions) {
       const opts = syncOptions || {};
-      const report = { pulled: false, pushed: false, conflicts: 0, downloaded: 0, uploaded: 0, summary: null };
+      const report = { pulled: false, pushed: false, conflicts: 0, deleted: 0, downloaded: 0, uploaded: 0, summary: null };
 
       function attempt(count) {
         if (count > MAX_ATTEMPTS) {
@@ -263,7 +315,8 @@
                 report.canceled = true;
                 return null;
               }
-              report.pulled = pulled.added > 0 || pulled.conflicts > 0;
+              report.pulled = pulled.added > 0 || pulled.conflicts > 0 || pulled.deleted > 0 || pulled.folders > 0;
+              report.deleted = pulled.deleted;
               report.conflicts = pulled.conflicts;
               report.downloaded = pulled.downloaded;
               report.summary = pulled;

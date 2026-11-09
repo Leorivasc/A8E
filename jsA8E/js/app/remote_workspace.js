@@ -237,7 +237,10 @@
       return [folder.id, folder.name, folder.parentId || ""];
     }).sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
     const workspace = manifest && manifest.workspace || {};
-    return JSON.stringify([library, folders, workspace.devices || {}, workspace.writeProtected || {}]);
+    const parts = [library, folders, workspace.devices || {}, workspace.writeProtected || {}];
+    const tombstones = (manifest && manifest.tombstones || []).map(function (item) { return item.kind + ":" + item.id; }).sort();
+    if (tombstones.length) parts.push(tombstones); // appended only when present: older fingerprints stay valid
+    return JSON.stringify(parts);
   }
 
   /* Synchronization coordinator. `state` is the persisted per-connection

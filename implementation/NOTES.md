@@ -51,6 +51,17 @@
   ArrowRight press (keyboard, also via the gamepad path) was ignored once while
   later ones worked; left, up and down did not show it. ESLint could not run
   (no `node_modules`); `node --check` passes.
+- 2026-11-09 (jsA8E: remote deletions, Phase 2b tombstones): `deleteFile` /
+  `deleteFolder` record tombstones in the IndexedDB `metadata` store (no schema
+  bump); `restoreTrash` removes them and bumps `modified`. Core API
+  `getTombstones`/`applyTombstones`/`dropTombstones` (proxy + worker + parity
+  test), `getManifest()` emits `tombstones`, the sync fingerprint includes them.
+  A tombstone only covers an entry whose contents it listed and whose `modified`
+  predates the deletion, so a later edit/move/restore always wins; remote
+  deletions go to the local trash, never purge. Tombstones expire after 90 days.
+  Also: empty remote folders now merge. Renames/moves still do not propagate.
+  Native A8E has no tombstones yet (parity debt). Test:
+  `tests/remote_library_tombstones.test.js`.
 - 2026-11-08 (jsA8E: remote full-library sync, Phase 2a): new mode "Whole
   library" next to the workspace MVP. `js/app/remote_library.js` keeps
   `library.json` + `blobs/<sha256>.<type>` on the WebDAV folder, transfers only

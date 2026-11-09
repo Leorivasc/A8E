@@ -53,6 +53,8 @@
     diskLibraryInspect: 60000,
     diskLibraryManifest: 60000,
     diskLibraryReadBlob: 30000,
+    diskLibraryApplyTombstones: 60000,
+    diskLibraryDropTombstones: 30000,
     diskLibraryCancel: 5000,
     diskLibraryRenameFolder: 15000,
     diskLibrarySelectRevision: 15000,
@@ -1150,6 +1152,21 @@
         { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryManifest });
     }
 
+    function getTombstones() {
+      return sendRequest("diskLibraryTombstones", {}, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryDropTombstones });
+    }
+
+    function applyTombstones(list) {
+      return sendRequest("diskLibraryApplyTombstones", { tombstones: list || [] }, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryApplyTombstones });
+    }
+
+    function dropTombstones(ids) {
+      return sendRequest("diskLibraryDropTombstones", { ids: ids || [] }, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryDropTombstones });
+    }
+
     function readBlob(hash) {
       return sendRequest("diskLibraryReadBlob", { hash: String(hash || "") }, null,
         { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryReadBlob });
@@ -1335,6 +1352,9 @@
         exportWorkspacePackage: exportWorkspacePackage,
         getManifest: getManifest,
         readBlob: readBlob,
+        getTombstones: getTombstones,
+        applyTombstones: applyTombstones,
+        dropTombstones: dropTombstones,
         renameFolder: renameFolder,
         listRevisions: listRevisions,
         selectRevision: selectRevision,

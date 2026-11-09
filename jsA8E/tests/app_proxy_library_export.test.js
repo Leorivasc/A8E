@@ -84,6 +84,9 @@ async function main() {
           message.cmd === "diskLibraryStorageEstimate" ||
           message.cmd === "diskLibraryManifest" ||
           message.cmd === "diskLibraryReadBlob" ||
+          message.cmd === "diskLibraryTombstones" ||
+          message.cmd === "diskLibraryApplyTombstones" ||
+          message.cmd === "diskLibraryDropTombstones" ||
           message.cmd === "diskLibraryCancel") {
         setTimeout(() => {
           this.onmessage({
@@ -154,6 +157,9 @@ async function main() {
   const blobRequest = await app.diskLibrary.readBlob("ab12");
   assert.equal(blobRequest.cmd, "diskLibraryReadBlob");
   assert.equal(blobRequest.payload.hash, "ab12");
+  assert.equal((await app.diskLibrary.getTombstones()).cmd, "diskLibraryTombstones");
+  assert.deepEqual((await app.diskLibrary.applyTombstones([{ id: "x" }])).payload.tombstones, [{ id: "x" }]);
+  assert.deepEqual((await app.diskLibrary.dropTombstones(["x"])).payload.ids, ["x"]);
 
   const progress = [];
   let cancelRequested = false;

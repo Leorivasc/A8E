@@ -9,6 +9,7 @@
   const META_STORE_NAME = "metadata";
   const ROOT_FOLDER_ID = "root";
   const FLUSH_DELAY_MS = 350;
+  const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
   const BLANK_ATR_SECTOR_COUNT = 720;
   const BLANK_ATR_SECTOR_SIZE = 128;
   const BLANK_ATR_HEADER_SIZE = 16;
@@ -112,6 +113,9 @@
       const trash = new Map();
       const folders = new Map();
       const listeners = new Set();
+      // Deletion records used by remote synchronization (id -> {kind, id,
+      // deletedAt, shas}); see implementation/OnlineDrive.md, Phase 2b.
+      const tombstones = new Map();
       let db = null;
       let ready = false;
       let mountsRestored = false;
@@ -566,6 +570,14 @@
                 resolve();
                 return;
               }
+              const tombstoneRequest = metadataTx.objectStore(META_STORE_NAME).get("tombstones");
+              tombstoneRequest.onsuccess = function () {
+                const list = tombstoneRequest.result && tombstoneRequest.result.value;
+                (Array.isArray(list) ? list : []).forEach(function (item) {
+                  const record = cleanTombstone(item);
+                  if (record) tombstones.set(record.id, record);
+                });
+              };
               const metadata = metadataTx.objectStore(META_STORE_NAME).get("libraryVersion");
               metadata.onsuccess = function () {
                 if (metadata.result && Number.isInteger(metadata.result.value)) {
@@ -790,6 +802,9 @@
         }
         folders.delete(folder.id);
         return deleteFolderRecord(folder.id).then(function () {
+          tombstones.set(folder.id, { kind: "folder", id: folder.id, deletedAt: Date.now() });
+          return persistTombstones();
+        }).then(function () {
           emitChange();
           return true;
         });
@@ -1207,11 +1222,130 @@
         });
       }
 
+      function cleanTombstone(item) {
+        if (!item || typeof item !== "object") return null;
+        const kind = item.kind === "folder" ? "folder" : item.kind === "entry" ? "entry" : "";
+        const id = String(item.id || "");
+        if (!kind || !id || id === ROOT_FOLDER_ID) return null;
+        const record = { kind: kind, id: id, deletedAt: Number(item.deletedAt) || Date.now() };
+        if (kind === "entry") {
+          record.shas = (Array.isArray(item.shas) ? item.shas : []).filter(function (sha) {
+            return typeof sha === "string" && /^[0-9a-f]{64}$/.test(sha);
+          });
+        }
+        return record;
+      }
+
+      function persistTombstones() {
+        if (!db) return Promise.resolve();
+        let tx;
+        try {
+          tx = db.transaction(META_STORE_NAME, "readwrite");
+        } catch (err) {
+          return Promise.reject(err);
+        }
+        return new Promise(function (resolve, reject) {
+          tx.objectStore(META_STORE_NAME).put({ key: "tombstones", value: Array.from(tombstones.values()) });
+          tx.oncomplete = function () { resolve(); };
+          tx.onabort = function () { reject(tx.error || new Error("Disk library tombstone write aborted")); };
+        });
+      }
+
+      // Every content hash an entry has ever held that is still retained.
+      function entryHashes(entry) {
+        const hashes = new Set([hashOfBytes(currentBytes(entry))]);
+        (entry.revisions || []).forEach(function (revision) { hashes.add(hashOfBytes(revision.bytes)); });
+        return Array.from(hashes);
+      }
+
+      function pruneTombstones() {
+        const cutoff = Date.now() - TOMBSTONE_TTL_MS;
+        tombstones.forEach(function (record, id) {
+          if (record.deletedAt < cutoff) tombstones.delete(id);
+        });
+      }
+
+      function getTombstones() {
+        pruneTombstones();
+        return Array.from(tombstones.values()).map(function (record) {
+          return Object.assign({}, record, record.shas ? { shas: record.shas.slice() } : {});
+        });
+      }
+
+      // True when the entry holds nothing the deleter had not seen and was not
+      // touched (edited, moved, restored) after the deletion, so deleting it
+      // cannot lose a later change.
+      function coveredByTombstone(record, shas, modified) {
+        const known = new Set(record.shas || []);
+        return modified < record.deletedAt && shas.every(function (sha) { return known.has(sha); });
+      }
+
+      // Applies remote deletions: covered local entries move to the trash
+      // (recoverable); entries edited after the deletion are kept. Resolves to
+      // {deleted, kept}.
+      function applyTombstones(list) {
+        const result = { deleted: 0, kept: 0 };
+        let pending = Promise.resolve();
+        let changed = false;
+        (Array.isArray(list) ? list : []).forEach(function (raw) {
+          const record = cleanTombstone(raw);
+          if (!record) return;
+          pending = pending.then(function () {
+            if (record.kind === "entry") {
+              const entry = getEntry(record.id);
+              if (entry) {
+                return flushEntry(entry).then(function () {
+                  if (!coveredByTombstone(record, entryHashes(entry), entry.modified || 0)) {
+                    result.kept++;
+                    return null;
+                  }
+                  return deleteFile(entry.id).then(function () { result.deleted++; });
+                });
+              }
+              if (!tombstones.has(record.id)) {
+                tombstones.set(record.id, record);
+                changed = true;
+              }
+              return null;
+            }
+            const folder = folders.get(record.id);
+            if (folder && listFolders(folder.id).length === 0 && listFiles(folder.id).length === 0) {
+              return deleteFolder(folder.id).then(function () { result.deleted++; });
+            }
+            if (!folder && !tombstones.has(record.id)) {
+              tombstones.set(record.id, record);
+              changed = true;
+            }
+            return null;
+          });
+        });
+        return pending.then(function () {
+          return changed ? persistTombstones() : null;
+        }).then(function () { return result; });
+      }
+
+      // Forgets deletion records, e.g. when a newer remote edit resurrects an
+      // entry. Its stale trash copy is an ancestor of the live entry, so it goes too.
+      function dropTombstones(ids) {
+        let changed = false;
+        let pending = Promise.resolve();
+        (ids || []).forEach(function (id) {
+          const key = String(id);
+          if (tombstones.delete(key)) changed = true;
+          if (trash.has(key) && entries.has(key)) pending = pending.then(function () { return purgeTrash(key); });
+        });
+        return pending.then(function () {
+          return changed ? persistTombstones() : null;
+        });
+      }
+
       function deleteFile(id) {
         const entry = getEntry(id);
         if (!entry) return Promise.reject(new Error("Disk library entry not found"));
         return unmountFile(id).then(function () {
-          entry.deletedAt = Date.now();
+          return flushEntry(entry);
+        }).then(function () {
+          entry.deletedAt = Math.max(Date.now(), (entry.modified || 0) + 1);
           trash.set(entry.id, entry);
           entries.delete(entry.id);
           return persistDeleteAtomically(entry).catch(function (err) {
@@ -1219,6 +1353,9 @@
             entries.set(entry.id, entry);
             throw err;
           });
+        }).then(function () {
+          tombstones.set(entry.id, { kind: "entry", id: entry.id, deletedAt: entry.deletedAt, shas: entryHashes(entry) });
+          return persistTombstones();
         }).then(function () {
           emitChange();
           return true;
@@ -1244,6 +1381,7 @@
         restored.slot = -1;
         restored.imageIndex = -1;
         restored.dirty = false;
+        restored.modified = Date.now(); // outranks the tombstone other browsers hold
         delete restored.deletedAt;
         entries.set(restored.id, restored);
         trash.delete(entry.id);
@@ -1251,6 +1389,8 @@
           entries.delete(restored.id);
           trash.set(entry.id, entry);
           throw err;
+        }).then(function () {
+          return tombstones.delete(restored.id) ? persistTombstones() : null;
         }).then(function () {
           emitChange();
           return getFileInfo(restored.id);
@@ -1473,6 +1613,10 @@
             folders: Array.from(folders.values()),
             scope: "library",
           });
+        }).then(function (manifest) {
+          const list = getTombstones();
+          if (list.length) manifest.tombstones = list;
+          return manifest;
         });
       }
 
@@ -1782,6 +1926,9 @@
         exportPackage: exportPackage,
         exportWorkspacePackage: exportWorkspacePackage,
         getManifest: getManifest,
+        getTombstones: getTombstones,
+        applyTombstones: applyTombstones,
+        dropTombstones: dropTombstones,
         readBlob: readBlob,
         inspectPackage: inspectPackage,
         previewImport: previewImport,

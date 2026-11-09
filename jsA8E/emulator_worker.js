@@ -1099,6 +1099,18 @@
         const library = requireDiskLibrary();
         return library.getManifest();
       }
+      case "diskLibraryTombstones": {
+        const library = requireDiskLibrary();
+        return library.getTombstones();
+      }
+      case "diskLibraryApplyTombstones": {
+        const library = requireDiskLibrary();
+        return library.applyTombstones(data.tombstones || []);
+      }
+      case "diskLibraryDropTombstones": {
+        const library = requireDiskLibrary();
+        return library.dropTombstones(data.ids || []);
+      }
       case "diskLibraryReadBlob": {
         const library = requireDiskLibrary();
         return library.readBlob(data.hash || "");

@@ -6,7 +6,7 @@ servidor que Nextcloud; pull/push entre browsers y colisiones con sufijo `(1)`
 funcionan como se diseñó). **Fase 2a (biblioteca completa incremental, `library.json` +
 `blobs/`) implementada en jsA8E y validada manualmente contra Nextcloud entre
 Firefox y Chromium (2026-11-09; el proxy debe permitir `MKCOL` en CORS).** Fase 2b
-(tombstones y propagación de renombres/movimientos) y Fase 3 (automático y
+(tombstones implementados; falta propagar renombres/movimientos) y Fase 3 (automático y
 nativo) siguen en diseño. Rama de trabajo:
 `OnlineDrive`.
 
@@ -426,41 +426,55 @@ también revisa los métodos usados por los módulos remotos.
 - La ruta del worker de `getManifest`/`readBlob` está cubierta por el test del
   proxy, pero no hay prueba automatizada del propio `emulator_worker.js`.
 
-## Fase 2b: tombstones (diseño)
+## Fase 2b: tombstones (implementado en jsA8E)
 
 Problema: sin registro de borrados, un `Delete` local se «resucita» en la
-siguiente fusión con un remoto que aún conserva el elemento. Solución prevista,
-compatible con schema v1 (campo opcional que un lector antiguo ignora):
+siguiente fusión con un remoto que aún conserva el elemento. Solución, compatible
+con schema v1 (campo opcional que un lector antiguo ignora):
 
 ```json
 "tombstones": [
-  { "kind": "entry",  "id": "disk-docs", "deletedAt": "2026-11-08T12:00:00Z",
-    "sha256": "<hash vigente al borrar>", "by": "browser-a" },
-  { "kind": "folder", "id": "folder-games", "deletedAt": "..." }
+  { "kind": "entry",  "id": "disk-docs", "deletedAt": 1731067200000,
+    "shas": ["<sha256 de cada contenido que la entrada tenía al borrar>"] },
+  { "kind": "folder", "id": "folder-games", "deletedAt": 1731067200000 }
 ]
 ```
 
-Reglas de fusión:
+Almacenamiento: clave `tombstones` del store `metadata` de IndexedDB (sin subir
+`DB_VERSION`). `deleteFile`/`deleteFolder` los crean; `restoreTrash` los retira.
+Vaciar la papelera **no** los retira (el borrado sigue vigente).
 
-- Un tombstone cubre sólo las revisiones que el borrador conocía: si la entrada
-  remota/local tiene una revisión que **no desciende** de `sha256` (editada
-  después del borrado en otro browser), gana la edición y el tombstone se
-  descarta. La pérdida de datos por borrado concurrente es imposible.
-- Un tombstone sin edición posterior mueve la entrada a la papelera local
-  (recuperable), no la purga: el borrado remoto nunca elimina bytes de forma
-  irreversible.
-- Un tombstone de carpeta sólo se aplica si la carpeta queda vacía tras
-  aplicar los tombstones de entradas; si no, se ignora.
-- Restaurar desde la papelera retira el tombstone (se publica sin él).
-- Recolección: un tombstone se puede descartar tras un período configurable
-  (p. ej. 90 días) o cuando todos los pares conocidos lo vieron; mientras tanto
-  evita resurrecciones.
-- Los blobs referenciados sólo por entradas con tombstone no se borran del
-  remoto en esta fase (no hay GC remoto; es un trabajo posterior explícito).
+API del núcleo (también en el proxy y el worker): `getTombstones()`,
+`applyTombstones(list)` → `{deleted, kept}` y `dropTombstones(ids)`.
+`getManifest()` los incluye y el fingerprint también.
 
-Renombrar y mover entradas/carpetas se resuelven con la marca `modifiedAt` de
-la entrada (gana la más reciente; empate determinista por id), sin pérdida de
-contenido, porque identidad y bytes no cambian.
+Reglas de fusión (`remote_library.js`, `pull`):
+
+- Una entrada queda *cubierta* por un tombstone si todos sus contenidos están en
+  `shas` **y** su `modified` es anterior a `deletedAt`. Una edición, un
+  movimiento o una restauración posteriores la sacan de ese caso: gana el cambio
+  y nunca se pierde un edit por un borrado concurrente.
+- Tombstone remoto + entrada local cubierta → la entrada va a la **papelera
+  local** (recuperable); el borrado remoto nunca purga bytes.
+- Tombstone local + entrada remota cubierta → no se importa; si no está cubierta,
+  se importa, se retira el tombstone y se purga la copia obsoleta de la papelera.
+- Un tombstone de carpeta sólo borra la carpeta si queda vacía, y una carpeta
+  borrada localmente no se reimporta salvo que una entrada descargada viva en ella.
+- Restaurar sube `modified`, así que el resto de browsers la ven como cambio
+  posterior y la recuperan.
+- Los tombstones caducan a los 90 días (`TOMBSTONE_TTL_MS`); un browser que
+  estuvo desconectado más tiempo podría resucitar elementos borrados.
+- Los blobs de entradas borradas no se eliminan del remoto (sin GC remoto).
+- Depende de los relojes de los browsers (`modified` vs `deletedAt`); un desfase
+  grande puede hacer que un borrado o un cambio gane cuando no debía, pero sin
+  pérdida de datos porque todo borrado va a la papelera.
+
+Además, las carpetas del remoto que faltan localmente (incluso vacías) ahora se
+importan, no sólo las que traen entradas.
+
+Pendiente de esta fase: propagar renombres y movimientos de entradas y carpetas
+(necesita una marca de tiempo de metadatos por entrada; `modified` sólo se
+actualiza con el contenido y los movimientos de archivo).
 
 ## Diseño original del repositorio incremental (referencia)
 
