@@ -1013,8 +1013,9 @@ Phase 4a (remote workspace sync over WebDAV, jsA8E only) and 4b (incremental
 whole-library sync) are implemented; the browser import now fast-forwards a
 same-id entry whose local content is a retained ancestor of the imported one
 (native A8E still keeps a `(1)` copy: parity debt); see
-`implementation/OnlineDrive.md`. Native parity and the incremental repository
-with tombstones remain open.
+`implementation/OnlineDrive.md`. The jsA8E sync also propagates deletions
+(tombstones), entry moves and folder renames, and has an automatic mode. Native
+A8E parity (WebDAV client, fast-forward, tombstones, metadata merge) remains open.
 
 - reuse `library.json` and content-addressed payloads for remote storage;
 - treat local IndexedDB or native files as a cache/local working store;
