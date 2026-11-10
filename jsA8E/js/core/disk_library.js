@@ -9,6 +9,7 @@
   const META_STORE_NAME = "metadata";
   const ROOT_FOLDER_ID = "root";
   const FLUSH_DELAY_MS = 350;
+  const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
   const BLANK_ATR_SECTOR_COUNT = 720;
   const BLANK_ATR_SECTOR_SIZE = 128;
   const BLANK_ATR_HEADER_SIZE = 16;
@@ -112,6 +113,9 @@
       const trash = new Map();
       const folders = new Map();
       const listeners = new Set();
+      // Deletion records used by remote synchronization (id -> {kind, id,
+      // deletedAt, shas}); see implementation/OnlineDrive.md, Phase 2b.
+      const tombstones = new Map();
       let db = null;
       let ready = false;
       let mountsRestored = false;
@@ -245,6 +249,7 @@
           slot: entry.slot | 0,
           created: entry.created || Date.now(),
           modified: entry.modified || Date.now(),
+          metaModified: entry.metaModified || 0,
           revisions: (entry.revisions || []).map(function (revision) {
             return {
               id: revision.id,
@@ -464,6 +469,7 @@
           flushTimer: 0,
           created: raw.created || Date.now(),
           modified: raw.modified || Date.now(),
+          metaModified: Number(raw.metaModified) || 0, // last folder/name change, see applyMetadata
           revisions: revisions,
           preferredRevisionId: raw.preferredRevisionId || revisions[revisions.length - 1].id,
         };
@@ -566,6 +572,14 @@
                 resolve();
                 return;
               }
+              const tombstoneRequest = metadataTx.objectStore(META_STORE_NAME).get("tombstones");
+              tombstoneRequest.onsuccess = function () {
+                const list = tombstoneRequest.result && tombstoneRequest.result.value;
+                (Array.isArray(list) ? list : []).forEach(function (item) {
+                  const record = cleanTombstone(item);
+                  if (record) tombstones.set(record.id, record);
+                });
+              };
               const metadata = metadataTx.objectStore(META_STORE_NAME).get("libraryVersion");
               metadata.onsuccess = function () {
                 if (metadata.result && Number.isInteger(metadata.result.value)) {
@@ -790,6 +804,9 @@
         }
         folders.delete(folder.id);
         return deleteFolderRecord(folder.id).then(function () {
+          tombstones.set(folder.id, { kind: "folder", id: folder.id, deletedAt: Date.now() });
+          return persistTombstones();
+        }).then(function () {
           emitChange();
           return true;
         });
@@ -802,6 +819,7 @@
         if (!target) return Promise.reject(new Error("Target folder not found"));
         entry.folderId = target.id;
         entry.modified = Date.now();
+        entry.metaModified = entry.modified;
         return persistRecord(entry).then(function () {
           emitChange();
           return getFileInfo(entry.id);
@@ -857,6 +875,7 @@
         return replace.then(function () {
           const format = getExtension(normalized);
           const bytes = cloneBytes(data);
+          if (normalized !== entry.name) entry.metaModified = Date.now();
           entry.name = normalized;
           entry.logicalName = logicalName(normalized);
           entry.format = format;
@@ -1207,11 +1226,130 @@
         });
       }
 
+      function cleanTombstone(item) {
+        if (!item || typeof item !== "object") return null;
+        const kind = item.kind === "folder" ? "folder" : item.kind === "entry" ? "entry" : "";
+        const id = String(item.id || "");
+        if (!kind || !id || id === ROOT_FOLDER_ID) return null;
+        const record = { kind: kind, id: id, deletedAt: Number(item.deletedAt) || Date.now() };
+        if (kind === "entry") {
+          record.shas = (Array.isArray(item.shas) ? item.shas : []).filter(function (sha) {
+            return typeof sha === "string" && /^[0-9a-f]{64}$/.test(sha);
+          });
+        }
+        return record;
+      }
+
+      function persistTombstones() {
+        if (!db) return Promise.resolve();
+        let tx;
+        try {
+          tx = db.transaction(META_STORE_NAME, "readwrite");
+        } catch (err) {
+          return Promise.reject(err);
+        }
+        return new Promise(function (resolve, reject) {
+          tx.objectStore(META_STORE_NAME).put({ key: "tombstones", value: Array.from(tombstones.values()) });
+          tx.oncomplete = function () { resolve(); };
+          tx.onabort = function () { reject(tx.error || new Error("Disk library tombstone write aborted")); };
+        });
+      }
+
+      // Every content hash an entry has ever held that is still retained.
+      function entryHashes(entry) {
+        const hashes = new Set([hashOfBytes(currentBytes(entry))]);
+        (entry.revisions || []).forEach(function (revision) { hashes.add(hashOfBytes(revision.bytes)); });
+        return Array.from(hashes);
+      }
+
+      function pruneTombstones() {
+        const cutoff = Date.now() - TOMBSTONE_TTL_MS;
+        tombstones.forEach(function (record, id) {
+          if (record.deletedAt < cutoff) tombstones.delete(id);
+        });
+      }
+
+      function getTombstones() {
+        pruneTombstones();
+        return Array.from(tombstones.values()).map(function (record) {
+          return Object.assign({}, record, record.shas ? { shas: record.shas.slice() } : {});
+        });
+      }
+
+      // True when the entry holds nothing the deleter had not seen and was not
+      // touched (edited, moved, restored) after the deletion, so deleting it
+      // cannot lose a later change.
+      function coveredByTombstone(record, shas, modified) {
+        const known = new Set(record.shas || []);
+        return modified < record.deletedAt && shas.every(function (sha) { return known.has(sha); });
+      }
+
+      // Applies remote deletions: covered local entries move to the trash
+      // (recoverable); entries edited after the deletion are kept. Resolves to
+      // {deleted, kept}.
+      function applyTombstones(list) {
+        const result = { deleted: 0, kept: 0 };
+        let pending = Promise.resolve();
+        let changed = false;
+        (Array.isArray(list) ? list : []).forEach(function (raw) {
+          const record = cleanTombstone(raw);
+          if (!record) return;
+          pending = pending.then(function () {
+            if (record.kind === "entry") {
+              const entry = getEntry(record.id);
+              if (entry) {
+                return flushEntry(entry).then(function () {
+                  if (!coveredByTombstone(record, entryHashes(entry), entry.modified || 0)) {
+                    result.kept++;
+                    return null;
+                  }
+                  return deleteFile(entry.id).then(function () { result.deleted++; });
+                });
+              }
+              if (!tombstones.has(record.id)) {
+                tombstones.set(record.id, record);
+                changed = true;
+              }
+              return null;
+            }
+            const folder = folders.get(record.id);
+            if (folder && listFolders(folder.id).length === 0 && listFiles(folder.id).length === 0) {
+              return deleteFolder(folder.id).then(function () { result.deleted++; });
+            }
+            if (!folder && !tombstones.has(record.id)) {
+              tombstones.set(record.id, record);
+              changed = true;
+            }
+            return null;
+          });
+        });
+        return pending.then(function () {
+          return changed ? persistTombstones() : null;
+        }).then(function () { return result; });
+      }
+
+      // Forgets deletion records, e.g. when a newer remote edit resurrects an
+      // entry. Its stale trash copy is an ancestor of the live entry, so it goes too.
+      function dropTombstones(ids) {
+        let changed = false;
+        let pending = Promise.resolve();
+        (ids || []).forEach(function (id) {
+          const key = String(id);
+          if (tombstones.delete(key)) changed = true;
+          if (trash.has(key) && entries.has(key)) pending = pending.then(function () { return purgeTrash(key); });
+        });
+        return pending.then(function () {
+          return changed ? persistTombstones() : null;
+        });
+      }
+
       function deleteFile(id) {
         const entry = getEntry(id);
         if (!entry) return Promise.reject(new Error("Disk library entry not found"));
         return unmountFile(id).then(function () {
-          entry.deletedAt = Date.now();
+          return flushEntry(entry);
+        }).then(function () {
+          entry.deletedAt = Math.max(Date.now(), (entry.modified || 0) + 1);
           trash.set(entry.id, entry);
           entries.delete(entry.id);
           return persistDeleteAtomically(entry).catch(function (err) {
@@ -1219,6 +1357,9 @@
             entries.set(entry.id, entry);
             throw err;
           });
+        }).then(function () {
+          tombstones.set(entry.id, { kind: "entry", id: entry.id, deletedAt: entry.deletedAt, shas: entryHashes(entry) });
+          return persistTombstones();
         }).then(function () {
           emitChange();
           return true;
@@ -1244,6 +1385,8 @@
         restored.slot = -1;
         restored.imageIndex = -1;
         restored.dirty = false;
+        restored.modified = Date.now(); // outranks the tombstone other browsers hold
+        restored.metaModified = restored.modified;
         delete restored.deletedAt;
         entries.set(restored.id, restored);
         trash.delete(entry.id);
@@ -1251,6 +1394,8 @@
           entries.delete(restored.id);
           trash.set(entry.id, entry);
           throw err;
+        }).then(function () {
+          return tombstones.delete(restored.id) ? persistTombstones() : null;
         }).then(function () {
           emitChange();
           return getFileInfo(restored.id);
@@ -1374,6 +1519,7 @@
                 bytes: currentBytes(entry),
                 created: entry.created,
                 modified: entry.modified,
+                metaModified: entry.metaModified || 0,
                 folderId: entry.folderId || ROOT_FOLDER_ID,
                 mountedSlot: entry.slot,
                 revisions: (entry.revisions || []).map(function (revision) {
@@ -1436,6 +1582,137 @@
         return exportPackage(config);
       }
 
+      // Remote metadata merge: the side that changed an entry's folder or name,
+      // or a folder's name, last wins (clock based, content is never touched).
+      // `remote` is {entries:[{id, name, folderId, metaModifiedAt}],
+      // folders:[{id, name, modifiedAt}]}. Resolves to {moved, renamed, newer}, where
+      // `newer` counts values the local side keeps because its own change is newer
+      // (the caller must republish them).
+      function applyMetadata(remote) {
+        const data = remote && typeof remote === "object" ? remote : {};
+        const result = { moved: 0, renamed: 0, newer: 0 };
+        let pending = Promise.resolve();
+        (data.folders || []).forEach(function (item) {
+          const folder = getFolder(item && item.id);
+          const name = normalizeFolderName(item && item.name);
+          const at = Date.parse(item && item.modifiedAt || "") || 0;
+          if (!folder || folder.id === ROOT_FOLDER_ID || !name || name === folder.name) return;
+          if (at < (folder.modified || 0)) result.newer++;
+          if (at <= (folder.modified || 0) || hasFolderName(name, folder.parentId, folder.id)) return;
+          pending = pending.then(function () {
+            folder.name = name;
+            folder.modified = at;
+            result.renamed++;
+            return persistFolder(folder);
+          });
+        });
+        (data.entries || []).forEach(function (item) {
+          const entry = getEntry(item && item.id);
+          const at = Date.parse(item && item.metaModifiedAt || "") || 0;
+          if (!entry) return;
+          if (at < (entry.metaModified || 0) && (item.folderId !== (entry.folderId || ROOT_FOLDER_ID) || normalizeName(item.name) !== currentName(entry))) {
+            result.newer++;
+          }
+          if (at <= (entry.metaModified || 0)) return;
+          pending = pending.then(function () {
+            const folderId = item.folderId && getFolder(item.folderId) ? item.folderId : (entry.folderId || ROOT_FOLDER_ID);
+            const name = normalizeName(item.name) || entry.name;
+            const sameFormat = getExtension(name) === entry.format;
+            const newName = sameFormat ? name : entry.name;
+            const taken = findByLogicalName(newName, folderId);
+            if (taken && taken.id !== entry.id) return null; // never create a duplicate name
+            const nameChanged = newName !== entry.name;
+            const folderChanged = folderId !== (entry.folderId || ROOT_FOLDER_ID);
+            if (!nameChanged && !folderChanged) return null;
+            entry.folderId = folderId;
+            if (nameChanged) {
+              entry.name = newName;
+              entry.logicalName = logicalName(newName);
+              if (entry.format === "atr" && entry.runtimeName) entry.runtimeName = newName;
+            }
+            entry.metaModified = at;
+            if (folderChanged) result.moved++;
+            else result.renamed++;
+            return persistRecord(entry);
+          });
+        });
+        return pending.then(function () {
+          if (result.moved || result.renamed) emitChange();
+          return result;
+        });
+      }
+
+      // Library manifest without bytes, mounts or trash, used by remote
+      // synchronization to compare against the remote `library.json`.
+      function getManifest() {
+        const packageApi = getPackageApi();
+        if (!packageApi) return Promise.reject(new Error("A8E library package support is unavailable"));
+        let pending = Promise.resolve();
+        entries.forEach(function (entry) {
+          pending = pending.then(function () { return flushEntry(entry); });
+        });
+        return pending.then(function () {
+          const records = [];
+          entries.forEach(function (entry) {
+            records.push({
+              id: entry.id,
+              name: currentName(entry),
+              format: entry.format === "xex" && entry.runtimeBytes ? "atr" : entry.format,
+              bytes: currentBytes(entry),
+              created: entry.created,
+              modified: entry.modified,
+              metaModified: entry.metaModified || 0,
+              folderId: entry.folderId || ROOT_FOLDER_ID,
+              revisions: (entry.revisions || []).map(function (revision) {
+                return {
+                  id: revision.id,
+                  bytes: revision.bytes,
+                  created: revision.created,
+                  modified: revision.modified,
+                  parentId: revision.parentId || null,
+                };
+              }),
+              preferredRevisionId: entry.preferredRevisionId,
+            });
+          });
+          return packageApi.makeManifest(records, {
+            libraryVersion: libraryVersion,
+            folders: Array.from(folders.values()),
+            scope: "library",
+          });
+        }).then(function (manifest) {
+          const list = getTombstones();
+          if (list.length) manifest.tombstones = list;
+          return manifest;
+        });
+      }
+
+      // Bytes of the current or retained revision whose SHA-256 is `hash`, or
+      // null. Hashes are cached per byte array so repeated lookups are cheap.
+      const blobHashes = new WeakMap();
+      function hashOfBytes(bytes) {
+        let hash = blobHashes.get(bytes);
+        if (!hash) {
+          hash = getPackageApi().sha256(bytes);
+          blobHashes.set(bytes, hash);
+        }
+        return hash;
+      }
+
+      function readBlob(hash) {
+        const wanted = String(hash || "");
+        let found = null;
+        entries.forEach(function (entry) {
+          if (found) return;
+          const candidates = [currentBytes(entry)];
+          (entry.revisions || []).forEach(function (revision) { candidates.push(revision.bytes); });
+          for (let i = 0; i < candidates.length && !found; i++) {
+            if (hashOfBytes(candidates[i]) === wanted) found = candidates[i];
+          }
+        });
+        return Promise.resolve(found ? cloneBytes(found) : null);
+      }
+
       function inspectPackage(data) {
         const packageApi = getPackageApi();
         if (!packageApi) return Promise.reject(new Error("A8E library package support is unavailable"));
@@ -1452,6 +1729,7 @@
             bytes: cloneBytes(currentBytes(entry)),
             created: entry.created,
             modified: entry.modified,
+            metaModified: entry.metaModified || 0,
             folderId: entry.folderId || ROOT_FOLDER_ID,
             revisions: (entry.revisions || []).map(function (revision) {
               return {
@@ -1504,6 +1782,7 @@
         entry.folderId = record.folderId || ROOT_FOLDER_ID;
         entry.created = Number.isFinite(record.created) ? record.created : Date.now();
         entry.modified = Number.isFinite(record.modified) ? record.modified : entry.created;
+        entry.metaModified = Number(record.metaModified) || 0;
         entry.slot = -1;
         if (Array.isArray(record.revisions) && record.revisions.length) {
           entry.revisions = record.revisions.map(function (revision) {
@@ -1620,9 +1899,24 @@
               }
             });
             emitChange();
+            // Fast-forwards advance the working content to the imported
+            // descendant revision and keep the disk in its drive.
+            let forwarding = Promise.resolve();
+            (plan.historyUpdates || []).forEach(function (update) {
+              if (!update.fastForward || !update.preferredRevisionId) return;
+              forwarding = forwarding.then(function () {
+                const entry = getEntry(update.id);
+                if (!entry) return undefined;
+                const slot = entry.slot | 0;
+                return selectRevision(update.id, update.preferredRevisionId).then(function () {
+                  if (slot >= 0 && mountDisk) return mountFile(update.id, slot);
+                  return undefined;
+                });
+              });
+            });
             const restored = [];
             const mountErrors = [];
-            let pending = Promise.resolve();
+            let pending = forwarding;
             plan.mounts.forEach(function (mount) {
               pending = pending.then(function () {
                 if (!mountDisk) return;
@@ -1700,6 +1994,12 @@
         purgeTrashBefore: purgeTrashBefore,
         exportPackage: exportPackage,
         exportWorkspacePackage: exportWorkspacePackage,
+        getManifest: getManifest,
+        getTombstones: getTombstones,
+        applyTombstones: applyTombstones,
+        applyMetadata: applyMetadata,
+        dropTombstones: dropTombstones,
+        readBlob: readBlob,
         inspectPackage: inspectPackage,
         previewImport: previewImport,
         importPackage: importPackage,

@@ -1095,6 +1095,30 @@
         const library = requireDiskLibrary();
         return library.getStorageEstimate();
       }
+      case "diskLibraryManifest": {
+        const library = requireDiskLibrary();
+        return library.getManifest();
+      }
+      case "diskLibraryTombstones": {
+        const library = requireDiskLibrary();
+        return library.getTombstones();
+      }
+      case "diskLibraryApplyTombstones": {
+        const library = requireDiskLibrary();
+        return library.applyTombstones(data.tombstones || []);
+      }
+      case "diskLibraryApplyMetadata": {
+        const library = requireDiskLibrary();
+        return library.applyMetadata(data.metadata || {});
+      }
+      case "diskLibraryDropTombstones": {
+        const library = requireDiskLibrary();
+        return library.dropTombstones(data.ids || []);
+      }
+      case "diskLibraryReadBlob": {
+        const library = requireDiskLibrary();
+        return library.readBlob(data.hash || "");
+      }
       case "diskLibraryInspect": {
         const library = requireDiskLibrary();
         return library.inspectPackage(data.buffer || new ArrayBuffer(0));

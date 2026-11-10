@@ -4273,3 +4273,149 @@ canvas.crtEnabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Remote workspace sync: LED (reuses the activity sprite), title-bar control
+ * and connection dialog. Sprite offsets: grey -53, green -18, yellow -0.67,
+ * red -35.33. */
+.remote-led {
+  display: inline-block;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  background-image: url("assets/leds.png");
+  background-repeat: no-repeat;
+  background-size: 72.33px 24px;
+  background-position: -53px center;
+  vertical-align: middle;
+}
+.remote-led[data-state="synced"],
+.remote-led[data-state="syncing"] {
+  background-position: -18px center;
+}
+.remote-led[data-state="pending"] {
+  background-position: -0.67px center;
+}
+.remote-led[data-state="error"] {
+  background-position: -35.33px center;
+}
+.remote-led[data-state="syncing"],
+.remote-led[data-state="error"] {
+  animation: remote-led-pulse 900ms ease-in-out infinite;
+}
+@keyframes remote-led-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .remote-led[data-state="syncing"],
+  .remote-led[data-state="error"] {
+    animation: none;
+  }
+}
+.disklib-remote-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.remote-led-host {
+  position: relative;
+}
+.remote-led-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 10px;
+  min-width: 10px;
+  height: 10px;
+  background-size: 40.2px 13.33px;
+  background-position: -29.4px center;
+  pointer-events: none;
+}
+.remote-led-badge[data-state="synced"],
+.remote-led-badge[data-state="syncing"] {
+  background-position: -10px center;
+}
+.remote-led-badge[data-state="pending"] {
+  background-position: -0.37px center;
+}
+.remote-led-badge[data-state="error"] {
+  background-position: -19.6px center;
+}
+.remote-led-badge[data-state="off"] {
+  display: none;
+}
+@media (max-width: 700px) {
+  .disklib-remote-label {
+    display: none;
+  }
+}
+.remoteSyncDialog {
+  max-width: min(460px, calc(100vw - 32px));
+  width: 100%;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--sub-panel-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+.remoteSyncDialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+.remote-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.remote-form h2 {
+  margin: 0;
+  font-size: var(--fs-base);
+}
+.remote-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--sub-panel-dim);
+}
+.remote-form input,
+.remote-form select {
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--panel2);
+  border: 1px solid var(--sub-panel-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+.remote-form label.remote-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.remote-form .remote-check input {
+  padding: 0;
+}
+.remote-message {
+  margin: 0;
+  min-height: 1.2em;
+  font-size: var(--fs-xs);
+  color: var(--sub-panel-dim);
+}
+.remote-message.error {
+  color: var(--danger);
+}
+.remote-message.success {
+  color: #70d090;
+}
+.remote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}

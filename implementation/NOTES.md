@@ -51,6 +51,82 @@
   ArrowRight press (keyboard, also via the gamepad path) was ignored once while
   later ones worked; left, up and down did not show it. ESLint could not run
   (no `node_modules`); `node --check` passes.
+- 2026-11-10 (jsA8E: remote renames and moves, Phase 2b): entries carry a
+  persisted `metaModified` (set by `moveFile`, name-changing `replaceFile`,
+  `restoreTrash`; manifest field `metaModifiedAt`, validated as optional).
+  `library.applyMetadata()` (core + proxy + worker + parity test) applies remote
+  moves/renames only when newer, never creating duplicate names, and reports
+  `newer` values so the sync republishes them. Remote folders already known
+  locally are passed to the importer under their local name (avoids `-import`
+  duplicates). Native A8E still lacks fast-forward, tombstones and metadata merge.
+  Test: `tests/remote_library_metadata.test.js`.
+- 2026-11-10 (jsA8E: automatic remote sync, Phase 3): `client.head()` and
+  `sync.checkRemote()` (HEAD + ETag compare, both scopes). `remote_sync_ui.js`
+  polls every 60 s and on focus/visibility, shows "Update" when the remote moved,
+  and runs the pending sync after 5 min without keyboard/pointer input; opt-out
+  checkbox `.remote-auto` in the dialog (saved as `auto`). A vetoed merge is never
+  retried automatically. Gamepad activity is not detected. Password is still memory
+  only. Tests: `checkRemote` assertions in `remote_library.test.js`.
+- 2026-11-09 (jsA8E: remote deletions, Phase 2b tombstones): `deleteFile` /
+  `deleteFolder` record tombstones in the IndexedDB `metadata` store (no schema
+  bump); `restoreTrash` removes them and bumps `modified`. Core API
+  `getTombstones`/`applyTombstones`/`dropTombstones` (proxy + worker + parity
+  test), `getManifest()` emits `tombstones`, the sync fingerprint includes them.
+  A tombstone only covers an entry whose contents it listed and whose `modified`
+  predates the deletion, so a later edit/move/restore always wins; remote
+  deletions go to the local trash, never purge. Tombstones expire after 90 days.
+  Also: empty remote folders now merge. Renames/moves still do not propagate.
+  Native A8E has no tombstones yet (parity debt). Test:
+  `tests/remote_library_tombstones.test.js`.
+- 2026-11-08 (jsA8E: remote full-library sync, Phase 2a): new mode "Whole
+  library" next to the workspace MVP. `js/app/remote_library.js` keeps
+  `library.json` + `blobs/<sha256>.<type>` on the WebDAV folder, transfers only
+  the blobs the other side lacks (SHA-256 verified on download, `HEAD` then
+  `PUT If-None-Match: *` on upload, manifest guarded by `If-Match`), imports in
+  <=48 MiB batches through the existing `importPackage`, and does not sync
+  mounts. Needs `MKCOL` in the server's CORS methods (creates `blobs/` once).
+  New library APIs `getManifest()`/`readBlob(sha)` in `disk_library.js`,
+  `app_proxy.js` and `emulator_worker.js`; the parity test now also scans the
+  remote modules. Core fix found while testing: `planImport` treated every
+  same-id/different-hash entry as a conflict, so a plain "edit in A, sync in B"
+  produced a `(1)` copy even though the revision graph said B's copy was an
+  ancestor. It now fast-forwards (adds the new revisions, advances the working
+  content and keeps the drive) when the local content is a retained ancestor of
+  the imported entry, ignores imported content that is already a local
+  revision, and keeps copies only for diverged branches. NOT mirrored in native
+  A8E yet (parity debt). Tests: `remote_library.test.js` (shared fixtures in
+  `remote_test_support.js`: pull, incremental upload/download counts, revisions,
+  concurrent edits, vetoed first merge, corrupted blob), `remote_workspace`
+  updated (fast-forward keeps D1, merging side keeps both variants), proxy test
+  covers the new messages. Not yet validated against Nextcloud; the worker
+  handlers themselves have no automated test. ESLint could not run.
+- 2026-11-08 (jsA8E: remote workspace sync MVP, branch `OnlineDrive`): added
+  optional manual synchronization of the mounted workspace with a WebDAV
+  folder. `js/app/remote_workspace.js` (fetch client + sync coordinator, no
+  DOM) keeps one `workspace.a8e` plus `.a8e-remote.json`, guards every write
+  with ETag `If-Match` / `If-None-Match: *`, and merges remote content through
+  the existing non-destructive `previewImport`/`importPackage` (it only uses the
+  public library API, so worker and main-thread paths both work and
+  `emulator_worker.js`/`app_proxy.js` are untouched). `js/app/remote_sync_ui.js`
+  adds the title-bar control, the connection dialog and the LED (reuses
+  `assets/leds.png`, also as a badge on the top-bar and mobile Disks buttons).
+  The password stays in memory; only URL/user/repoId/ETag/fingerprint go to
+  localStorage. `tests/remote_workspace.test.js` (in `test:automation`) runs two
+  independent libraries against an in-process ETag-aware server: auth failure,
+  foreign folder, missing-ETag diagnosis, publish, no-op sync, pull, sequential
+  edits, concurrent edits (412 -> merge -> republish, both variants kept) and a
+  vetoed first merge. Chromium headless smoke test: page loads, control and
+  badges initialize, no console errors. Verified by the author against a real
+  Nextcloud with jsA8E served from the same server (Firefox + Chromium: pull,
+  push, collisions kept as `(1)`); a first failed attempt was a wrong URL. The
+  status text now says when the remote is empty and nothing is mounted instead
+  of a bare "up to date". Findings:
+  `libraryVersion` only increments on import, not on local edits, so pending
+  changes are detected with a manifest fingerprint instead; `replaceFile`
+  unmounts a mounted entry (tests remount it). Tombstones, the incremental
+  `library.json` + `blobs/` repository, automatic sync and native parity are
+  designed in `OnlineDrive.md` but not implemented. ESLint could not run (no
+  `node_modules`); `node --check` passes.
 - 2026-11-06 (jsA8E: Disk Library parity with and without the worker): the
   library UI talks to either the core `disk_library.js` (main thread) or the
   proxy in `app_proxy.js` (worker). Comparing both APIs showed that the proxy
