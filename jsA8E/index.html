@@ -627,8 +627,12 @@
           <label>User
             <input type="text" class="remote-user" autocomplete="username" spellcheck="false" />
           </label>
-          <label>Application password (kept in memory for this session only)
+          <label>Application password
             <input type="password" class="remote-password" autocomplete="off" />
+          </label>
+          <label class="remote-check">
+            <input type="checkbox" class="remote-remember" />
+            Remember the password on this device (stored unencrypted in this browser; use a revocable application password)
           </label>
           <label class="remote-check">
             <input type="checkbox" class="remote-auto" checked />
@@ -637,6 +641,7 @@
           <p class="remote-message" aria-live="polite"></p>
           <div class="remote-actions">
             <button type="button" class="disklib-btn remote-connect">Connect</button>
+            <button type="button" class="disklib-btn remote-cleanup" hidden title="Deletes remote files that no library entry references (older than 7 days). Needs DELETE in the server CORS methods.">Clean up remote</button>
             <button type="button" class="disklib-btn remote-forget">Disconnect and forget</button>
             <button type="button" class="disklib-btn remote-close">Close</button>
           </div>

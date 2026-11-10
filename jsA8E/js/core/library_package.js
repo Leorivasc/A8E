@@ -281,7 +281,9 @@
       if (Array.isArray(record.revisions) && record.revisions.length) {
         result.revisions = record.revisions.map(function (revision) {
           const revisionBytes = cloneBytes(revision.bytes);
-          const revisionHash = sha256(revisionBytes);
+          const revisionHash = typeof config.revisionHash === "function"
+            ? config.revisionHash(revision.bytes)
+            : sha256(revisionBytes);
           return {
             id: String(revision.id || "revision-" + revisionHash.substring(0, 12)),
             path: "blobs/" + revisionHash + "." + type,

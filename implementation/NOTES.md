@@ -51,6 +51,19 @@
   ArrowRight press (keyboard, also via the gamepad path) was ignored once while
   later ones worked; left, up and down did not show it. ESLint could not run
   (no `node_modules`); `node --check` passes.
+- 2026-11-11 (jsA8E: remote sync hardening, post-merge): (1) hash cache:
+  `getManifest()` passes `hashOfRevision` (WeakMap, revisions are immutable) to
+  `makeManifest({revisionHash})`; `readBlob` and the tombstone hashes no longer
+  cache the current bytes, which sector writes mutate in place (this fixed a
+  latent stale-hash bug). (2) `client.head()` returns `lastModified`,
+  `client.deleteFile()`, `sync.collectGarbage()` and the "Clean up remote" button
+  (age >= 7 days, never touches blobs referenced remotely or locally; needs
+  `DELETE` in CORS). (3) Opt-in "Remember the password" (unencrypted
+  localStorage) with automatic reconnection on load; rejected stored passwords
+  are discarded. (4) Gamepad sampling counts as activity for the idle sync.
+  (5) "Unknown worker request" now explains the stale-cache cause. Tests:
+  GC cases in `remote_library_tombstones.test.js`. Native client is blocked on
+  the HTTPS/TLS dependency decision (see `OnlineDrive.md`).
 - 2026-11-10 (jsA8E: remote renames and moves, Phase 2b): entries carry a
   persisted `metaModified` (set by `moveFile`, name-changing `replaceFile`,
   `restoreTrash`; manifest field `metaModifiedAt`, validated as optional).

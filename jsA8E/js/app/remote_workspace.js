@@ -153,12 +153,25 @@
       });
     }
 
-    /* Resolves to {status:"missing"} | {status:"ok", etag}, without the body. */
+    /* Resolves to {status:"missing"} | {status:"ok", etag, lastModified} (ms, 0
+     * when the server sends none), without the body. */
     function head(name) {
       return request("HEAD", name).then(function (response) {
         if (response.status === 404) return { status: "missing" };
         if (!response.ok) throw new RemoteError("http", "Server error " + response.status + " checking " + name + ".");
-        return { status: "ok", etag: etagOf(response) };
+        return { status: "ok", etag: etagOf(response), lastModified: Date.parse(response.headers.get("Last-Modified") || "") || 0 };
+      });
+    }
+
+    /* Deletes a file; resolves to true when it existed. Needs DELETE in the CORS methods. */
+    function deleteFile(name) {
+      return request("DELETE", name).then(function (response) {
+        if (response.status === 404) return false;
+        if (response.status === 405) {
+          throw new RemoteError("http", "The server does not allow DELETE (check the CORS methods).");
+        }
+        if (!response.ok) throw new RemoteError("http", "Server error " + response.status + " deleting " + name + ".");
+        return true;
       });
     }
 
@@ -226,6 +239,7 @@
       putFile: putFile,
       exists: exists,
       head: head,
+      deleteFile: deleteFile,
       mkcol: mkcol,
       connect: connect,
     };

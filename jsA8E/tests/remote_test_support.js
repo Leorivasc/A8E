@@ -43,9 +43,14 @@ function startServer(options) {
       const body = Buffer.concat(chunks);
       const current = files.get(name);
       const headers = options && options.hideEtag ? {} : (current ? { ETag: current.etag } : {});
+      if (req.method === "DELETE") {
+        if (!current) { res.writeHead(404); res.end(); return; }
+        files.delete(name); res.writeHead(204); res.end(); return;
+      }
       if (req.method === "GET" || req.method === "HEAD") {
         stats.gets++;
         if (!current) { res.writeHead(404); res.end(); return; }
+        headers["Last-Modified"] = new Date(current.modified).toUTCString();
         if (req.headers["if-none-match"] === current.etag) { res.writeHead(304, headers); res.end(); return; }
         res.writeHead(200, headers); res.end(req.method === "GET" ? current.body : undefined); return;
       }
@@ -62,7 +67,7 @@ function startServer(options) {
         }
         if (req.headers["if-none-match"] === "*" && current) { res.writeHead(412); res.end(); return; }
         const etag = "\"" + (++counter) + "-" + crypto.createHash("md5").update(body).digest("hex") + "\"";
-        files.set(name, { body: body, etag: etag });
+        files.set(name, { body: body, etag: etag, modified: Date.now() });
         res.writeHead(current ? 204 : 201, options && options.hideEtag ? {} : { ETag: etag });
         res.end(); return;
       }
