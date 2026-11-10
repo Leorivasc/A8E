@@ -12,6 +12,11 @@ async function main() {
   const romDir = fs.existsSync(path.join(root, "ATARIXL.ROM"))
     ? root
     : path.join(root, "A8E/build");
+  if (!fs.existsSync(path.join(romDir, "ATARIXL.ROM"))
+      || !fs.existsSync(path.join(romDir, "ATARIBAS.ROM"))) {
+    console.log("ahrm10_priority_collision_boot.test.js skipped (Atari OS/BASIC ROMs are unavailable).");
+    return;
+  }
   const runtime = await createHeadlessAutomation({
     roms: {
       os: path.join(romDir, "ATARIXL.ROM"),
