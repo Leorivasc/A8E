@@ -51,6 +51,13 @@
   ArrowRight press (keyboard, also via the gamepad path) was ignored once while
   later ones worked; left, up and down did not show it. ESLint could not run
   (no `node_modules`); `node --check` passes.
+- 2026-11-10 (jsA8E: automatic remote sync, Phase 3): `client.head()` and
+  `sync.checkRemote()` (HEAD + ETag compare, both scopes). `remote_sync_ui.js`
+  polls every 60 s and on focus/visibility, shows "Update" when the remote moved,
+  and runs the pending sync after 5 min without keyboard/pointer input; opt-out
+  checkbox `.remote-auto` in the dialog (saved as `auto`). A vetoed merge is never
+  retried automatically. Gamepad activity is not detected. Password is still memory
+  only. Tests: `checkRemote` assertions in `remote_library.test.js`.
 - 2026-11-09 (jsA8E: remote deletions, Phase 2b tombstones): `deleteFile` /
   `deleteFolder` record tombstones in the IndexedDB `metadata` store (no schema
   bump); `restoreTrash` removes them and bumps `modified`. Core API

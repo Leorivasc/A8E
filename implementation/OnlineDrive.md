@@ -6,9 +6,9 @@ servidor que Nextcloud; pull/push entre browsers y colisiones con sufijo `(1)`
 funcionan como se diseñó). **Fase 2a (biblioteca completa incremental, `library.json` +
 `blobs/`) implementada en jsA8E y validada manualmente contra Nextcloud entre
 Firefox y Chromium (2026-11-09; el proxy debe permitir `MKCOL` en CORS).** Fase 2b
-(tombstones implementados; falta propagar renombres/movimientos) y Fase 3 (automático y
-nativo) siguen en diseño. Rama de trabajo:
-`OnlineDrive`.
+(tombstones implementados; falta propagar renombres/movimientos). Fase 3:
+sincronización automática implementada en jsA8E; cliente nativo pendiente. Rama de
+trabajo: `OnlineDrive`.
 
 ## Decisiones tomadas (2026-11-08)
 
@@ -425,6 +425,30 @@ también revisa los métodos usados por los módulos remotos.
 - Sin sincronización automática; sin GC de blobs remotos.
 - La ruta del worker de `getManifest`/`readBlob` está cubierta por el test del
   proxy, pero no hay prueba automatizada del propio `emulator_worker.js`.
+
+## Fase 3: sincronización automática (jsA8E, implementada)
+
+Opción del diálogo «Check the remote automatically; sync after 5 minutes without
+activity» (activa por defecto, se guarda en `auto`). Sólo actúa con la conexión
+establecida en esta sesión (la contraseña no se guarda, así que tras recargar hay
+que pulsar *Connect*; ese primer sync ya trae los cambios remotos).
+
+- **Marca de cambio = ETag** del fichero principal (`library.json` o
+  `workspace.a8e`). `checkRemote()` hace un `HEAD` (sin cuerpo) y compara con el
+  último ETag propio; no hay campo «last updated» (evita desfases de reloj).
+- **Disparadores:** cada 60 s, al recuperar el foco y al volver a hacer visible la
+  pestaña. Un fallo de red en el sondeo se ignora; el sync manual lo diagnostica.
+- **Cambio remoto detectado:** el control muestra *Update* (LED amarillo) y un
+  mensaje; no se toca nada mientras haya actividad.
+- **Inactividad:** tras 5 minutos sin teclado/puntero/rueda/táctil se ejecuta el
+  sync pendiente (pull y/o push) solo. Si el usuario vetó una fusión
+  (*confirmMerge*), no se vuelve a lanzar automáticamente.
+- Limitación: no se detecta actividad de gamepad, así que quien juegue sólo con
+  mando >5 min podría recibir un sync automático. Los montajes no se tocan en
+  modo biblioteca; un fast-forward del disco montado conserva la unidad.
+- Alternativa descartada por seguridad: guardar la contraseña en `localStorage`
+  para comprobar al abrir sin interacción. Podría ofrecerse como opción explícita
+  con contraseña de aplicación revocable.
 
 ## Fase 2b: tombstones (implementado en jsA8E)
 

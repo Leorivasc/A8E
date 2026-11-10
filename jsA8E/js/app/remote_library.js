@@ -358,6 +358,7 @@
       sync: sync,
       /* Creates blobs/ when the library repository is first used. */
       prepare: function () { return client.mkcol(BLOB_DIR); },
+      checkRemote: function () { return window.A8ERemoteWorkspace.hasRemoteChanged(client, MANIFEST_FILE, state); },
       getState: function () { return Object.assign({}, state); },
     };
   }

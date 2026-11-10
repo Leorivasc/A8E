@@ -2,10 +2,15 @@
   "use strict";
 
   /* Title-bar control, LED and connection dialog for remote workspace sync.
-   * Sync is manual. Only URL and user name are persisted (localStorage, per-viewer); the
-   * application password stays in memory for the page session. */
+   * Sync is manual, plus an optional automatic mode: while connected the
+   * remote ETag is polled (HEAD) every minute and when the tab regains focus.
+   * A change shows "Update"; after IDLE_MS without user input the pending
+   * pull/push runs by itself. Only URL, user name and settings are persisted
+   * (localStorage, per-viewer); the application password stays in memory. */
 
   const STORAGE_KEY = "a8e.remoteWorkspace.v1";
+  const CHECK_MS = 60000;
+  const IDLE_MS = 5 * 60 * 1000;
 
   function loadConfig() {
     try {
@@ -59,6 +64,7 @@
     if (!controlBtn || !dialog) return;
     const urlInput = dialog.querySelector(".remote-url");
     const scopeSelect = dialog.querySelector(".remote-scope");
+    const autoInput = dialog.querySelector(".remote-auto");
     const userInput = dialog.querySelector(".remote-user");
     const passwordInput = dialog.querySelector(".remote-password");
     const messageEl = dialog.querySelector(".remote-message");
@@ -85,6 +91,9 @@
     let errorText = "";
     let pending = false;
     let running = false;
+    let remoteChanged = false;  // the remote moved since our last sync
+    let declined = false;       // the user vetoed a merge: do not auto-sync again
+    let lastInput = Date.now();
 
     function describe() {
       switch (phase) {
@@ -98,6 +107,9 @@
           return { led: "error", label: "Review", tip: "Remote sync: " + errorText };
         default: {
           const when = saved.syncedAt ? "synchronized " + ago(saved.syncedAt) : "not synchronized yet";
+          if (remoteChanged) {
+            return { led: "pending", label: "Update", tip: "Remote sync: the remote library changed; click to update (" + when + ")" };
+          }
           return pending
             ? { led: "pending", label: "Sync", tip: "Remote sync: local changes pending (" + when + ")" }
             : { led: "synced", label: "Sync", tip: "Remote sync: connected; " + when };
@@ -141,6 +153,7 @@
       urlInput.value = saved.url || "";
       userInput.value = saved.user || "";
       scopeSelect.value = saved.scope === "library" ? "library" : "workspace";
+      autoInput.checked = saved.auto !== false;
       passwordInput.value = "";
       showMessage(phase === "error" ? errorText : "", phase === "error" ? "error" : "");
       if (typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
@@ -183,6 +196,7 @@
           url: url,
           user: user,
           scope: scope,
+          auto: autoInput.checked,
           repoId: identity.repoId,
           lastEtag: sameRemote ? saved.lastEtag : "",
           lastFingerprint: sameRemote ? saved.lastFingerprint : "",
@@ -237,9 +251,12 @@
         phase = "connected";
         if (report.canceled) {
           pending = true;
+          declined = true;
           setStatus("Remote merge canceled", "success");
         } else {
           pending = false;
+          remoteChanged = false;
+          declined = false;
           const parts = [];
           if (report.empty) parts.push("remote is empty and there is nothing to publish");
           if (report.pulled) parts.push("pulled");
@@ -280,6 +297,7 @@
       password = "";
       sync = null;
       pending = false;
+      remoteChanged = false;
       phase = "unconfigured";
       urlInput.value = "";
       userInput.value = "";
@@ -302,7 +320,39 @@
         refresh();
       });
     }
-    setInterval(refresh, 60000);
+
+    // Automatic mode. Polling is a HEAD request; a network failure here is
+    // ignored (the next manual sync reports it properly).
+    function isIdle() {
+      return Date.now() - lastInput >= IDLE_MS;
+    }
+
+    function autoTick() {
+      if (!sync || running || phase !== "connected" || declined || saved.auto === false) return;
+      const check = remoteChanged || typeof sync.checkRemote !== "function"
+        ? Promise.resolve(remoteChanged)
+        : sync.checkRemote().catch(function () { return false; });
+      check.then(function (changed) {
+        if (changed && !remoteChanged) {
+          remoteChanged = true;
+          setStatus("The remote library changed. Click Update to sync.", "success");
+          refresh();
+        }
+        if ((remoteChanged || pending) && isIdle()) runSync();
+      });
+    }
+
+    ["keydown", "pointerdown", "wheel", "touchstart"].forEach(function (name) {
+      window.addEventListener(name, function () { lastInput = Date.now(); }, { passive: true, capture: true });
+    });
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") autoTick();
+    });
+    window.addEventListener("focus", autoTick);
+    setInterval(function () {
+      refresh();
+      autoTick();
+    }, CHECK_MS);
     refresh();
   }
 

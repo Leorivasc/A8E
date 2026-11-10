@@ -48,6 +48,7 @@ async function main() {
     report = await syncA.sync();
     assert.equal(report.pushed, false);
     assert.equal(remote.stats.puts, putsBefore);
+    assert.equal(await syncA.checkRemote(), false, "the poll sees no change after our own publish");
 
     // B starts empty and downloads both blobs without a confirmation.
     const syncB = makeSync(b);
@@ -84,7 +85,9 @@ async function main() {
     report = await syncB.sync();
     assert.equal(report.pulled, true);
     assert.equal(report.pushed, true);
+    assert.equal(await syncA.checkRemote(), true, "the poll sees the other browser's publish");
     await syncA.sync();
+    assert.equal(await syncA.checkRemote(), false);
     assert.equal(a.listAllFiles().length, 4);
     assert.equal(b.listAllFiles().length, 4);
 

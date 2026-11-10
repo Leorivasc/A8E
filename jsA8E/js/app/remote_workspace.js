@@ -153,6 +153,15 @@
       });
     }
 
+    /* Resolves to {status:"missing"} | {status:"ok", etag}, without the body. */
+    function head(name) {
+      return request("HEAD", name).then(function (response) {
+        if (response.status === 404) return { status: "missing" };
+        if (!response.ok) throw new RemoteError("http", "Server error " + response.status + " checking " + name + ".");
+        return { status: "ok", etag: etagOf(response) };
+      });
+    }
+
     /* Creates a collection; an existing one (405) is fine. */
     function mkcol(name) {
       return request("MKCOL", name).then(function (response) {
@@ -216,6 +225,7 @@
       getFile: getFile,
       putFile: putFile,
       exists: exists,
+      head: head,
       mkcol: mkcol,
       connect: connect,
     };
@@ -241,6 +251,12 @@
     const tombstones = (manifest && manifest.tombstones || []).map(function (item) { return item.kind + ":" + item.id; }).sort();
     if (tombstones.length) parts.push(tombstones); // appended only when present: older fingerprints stay valid
     return JSON.stringify(parts);
+  }
+
+  function hasRemoteChanged(client, name, state) {
+    return client.head(name).then(function (remote) {
+      return remote.status === "ok" && !!remote.etag && remote.etag !== state.lastEtag;
+    });
   }
 
   /* Synchronization coordinator. `state` is the persisted per-connection
@@ -374,6 +390,8 @@
     return {
       sync: sync,
       hasLocalChanges: hasLocalChanges,
+      /* Cheap poll (HEAD): true when the remote file changed since our last sync. */
+      checkRemote: function () { return hasRemoteChanged(client, WORKSPACE_FILE, state); },
       getState: function () { return Object.assign({}, state); },
     };
   }
@@ -381,6 +399,7 @@
   window.A8ERemoteWorkspace = {
     IDENTITY_FILE: IDENTITY_FILE,
     WORKSPACE_FILE: WORKSPACE_FILE,
+    hasRemoteChanged: hasRemoteChanged,
     RemoteError: RemoteError,
     normalizeUrl: normalizeUrl,
     createClient: createClient,
