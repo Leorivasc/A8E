@@ -1,521 +1,536 @@
-# Online Drive / sincronización remota de la Disk Library
+# Online Drive: remote synchronization of the Disk Library
 
-Estado: **Fase 1 (MVP de Workspace remoto) implementada en jsA8E y validada
-contra un Nextcloud real** (Firefox y Chromium, jsA8E servido desde el mismo
-servidor que Nextcloud; pull/push entre browsers y colisiones con sufijo `(1)`
-funcionan como se diseñó). **Fase 2a (biblioteca completa incremental, `library.json` +
-`blobs/`) implementada en jsA8E y validada manualmente contra Nextcloud entre
-Firefox y Chromium (2026-11-09; el proxy debe permitir `MKCOL` en CORS).** Fase 2b
-(tombstones implementados; falta propagar renombres/movimientos). Fase 3:
-sincronización automática implementada en jsA8E; cliente nativo pendiente. Rama de
-trabajo: `OnlineDrive`.
+Status (jsA8E, branch `OnlineDrive`):
 
-## Decisiones tomadas (2026-11-08)
+| Phase | Scope | Status |
+|---|---|---|
+| 1 | Workspace sync (`workspace.a8e`, mounted disks only) | Implemented, validated on a real Nextcloud (Firefox + Chromium) |
+| 2a | Whole-library incremental sync (`library.json` + `blobs/`) | Implemented, validated on a real Nextcloud (2026-11-09; the proxy must allow `MKCOL` in CORS) |
+| 2b | Deletions through tombstones | Implemented, validated on a real Nextcloud (delete, edit-beats-delete) |
+| 2b | Renames / moves of entries and folders | Not implemented |
+| 3 | Automatic sync (ETag polling, "Update" indicator, idle sync) | Implemented in jsA8E; polling covered by unit tests, UI timers not covered by automated tests |
+| - | Native A8E WebDAV client | Not started (accepted parity debt) |
 
-- Se empieza por el **MVP de Workspace remoto** (un único `workspace.a8e`).
-- Los **tombstones** se diseñan ahora (ver más abajo) y se implementan en la
-  Fase 2: en el MVP el paquete sólo contiene discos montados y no hay borrados
-  que propagar, así que no aportarían nada todavía.
-- **Web primero, nativo después.** Se acepta explícitamente la diferencia de
-  paridad con A8E nativo hasta que exista el adaptador (ver «Paridad»).
-- La validación real se hará contra el Nextcloud del autor (carpeta compartida
-  y cuenta con contraseña de aplicación).
+## Decisions (2026-11-08)
 
-## Problema
+- Start with the **workspace MVP** (a single `workspace.a8e`), then grow.
+- **Tombstones** were designed up front and implemented in Phase 2b: the MVP
+  only carries mounted disks, so there were no deletions to propagate yet.
+- **Web first, native later.** The parity gap with native A8E is explicitly
+  accepted until the native adapter exists (see "Native parity").
+- Real validation is done against the author's own Nextcloud (shared folder,
+  application password).
 
-La Disk Library de jsA8E vive hoy en el almacenamiento local de cada browser.
-Aunque la exportación/importación de paquetes `.a8e` funciona y conserva los
-discos, carpetas, revisiones y workspace, usar más de un navegador obliga a
-llevar manualmente el paquete actualizado, reemplazar la copia antigua y
-recordar cuál es la más reciente. El objetivo es que una misma biblioteca de
-trabajo pueda sincronizarse opcionalmente con un repositorio remoto.
+## Problem and scope
 
-## Decisión de alcance
-
-El remoto no será una segunda sección de la Biblioteca ni una colección
-"online" distinta. Será el par remoto opcional de la Full Library local:
+The Disk Library of jsA8E lives in the local storage of each browser. Exporting
+and importing `.a8e` packages works, but using several browsers means carrying
+the newest package by hand and remembering which copy is current. The goal is
+an **optional** remote peer of the local library:
 
 ```text
-IndexedDB local  <---- sincronización ---->  repositorio WebDAV
+local IndexedDB  <---- synchronization ---->  WebDAV repository
 ```
 
-La biblioteca local continúa siendo la copia de trabajo y debe funcionar sin
-red. El remoto permite continuar el trabajo desde otro browser, computador o,
-cuando exista el adaptador equivalente, A8E nativo.
+The local library stays the working copy and works offline. The remote is not a
+second "online" section of the Library nor a public/shared collection (that
+would be a different product).
 
-La sincronización podrá tener dos alcances:
+Two scopes exist:
 
-- **Biblioteca completa:** entradas, carpetas, revisiones y workspace.
-- **Workspace actual:** sólo los discos montados y su ascendencia de carpetas.
+- **Mounted disks only** (workspace): one `workspace.a8e` package.
+- **Whole library**: entries, folders and revisions, transferred incrementally.
 
-El segundo alcance ataca el caso cotidiano de trasladar una sesión de trabajo
-sin descargar necesariamente toda la colección.
+## Behavior at a glance (sequence diagrams)
 
-Una colección remota pública/compartida, con otros permisos o navegación
-separada, es un producto diferente y queda fuera de esta propuesta inicial.
+HTTP is the transport and WebDAV is the server dialect: the browser only uses
+`GET`, `HEAD`, `PUT` and (once, whole-library scope) `MKCOL`. There is no
+`PROPFIND`.
 
-## Formato remoto propuesto
+### 1. Connect and first sync
 
-El formato existente ya es apropiado: `library.json` describe entradas,
-carpetas, revisiones, hashes y workspace; los ATR/XEX son blobs direccionados
-por SHA-256. Un directorio WebDAV remoto contendrá:
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant UI as Sync UI
+    participant S as Sync coordinator
+    participant L as Local library (IndexedDB)
+    participant R as WebDAV server
+
+    U->>UI: URL, user, app password, scope, Connect
+    UI->>R: GET .a8e-remote.json
+    alt folder is empty
+        UI->>R: PUT .a8e-remote.json (If-None-Match *)
+        Note over UI,R: a new repoId is created
+    else identity found
+        R-->>UI: repoId, protocol, kind
+        Note over UI: checks it is an A8E repo and the protocol is not newer
+    end
+    UI->>R: MKCOL blobs/ (whole-library scope only)
+    R-->>UI: 201 created or 405 already exists (both fine)
+    UI->>S: create coordinator (password stays in memory only)
+    S->>L: flush and read manifest
+    S->>R: GET main file (library.json or workspace.a8e)
+    alt remote is empty and local has data
+        S->>R: PUT (If-None-Match *) blobs first, manifest last
+    else remote has data and local is empty
+        R-->>S: manifest (+ blobs on demand)
+        S->>L: import (no confirmation needed)
+    else both sides have data (first sync only)
+        S->>U: Merge? confirmation
+        U-->>S: yes (or no, then nothing changes)
+        S->>L: non-destructive merge, conflicts keep both variants
+        S->>R: PUT merged state (If-Match ETag)
+    end
+    S-->>UI: report (pulled, pushed, conflicts, deletions)
+    UI->>UI: LED green, remember ETag and fingerprint
+```
+
+### 2. One sync cycle (whole-library scope)
+
+```mermaid
+sequenceDiagram
+    participant S as Sync coordinator
+    participant L as Local library
+    participant R as WebDAV server
+
+    S->>L: flush, getManifest() (includes tombstones)
+    S->>R: GET library.json (If-None-Match lastEtag)
+    alt 404, remote has no library yet
+        S->>R: upload every blob (HEAD, then PUT If-None-Match *)
+        S->>R: PUT library.json (If-None-Match *)
+    else 304, remote unchanged
+        opt local fingerprint differs from last synced
+            S->>R: upload missing blobs
+            S->>R: PUT library.json (If-Match lastEtag)
+        end
+    else 200, remote changed
+        R-->>S: manifest + new ETag
+        S->>S: validate manifest, compute entries not yet local
+        loop only blobs missing locally (batches up to 48 MiB)
+            S->>R: GET blobs/sha256.type
+            R-->>S: bytes
+            S->>S: verify SHA-256 (a corrupt blob aborts everything)
+        end
+        S->>L: importPackage (fast-forward, duplicates, conflict copies)
+        S->>L: dropTombstones (resurrected), applyTombstones (remote deletions)
+        opt local had changes before the pull
+            S->>R: upload missing blobs
+            S->>R: PUT library.json (If-Match new ETag)
+        end
+    end
+    S->>S: store ETag, fingerprint, known remote blobs, syncedAt
+```
+
+### 3. Two browsers publish at the same time (precondition failure)
+
+```mermaid
+sequenceDiagram
+    participant A as Browser A
+    participant R as WebDAV server
+    participant B as Browser B
+
+    A->>R: GET library.json
+    B->>R: GET library.json
+    R-->>A: ETag e1
+    R-->>B: ETag e1
+    Note over A: edits DOC.ATR (revision a)
+    Note over B: edits DOC.ATR (revision b)
+    A->>R: PUT blob a, then PUT library.json (If-Match e1)
+    R-->>A: 200, ETag e2
+    B->>R: PUT blob b, then PUT library.json (If-Match e1)
+    R-->>B: 412 Precondition Failed
+    Note over B: drops the stale ETag and retries (max 5)
+    B->>R: GET library.json
+    R-->>B: manifest with revision a, ETag e2
+    B->>B: merge, histories diverged, keep both (DOC.ATR and DOC(1).ATR)
+    B->>R: PUT library.json (If-Match e2)
+    R-->>B: 200, ETag e3
+    Note over A: next sync downloads only blob b and keeps both variants too
+```
+
+### 4. Deletions and tombstones (an edit always beats a delete)
+
+```mermaid
+sequenceDiagram
+    participant A as Browser A
+    participant R as WebDAV server
+    participant B as Browser B
+
+    Note over A,B: both hold X.ATR and Y.ATR, in sync
+    A->>A: delete X.ATR (local Trash, records a tombstone)
+    A->>R: PUT library.json (tombstone X, entry X removed)
+    B->>R: GET library.json
+    R-->>B: tombstone X
+    B->>B: X is covered (same contents, not modified after deletion)
+    B->>B: X moves to B's Trash (recoverable, never purged)
+
+    Note over A,B: concurrent case on Y.ATR
+    A->>A: delete Y.ATR (tombstone lists the contents A knew)
+    B->>B: edit Y.ATR (new content, not in the tombstone)
+    A->>R: PUT library.json (tombstone Y)
+    B->>R: GET library.json
+    R-->>B: tombstone Y
+    B->>B: Y holds contents the tombstone does not cover, keep Y
+    B->>R: PUT library.json (Y with the edit, no tombstone)
+    A->>R: GET library.json
+    R-->>A: Y with new content
+    A->>A: not covered by A's tombstone, import Y, drop tombstone and stale Trash copy
+    Note over A,B: nothing is lost, the old content stays in Y's revision history
+```
+
+### 5. Automatic mode (polling, Update indicator, idle sync)
+
+```mermaid
+sequenceDiagram
+    participant T as Timer, focus, visibility
+    participant UI as Sync UI
+    participant S as Sync coordinator
+    participant R as WebDAV server
+
+    loop every 60 s, on focus, when the tab becomes visible
+        T->>UI: tick
+        UI->>S: checkRemote()
+        S->>R: HEAD main file
+        R-->>S: ETag
+        alt ETag differs from our last ETag
+            S-->>UI: changed
+            UI->>UI: show Update (yellow LED) and a status message
+        else same ETag
+            S-->>UI: unchanged
+        end
+        opt remote changed or local changes pending
+            alt 5 minutes without keyboard, pointer, wheel or touch input
+                UI->>S: sync()
+                Note over S,R: same cycle as diagram 2
+                S-->>UI: report, LED green
+            else user is active
+                Note over UI: nothing is touched, the user clicks Update when ready
+            end
+        end
+    end
+    Note over UI: a failed HEAD is ignored, the next manual sync reports it
+    Note over UI: a merge vetoed by the user is never retried automatically
+```
+
+### 6. Control states
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unconfigured
+    Unconfigured --> Disconnected: settings saved
+    Disconnected --> Connected: Connect (password entered)
+    Connected --> Syncing: click, idle tick, connect
+    Syncing --> Connected: success
+    Syncing --> Error: network, CORS, bad manifest, corrupt blob
+    Error --> Syncing: click Review (credentials still valid)
+    Error --> Disconnected: auth or permission error (password forgotten)
+    Connected --> Unconfigured: Disconnect and forget
+```
+
+While `Connected`, a local change marks the control *Pending* and a remote
+change marks it *Update* (both yellow LED); a successful sync clears both.
+
+## Remote format
 
 ```text
-A8E/
-├── .a8e-remote.json   identidad del repositorio y metadatos de protocolo
-├── library.json       manifiesto de la biblioteca
+<WebDAV folder>/
+├── .a8e-remote.json   {format:"a8e-remote", protocol:1, kind, repoId}
+├── workspace.a8e      workspace scope: existing ZIP package (mounted disks + folder ancestry)
+├── library.json       whole-library scope: schema-v1 manifest (+ optional "tombstones")
 └── blobs/
-    ├── <sha256>.atr
-    └── <sha256>.xex
+    └── <sha256>.<atr|xex>   immutable, content-addressed payloads
 ```
 
-`library.json` conserva el contrato de intercambio actual. Los blobs son
-inmutables y deduplicables: una revisión nueva produce un hash nuevo; no se
-sobrescribe el contenido de otra revisión.
+- `.a8e-remote.json` identifies the repository so a local configuration cannot
+  point at another compatible folder by accident. It never holds secrets or
+  local paths. The two scopes can live in the same folder.
+- Blobs are immutable and deduplicated: a new revision is a new hash; the
+  content of another revision is never overwritten.
+- `library.json` keeps the existing exchange contract. `tombstones` is an
+  optional field that older readers ignore.
+- The WebDAV folder must exist; A8E does not create it.
 
-El archivo `.a8e-remote.json` debe identificar el repositorio para impedir que
-una configuración local apunte accidentalmente a otro directorio compatible.
-No debe contener contraseñas, tokens ni rutas locales.
+## Synchronization principles
 
-## Protocolo de sincronización
+- No "last writer wins". Every write is guarded by `If-Match` (publish) or
+  `If-None-Match: *` (create). `412`/`409` means someone published first: drop
+  the stale ETag, download, merge, retry (max 5).
+- Merging reuses the Library's non-destructive import: identical content is a
+  duplicate, a descendant revision fast-forwards, divergent histories keep both
+  variants (`DOC.ATR`, `DOC(1).ATR`). A merge never discards a variant.
+- Sector writes never trigger network traffic: the emulator persists locally
+  first, and syncing is manual or idle-driven.
+- Dirty detection uses a deterministic **fingerprint** of the manifest
+  (entries, folders, revision ids/hashes, devices, write protection,
+  tombstones; no timestamps), because `libraryVersion` is a local counter that
+  only increments on import.
+- The manifest is published **last**, after its blobs, so the remote never
+  references a missing blob.
+- First connection never replaces anything implicitly: an empty remote is
+  published to, an empty library is filled from the remote, and when both have
+  data the user confirms a non-destructive merge.
 
-No se debe sincronizar ATR por nombre ni usar una política silenciosa de
-"last writer wins". Eso puede destruir cambios realizados en otro browser.
+## Credentials and security
 
-Flujo propuesto:
+A static web app has no secret store comparable to the OS keychain. A password
+kept in IndexedDB/localStorage is readable by same-origin JavaScript (including
+a possible XSS), so it is not considered secure storage.
 
-1. Al conectar o sincronizar, descargar el manifiesto remoto y su `ETag`.
-2. Comparar el manifiesto con el estado local y descargar sólo los blobs que
-   falten localmente.
-3. Para publicar cambios locales, subir primero los blobs de hash ausente y
-   después actualizar `library.json`.
-4. Actualizar el manifiesto con la precondición WebDAV/HTTP `If-Match` usando
-   el `ETag` leído. Si otro cliente publicó antes, el servidor debe rechazar
-   la escritura.
-5. Ante ese rechazo, volver a descargar, fusionar historias y conservar las
-   versiones binarias incompatibles como revisiones/conflictos explícitos.
-   Nunca descartar una variante automáticamente.
-6. Publicar el manifiesto fusionado con el nuevo `ETag`.
+- An **application password** (Nextcloud: Settings, Security) is asked each
+  session and kept only in memory.
+- Only URL, user, scope, auto-sync preference, `repoId`, last ETag/fingerprint,
+  `syncedAt` and the known remote blob list are persisted (localStorage key
+  `a8e.remoteWorkspace.v1`).
+- No secrets in `.a8e`, `library.json`, snapshots or diagnostics.
+- HTTPS is required (only `localhost`, `127.0.0.1` and `[::1]` may use `http`);
+  credentials inside the URL are rejected; requests use `credentials: "omit"`
+  and `redirect: "error"` with a manual `Authorization: Basic` header.
+- After a reload the control returns to "Connect" because the password is not
+  persisted. Discarded alternative: a "Remember on this device" option storing
+  the password in `localStorage`; it could be offered later as an explicit
+  opt-in for revocable application passwords. A backend with an `HttpOnly`
+  session, or OAuth/OIDC with PKCE, would be safer but needs extra
+  infrastructure.
 
-La política de conflictos debe reutilizar la filosofía vigente de la Library:
-preservación no destructiva y copias/revisiones separadas para ATR/XEX, no un
-merge binario ficticio.
+## Server requirements: CORS and Nextcloud
 
-Las escrituras de sectores de un ATR no deben disparar una petición remota por
-cada operación. El emulador persiste primero la copia local; la sincronización
-puede ejecutarse manualmente, tras un período breve de inactividad, al expulsar
-el medio y como intento de salida. La salida del browser nunca puede ser la
-única garantía de subida.
-
-## MVP recomendado
-
-Antes de implementar el repositorio incremental completo, se puede ofrecer un
-MVP de **Workspace remoto**: almacenar un único `workspace.a8e` en WebDAV,
-protegido con `ETag`/`If-Match`. El paquete existente ya preserva los discos
-montados, sus revisiones y sus asignaciones. Sirve para validar WebDAV, CORS,
-autenticación y conflictos con una superficie más pequeña.
-
-La solución final preferida es el directorio `library.json` + `blobs/`, porque
-evita transferir toda la biblioteca en cada cambio y deduplica el contenido.
-
-## Configuración de conexión
-
-La configuración pertenece a la Biblioteca y no al contenido exportable:
-
-```text
-Sincronización remota
-  URL de carpeta WebDAV: https://servidor/.../A8E/
-  Usuario:              ...
-  Contraseña de aplicación: ...
-  [Probar conexión]
-```
-
-El botón de prueba debe comprobar HTTPS (excepto `localhost` para desarrollo),
-lectura/escritura WebDAV, soporte de `ETag` y la presencia/identidad del
-repositorio. Debe diagnosticar específicamente una restricción CORS, una
-autenticación rechazada, falta de permisos de escritura o un remoto que no es
-una biblioteca A8E.
-
-En la primera conexión no se reemplaza nada de forma implícita. La interfaz
-debe ofrecer, según los estados detectados:
-
-- publicar la biblioteca local si el remoto está vacío;
-- traer y fusionar el remoto si la biblioteca local está vacía;
-- fusionar preservando conflictos si ambos contienen datos.
-
-La política inicial recomendada es sincronización manual. Más adelante pueden
-ofrecerse modos automáticos tras inactividad y al abrir la aplicación, siempre
-mostrando cambios pendientes y conflictos.
-
-## Credenciales y seguridad
-
-Una aplicación web estática no tiene un almacén de secretos equivalente al
-llavero del sistema. Guardar una contraseña o token en IndexedDB/localStorage
-lo deja disponible para JavaScript del mismo origen, incluido un posible XSS;
-no se considera almacenamiento seguro.
-
-Decisión inicial propuesta:
-
-- solicitar una **contraseña de aplicación** WebDAV en cada sesión;
-- mantenerla sólo en memoria;
-- persistir únicamente URL, usuario, identidad del remoto y preferencias de
-  sincronización;
-- no incluir secretos en `.a8e`, `library.json`, snapshots ni diagnósticos;
-- exigir HTTPS salvo desarrollo local.
-
-Puede añadirse una comodidad opcional que delegue el recuerdo de credenciales
-en el gestor propio del browser mediante autenticación HTTP estándar. A8E no
-debe leer ni almacenar esa contraseña y el diseño no debe depender de que todos
-los browsers muestren o recuerden el diálogo de autenticación igual.
-
-Para sincronización totalmente transparente, la alternativa más segura es un
-backend propio con sesión `HttpOnly` que guarde la credencial WebDAV en el lado
-servidor. Eso requiere operar cuentas y un servicio adicional. OAuth/OIDC con
-PKCE es otra alternativa cuando el proveedor la soporte, pero no reemplaza por
-sí sola las ventajas de una cookie `HttpOnly` para una aplicación estática.
-
-## Requisito de servidor y navegador
-
-El WebDAV debe permitir CORS desde el origen de jsA8E y permitir/exponer las
-cabeceras necesarias, al menos `ETag` e `If-Match`. El diagnóstico de conexión
-debe identificar este problema porque es probable en instalaciones de
-Nextcloud/ownCloud o nginx que no hayan sido configuradas para jsA8E.
-
-Una futura implementación nativa debe mantener la paridad de la Full Library.
-Un cliente WebDAV con HTTPS sin dependencias externas es un trabajo relevante;
-no se debe ocultar esa diferencia ni afirmar paridad hasta que exista el
-adaptador nativo o se apruebe explícitamente una entrega web inicial.
-
-## Indicador y controles de interfaz
-
-La interfaz de biblioteca visible usa la vista clásica de cuatro drives:
-`D1:` a `D4:`. Aunque el núcleo conserva ocho slots internos para
-compatibilidad, esta propuesta no añade controles de montaje ni confunde la
-sincronización con esas unidades.
-
-Ubicación propuesta:
+CORS is enforced by the browser, not by WebDAV, so opening the WebDAV URL in a
+tab proves nothing. The browser sends a preflight (`OPTIONS`) because of
+`Authorization`, `If-Match`, `If-None-Match` and `Content-Type`. The server
+must answer for the jsA8E origin:
 
 ```text
-Barra superior
-  [...][ botón existente Disk Library con LED superpuesto ][...]
-
-Panel Disk Library, barra de título
-  [ disco | Disk Library | ruta actual | estado de operación | conexión/sync ]
-```
-
-- El LED superpuesto en el botón existente de Disk Library informa del estado
-  remoto incluso cuando el panel está cerrado.
-- El control de conexión/sincronización va al extremo derecho de la barra de
-  título. No va en la barra de herramientas: esa fila ya reúne acciones sobre
-  archivos (subir, crear, borrar, importar y exportar) y es horizontalmente
-  densa.
-- En móvil, el mismo LED se muestra como insignia del acceso inferior `Disks`;
-  el control se usa dentro de la barra de título del panel.
-- En pantallas estrechas el control puede mostrar sólo icono y LED, siempre
-  con texto accesible y tooltip.
-
-Se reutiliza el recurso gráfico LED verde actual; no hace falta crear un LED
-azul. El contexto (botón de Biblioteca, tooltip y texto del panel) distingue
-su función de la actividad SIO. Estados propuestos:
-
-| LED | Estado |
-|---|---|
-| Apagado/gris | No hay remoto configurado o la sesión no está conectada. |
-| Verde fijo | Remoto conectado y biblioteca sincronizada. |
-| Verde pulsante | Sincronización en progreso. |
-| Amarillo fijo | Hay cambios locales pendientes de sincronizar. |
-| Rojo pulsante | Error de conexión o conflicto que requiere atención. |
-
-El control cambia según el estado: `Configurar`, `Conectar`, `Sincronizar` o
-`Revisar`. Al reiniciar el browser, una conexión configurada vuelve a estado
-no conectado porque la contraseña no se persiste. El tooltip y el texto deben
-dar el detalle que el color no transmite, por ejemplo: “Biblioteca remota:
-conectada; sincronizada hace 3 min” o “3 cambios locales pendientes”.
-
-El LED de actividad de medio ya existente conserva su semántica: verde para
-lecturas y amarillo para escrituras SIO. No debe reutilizarse para tráfico de
-red.
-
-## Fase 1: Workspace remoto (implementado)
-
-Archivos: `jsA8E/js/app/remote_workspace.js` (cliente y sincronización, sin
-DOM), `jsA8E/js/app/remote_sync_ui.js` (control, LED y diálogo),
-`jsA8E/tests/remote_workspace.test.js` (dentro de `test:automation`).
-
-El módulo sólo usa `fetch` y la API pública de la Disk Library
-(`flush`, `exportWorkspacePackage`, `previewImport`, `importPackage`), de modo
-que funciona igual con y sin worker y no hizo falta tocar `emulator_worker.js`
-ni `app_proxy.js`.
-
-### Layout remoto
-
-```text
-<carpeta WebDAV>/
-├── .a8e-remote.json   {format:"a8e-remote", protocol:1, kind:"workspace", repoId}
-└── workspace.a8e      paquete ZIP existente (sólo discos montados + ascendencia)
-```
-
-La carpeta WebDAV debe existir; A8E no la crea. `repoId` se genera al conectar a
-una carpeta vacía y se compara en conexiones posteriores.
-
-### Algoritmo de `sync()`
-
-1. `library.flush()` y exportación del workspace local; se calcula una
-   *huella* determinista (entradas, carpetas, hash de cada revisión, montajes y
-   protección; sin marcas de tiempo del export).
-2. `GET workspace.a8e` con `If-None-Match: <último ETag>`.
-   - `404`: remoto vacío; si hay discos montados se publica con
-     `If-None-Match: *`.
-   - `304`/mismo ETag: el remoto no cambió. Si la huella local difiere de la
-     última sincronizada se publica con `If-Match`.
-   - ETag distinto: se descarga y se fusiona con `previewImport` +
-     `importPackage` (política existente «keep both», no destructiva). En la
-     primera sincronización con datos en ambos lados se pide confirmación. Si el
-     local estaba limpio basta la fusión; si tenía cambios se republica con
-     `If-Match` del ETag recién leído.
-3. `412`/`409` en la subida: otro cliente publicó antes; se olvida el ETag, se
-   vuelve a descargar y fusionar (máx. 5 intentos). Nunca se sobrescribe.
-4. Se guarda ETag, huella y hora de sincronización.
-
-Consecuencias del diseño actual:
-
-- Sólo viajan los discos **montados** (D1–D4 visibles en la UI): es el alcance
-  «Workspace actual» de este documento.
-- Si dos browsers editaron el mismo disco, cada lado conserva ambas variantes
-  como entradas separadas (`DOC.ATR`, `DOC(1).ATR`); es la política vigente de
-  la Library para ATR/XEX. La variante de cada lado es la que queda montada.
-- Un pull restaura los montajes del remoto (llama a `mountFile`), por eso se
-  hace `flush()` antes de fusionar. Sólo se descarga cuando el ETag cambió.
-- La sincronización es **manual** (botón de la barra de título). Las ediciones
-  locales sólo ponen el LED en amarillo; las escrituras de sectores nunca
-  generan tráfico de red.
-- `replaceFile` desmonta un disco montado (flujo existente de la UI); un disco
-  sustituido y no vuelto a montar deja de formar parte del workspace.
-
-### Diagnóstico de conexión
-
-`client.connect()` (botón *Connect* del diálogo) distingue: URL inválida o no
-HTTPS (se permite `http` sólo en `localhost`/`127.0.0.1`/`[::1]`), credenciales
-en la URL, fallo de red/CORS (el navegador no distingue ambos y el mensaje lo
-dice), `401` (autenticación rechazada), `403` (sin permisos), carpeta
-inexistente (`404`/`405` al subir), ETag no expuesto por CORS (`no-etag`), carpeta
-con `.a8e-remote.json` que no es A8E y protocolo más nuevo. Con el remoto vacío
-crea la identidad con `If-None-Match: *`. La escritura del `workspace.a8e` se
-verifica en la primera subida.
-
-### Interfaz
-
-Barra de título del panel Disk Library, al extremo derecho: LED + botón
-(`Configure` / `Connect` / `Sync` / `Syncing` / `Review`) y un engranaje que abre
-el diálogo (URL, usuario, contraseña de aplicación). El LED reutiliza
-`assets/leds.png` (gris / verde / verde pulsante / amarillo / rojo pulsante) y
-se muestra además como insignia sobre el botón de la barra superior y el acceso
-móvil `Disks`. El tooltip y `aria-label` llevan el detalle («sincronizada hace
-3 min», «cambios locales pendientes», texto del error). Se persisten sólo URL,
-usuario, `repoId`, último ETag/huella y hora (localStorage); la contraseña vive
-en memoria y se pide de nuevo tras recargar.
-
-### Limitaciones conocidas del MVP
-
-- Sin sincronización automática ni al expulsar el medio.
-- Sin descarga/subida incremental: cada publicación sube todo el workspace.
-- No se propagan borrados de ningún tipo (no aplican: sólo discos montados).
-- Sin `PROPFIND`/`MKCOL`: el protocolo usa sólo `GET`, `HEAD`, `PUT`.
-- Sin paridad nativa.
-
-## Servidor: CORS y Nextcloud
-
-El navegador envía preflight (`OPTIONS`) porque se usan `Authorization`,
-`If-Match`, `If-None-Match` y `Content-Type: application/octet-stream`. El
-servidor debe responder para el origen de jsA8E:
-
-```text
-Access-Control-Allow-Origin:   https://<origen de jsA8E>   (o http://localhost:<puerto>)
+Access-Control-Allow-Origin:   https://<jsA8E origin>   (or http://localhost:<port>)
 Access-Control-Allow-Methods:  GET, HEAD, PUT, MKCOL, OPTIONS
 Access-Control-Allow-Headers:  Authorization, If-Match, If-None-Match, Content-Type
 Access-Control-Expose-Headers: ETag
 ```
 
-`MKCOL` sólo lo necesita el modo «biblioteca completa» (crea `blobs/` una vez).
-No debe usarse `Allow-Credentials`: el cliente usa `credentials: "omit"` y
-envía `Authorization` manualmente. Nextcloud/ownCloud no añaden estas cabeceras
-por sí solos para un origen arbitrario: hay que añadirlas en el proxy inverso
-(nginx/Apache) para la ruta `/remote.php/dav/` (y responder `OPTIONS` sin
-autenticación con 204) o usar una app de CORS. URL típica de Nextcloud:
-`https://servidor/remote.php/dav/files/<usuario>/A8E/` con una **contraseña de
-aplicación** (Ajustes → Seguridad), nunca la contraseña principal.
+- `MKCOL` is only needed by the whole-library scope (creates `blobs/` once; a
+  `405` on later runs is normal and is treated as success, although the browser
+  console shows it).
+- Do not send `Allow-Credentials`: the client omits credentials and sends
+  `Authorization` itself.
+- Nextcloud/ownCloud do not add these headers for arbitrary origins: add them
+  in the reverse proxy (nginx/Apache) for `/remote.php/dav/`, answering
+  `OPTIONS` without authentication with 204, or use a CORS app. A simple setup
+  is serving jsA8E from the same server as Nextcloud.
+- Typical Nextcloud URL: `https://server/remote.php/dav/files/<user>/A8E/`.
+- **Deployments:** upload `emulator_worker.js` together with `js/`, and reload
+  without cache. A stale cached worker answers `Unknown worker request` to the
+  newer proxy messages (neither the worker nor the scripts are version-busted).
 
-### Plan de prueba con Nextcloud
+Connection diagnosis (`client.connect()`): invalid or non-HTTPS URL, credentials
+in the URL, network/CORS failure (the browser cannot tell them apart and the
+message says so), `401` rejected authentication, `403` no permission, missing
+folder (`404`/`405` on upload), ETag not exposed by CORS (`no-etag`), a folder
+whose `.a8e-remote.json` is not an A8E repo, and a newer protocol.
 
-1. Crear la carpeta `A8E` y una contraseña de aplicación.
-2. Configurar CORS para el origen de prueba y abrir jsA8E (o `localhost`).
-3. *Connect*: debe crear `.a8e-remote.json`. Verificar que Nextcloud devuelve y
-   expone `ETag` en `GET`/`PUT` y acepta `If-Match` e `If-None-Match: *`.
-4. Montar un disco en D1, *Sync*: debe aparecer `workspace.a8e`.
-5. Segundo browser/perfil: *Connect* + *Sync*; comprobar que trae y monta el
-   disco. Editar en uno, sincronizar ambos; repetir editando en los dos.
+### Nextcloud test plan
 
-## Fase 2a: biblioteca completa incremental (implementado)
+1. Create the folder and an application password.
+2. Configure CORS for the test origin and open jsA8E (or `localhost`).
+3. *Connect*: `.a8e-remote.json` must appear. Verify the server returns and
+   exposes `ETag` on `GET`/`PUT` and honors `If-Match` and `If-None-Match: *`.
+4. Workspace scope: mount a disk in D1, *Sync*, `workspace.a8e` must appear.
+5. Whole-library scope: `blobs/` appears, a new disk uploads exactly one blob.
+6. Second browser or profile: *Connect* + *Sync* must bring everything. Edit on
+   one side and sync both, then edit on both sides and sync.
+7. Delete a disk in one browser and sync both: it must land in the other
+   browser's Trash. Edit it in one browser and delete it in the other before
+   syncing: the edit must survive.
+8. Automatic mode: edit in one browser and sync; in the other the control must
+   show *Update* within a minute (or when the tab regains focus), and after 5
+   idle minutes it must update by itself.
 
-Archivos: `jsA8E/js/app/remote_library.js`, selector «What to synchronize» en el
-diálogo, `tests/remote_library.test.js` (+ `tests/remote_test_support.js` con el
-servidor simulado compartido).
+## Phase 1: workspace sync
 
-Se elige en el diálogo entre **Mounted disks only** (MVP) y **Whole library**.
-Cambiar de modo reinicia el estado de sincronización de esa conexión. Los dos
-modos pueden convivir en la misma carpeta remota (`workspace.a8e` vs
-`library.json` + `blobs/`; `.a8e-remote.json` es común).
+Files: `js/app/remote_workspace.js` (client and sync, no DOM),
+`js/app/remote_sync_ui.js` (control, LED, dialog), `tests/remote_workspace.test.js`.
+It only uses `fetch` and the public Disk Library API (`flush`,
+`exportWorkspacePackage`, `previewImport`, `importPackage`), so it works with or
+without the worker.
 
-### Algoritmo
+`sync()`:
 
-1. `library.getManifest()` (manifiesto local sin bytes ni montajes) y
-   `GET library.json` con `If-None-Match`.
-2. Remoto ausente: se publica todo (`If-None-Match: *`). Remoto sin cambios: se
-   publica sólo si la huella local cambió (`If-Match`).
-3. Remoto cambiado: se valida el manifiesto (el mismo validador del importador),
-   se calculan las entradas que el local aún no tiene (id desconocido o
-   revisiones/hash distintos) y de ellas **sólo se descargan los blobs cuyo
-   SHA-256 falta localmente** (verificados al llegar; un blob corrupto aborta sin
-   importar nada). Las entradas se importan por lotes de ≤ 48 MiB armando un
-   `.a8e` en memoria y usando el `importPackage` existente (misma validación,
-   atomicidad y política de conflictos). Los blobs ya locales se leen con
-   `library.readBlob(sha)`.
-4. Publicar: por cada blob que el remoto no tiene, `HEAD`; si falta, `PUT` con
-   `If-None-Match: *` (inmutable e idempotente); al final `PUT library.json` con
-   `If-Match`. Un `412` reinicia el ciclo (máx. 5). El conjunto de blobs
-   conocidos del remoto se guarda en localStorage (`remoteBlobs`) para evitar
-   `HEAD`s repetidos.
-5. Los montajes **no** se sincronizan en este modo (son por browser).
+1. `library.flush()` and export of the local workspace; compute the fingerprint.
+2. `GET workspace.a8e` with `If-None-Match`: `404` publishes if there are
+   mounted disks; the same ETag publishes only if the fingerprint changed; a new
+   ETag downloads and merges (`previewImport` + `importPackage`), asking for
+   confirmation on the first sync with data on both sides, then republishes if
+   the local side had changes.
+3. `412`/`409` on upload: retry up to 5 times. Never overwrite.
+4. Store ETag, fingerprint and time.
 
-### Cambio en el núcleo: avance rápido (fast-forward)
+Consequences:
 
-Al probar este modo se vio que `planImport` trataba toda entrada con el mismo id
-y distinto contenido como conflicto, aunque fuera una edición posterior del mismo
-disco; una sincronización normal (editar en A, sincronizar en B) generaba una
-copia `(1)`. `library_package.js` ahora usa el grafo de revisiones:
+- Only **mounted** disks travel (D1-D4 in the UI).
+- If two browsers edited the same disk, each side keeps both variants as
+  separate entries; the variant of each side stays mounted.
+- A pull restores the remote mounts (`mountFile`), hence the `flush()` first.
+- `replaceFile` unmounts a mounted entry, so a replaced and not remounted disk
+  leaves the workspace.
+- No incremental transfer (every publish uploads the whole workspace) and no
+  deletions to propagate.
 
-- si el contenido local actual es una revisión retenida de la entrada importada →
-  **avance rápido**: se añaden las revisiones nuevas y el disco pasa al contenido
-  importado conservando su unidad montada (`summary.fastForwarded`);
-- si el contenido importado ya es una revisión retenida local → es historia más
-  vieja, se trata como duplicado;
-- en cualquier otro caso (ramas divergentes) → conflicto, copia `(1)` como antes.
+## Phase 2a: whole-library incremental sync
 
-Esto realiza la regla «un descendiente se prefiere a su ancestro» de
-`full_library.md`. Afecta también al import manual y al modo workspace. **Aún no
-está replicado en A8E nativo** (queda anotado en la deuda de paridad).
+Files: `js/app/remote_library.js`, the "What to synchronize" selector in the
+dialog, `tests/remote_library.test.js` and `tests/remote_test_support.js` (the
+shared simulated server). Switching scope resets that connection's sync state.
 
-### Nuevas APIs de la Disk Library (núcleo y proxy del worker)
+Algorithm (diagram 2):
 
-`getManifest()` y `readBlob(sha256)`; mensajes del worker `diskLibraryManifest` y
-`diskLibraryReadBlob`. El test de paridad (`disk_library_api_parity`) ahora
-también revisa los métodos usados por los módulos remotos.
+1. `library.getManifest()` (no bytes, no mounts) and `GET library.json`.
+2. Remote missing: publish everything. Remote unchanged: publish only if the
+   fingerprint changed.
+3. Remote changed: validate the manifest with the importer's validator, compute
+   the entries the library lacks (unknown id, or different revisions/hash) and
+   download **only the blobs whose SHA-256 is missing locally**, verifying each
+   one on arrival (a corrupt or missing blob aborts without importing anything).
+   Entries are imported in batches of at most 48 MiB by assembling an in-memory
+   `.a8e` and using the existing `importPackage`, so validation, atomicity and
+   conflict policy are the same. Local blobs are read with `library.readBlob`.
+4. Publish: for every blob the remote lacks, `HEAD`, then `PUT` with
+   `If-None-Match: *`; finally `PUT library.json` with `If-Match`. The set of
+   known remote blobs is stored (`remoteBlobs`) to avoid repeated `HEAD`s.
+5. Mounts are **not** synchronized in this scope (they are per browser).
 
-### Comportamiento y límites de esta parte
+### Core change: fast-forward
 
-- Los modos son **aditivos**: nuevas entradas, revisiones y carpetas viajan;
-  borrados, renombres y movimientos **no** (Fase 2b). Un borrado local puede
-  «resucitar» al sincronizar con un remoto que aún conserva la entrada.
-- `getManifest()` recalcula el SHA-256 de toda la biblioteca en cada sincronización
-  (cientos de MB tardarían segundos); un caché de hash por revisión es una
-  optimización pendiente.
-- En el modo workspace, quien fusiona una rama divergente conserva su edición y
-  una copia `(1)` de la remota, y el montaje del workspace remoto prevalece; la
-  edición del otro lado sólo viaja si está montada.
-- Sin sincronización automática; sin GC de blobs remotos.
-- La ruta del worker de `getManifest`/`readBlob` está cubierta por el test del
-  proxy, pero no hay prueba automatizada del propio `emulator_worker.js`.
+`planImport` used to treat any entry with the same id and different content as
+a conflict, even when it was a later edit of the same disk, so "edit on A, sync
+on B" created a `(1)` copy. It now uses the revision graph:
 
-## Fase 3: sincronización automática (jsA8E, implementada)
+- local current content is a retained revision of the imported entry:
+  **fast-forward** (add the new revisions, advance the content, keep the mounted
+  drive; `summary.fastForwarded`);
+- imported content is already a retained local revision: older history,
+  reported as a duplicate;
+- anything else (diverged branches): conflict, `(1)` copy as before.
 
-Opción del diálogo «Check the remote automatically; sync after 5 minutes without
-activity» (activa por defecto, se guarda en `auto`). Sólo actúa con la conexión
-establecida en esta sesión (la contraseña no se guarda, así que tras recargar hay
-que pulsar *Connect*; ese primer sync ya trae los cambios remotos).
+This implements the "a descendant is preferred to its ancestor" rule of
+`full_library.md`. It also affects manual import and workspace sync. **Native
+A8E does not have it yet** (parity debt).
 
-- **Marca de cambio = ETag** del fichero principal (`library.json` o
-  `workspace.a8e`). `checkRemote()` hace un `HEAD` (sin cuerpo) y compara con el
-  último ETag propio; no hay campo «last updated» (evita desfases de reloj).
-- **Disparadores:** cada 60 s, al recuperar el foco y al volver a hacer visible la
-  pestaña. Un fallo de red en el sondeo se ignora; el sync manual lo diagnostica.
-- **Cambio remoto detectado:** el control muestra *Update* (LED amarillo) y un
-  mensaje; no se toca nada mientras haya actividad.
-- **Inactividad:** tras 5 minutos sin teclado/puntero/rueda/táctil se ejecuta el
-  sync pendiente (pull y/o push) solo. Si el usuario vetó una fusión
-  (*confirmMerge*), no se vuelve a lanzar automáticamente.
-- Limitación: no se detecta actividad de gamepad, así que quien juegue sólo con
-  mando >5 min podría recibir un sync automático. Los montajes no se tocan en
-  modo biblioteca; un fast-forward del disco montado conserva la unidad.
-- Alternativa descartada por seguridad: guardar la contraseña en `localStorage`
-  para comprobar al abrir sin interacción. Podría ofrecerse como opción explícita
-  con contraseña de aplicación revocable.
+### New Disk Library APIs (core and worker proxy)
 
-## Fase 2b: tombstones (implementado en jsA8E)
+`getManifest()`, `readBlob(sha256)`, `getTombstones()`, `applyTombstones(list)`
+and `dropTombstones(ids)`, with worker messages `diskLibraryManifest`,
+`diskLibraryReadBlob`, `diskLibraryTombstones`, `diskLibraryApplyTombstones`
+and `diskLibraryDropTombstones`. `disk_library_api_parity.test.js` also scans
+the remote modules for methods they use. The proxy side is covered by
+`app_proxy_library_export.test.js`; `emulator_worker.js` itself has no direct
+automated test (manual use in Chromium exercises it).
 
-Problema: sin registro de borrados, un `Delete` local se «resucita» en la
-siguiente fusión con un remoto que aún conserva el elemento. Solución, compatible
-con schema v1 (campo opcional que un lector antiguo ignora):
+## Phase 2b: deletions with tombstones
+
+Problem: without a deletion record, a local delete is resurrected by the next
+merge with a remote that still holds the item. Solution (schema-v1 compatible,
+optional field):
 
 ```json
 "tombstones": [
   { "kind": "entry",  "id": "disk-docs", "deletedAt": 1731067200000,
-    "shas": ["<sha256 de cada contenido que la entrada tenía al borrar>"] },
+    "shas": ["<sha256 of every content the entry held when deleted>"] },
   { "kind": "folder", "id": "folder-games", "deletedAt": 1731067200000 }
 ]
 ```
 
-Almacenamiento: clave `tombstones` del store `metadata` de IndexedDB (sin subir
-`DB_VERSION`). `deleteFile`/`deleteFolder` los crean; `restoreTrash` los retira.
-Vaciar la papelera **no** los retira (el borrado sigue vigente).
+- Stored under the key `tombstones` of the IndexedDB `metadata` store (no
+  `DB_VERSION` bump). `deleteFile` and `deleteFolder` create them,
+  `restoreTrash` removes them. Emptying the Trash does **not** remove them (the
+  deletion stays in force). `getManifest()` emits them and the fingerprint
+  includes them (appended only when present, so older fingerprints stay valid).
+- An entry is **covered** by a tombstone when all its contents are in `shas`
+  **and** its `modified` is before `deletedAt`. A later edit, move or restore
+  takes it out of that case: the change wins, so a concurrent delete can never
+  lose an edit.
+- Remote tombstone and covered local entry: the entry moves to the **local
+  Trash** (recoverable). A remote deletion never purges bytes.
+- Local tombstone and covered remote entry: not imported. If not covered, it is
+  imported, the tombstone is dropped and the stale Trash copy is purged (its
+  content is an ancestor of the live entry and stays in the revision history).
+- A folder tombstone deletes the folder only if it ends up empty; a locally
+  deleted folder is not re-imported unless a downloaded entry lives in it.
+- Restoring bumps `modified`, so other browsers see the restore as a later
+  change and recover the entry.
+- Tombstones expire after 90 days (`TOMBSTONE_TTL_MS`); a browser offline longer
+  than that could resurrect deleted items.
+- Blobs of deleted entries are not removed from the remote (no remote GC).
+- The comparison uses browser clocks (`modified` vs `deletedAt`); a large skew
+  can make a delete or an edit win wrongly, without data loss because every
+  deletion goes to the Trash.
+- Remote folders the library lacks (even empty ones) are now merged too.
+- Test: `tests/remote_library_tombstones.test.js`.
 
-API del núcleo (también en el proxy y el worker): `getTombstones()`,
-`applyTombstones(list)` → `{deleted, kept}` y `dropTombstones(ids)`.
-`getManifest()` los incluye y el fingerprint también.
+Pending in this phase: propagating **renames and moves** of entries and folders.
+It needs a per-entry metadata timestamp (`modified` currently follows content
+and file moves only).
 
-Reglas de fusión (`remote_library.js`, `pull`):
+## Phase 3: automatic sync
 
-- Una entrada queda *cubierta* por un tombstone si todos sus contenidos están en
-  `shas` **y** su `modified` es anterior a `deletedAt`. Una edición, un
-  movimiento o una restauración posteriores la sacan de ese caso: gana el cambio
-  y nunca se pierde un edit por un borrado concurrente.
-- Tombstone remoto + entrada local cubierta → la entrada va a la **papelera
-  local** (recuperable); el borrado remoto nunca purga bytes.
-- Tombstone local + entrada remota cubierta → no se importa; si no está cubierta,
-  se importa, se retira el tombstone y se purga la copia obsoleta de la papelera.
-- Un tombstone de carpeta sólo borra la carpeta si queda vacía, y una carpeta
-  borrada localmente no se reimporta salvo que una entrada descargada viva en ella.
-- Restaurar sube `modified`, así que el resto de browsers la ven como cambio
-  posterior y la recuperan.
-- Los tombstones caducan a los 90 días (`TOMBSTONE_TTL_MS`); un browser que
-  estuvo desconectado más tiempo podría resucitar elementos borrados.
-- Los blobs de entradas borradas no se eliminan del remoto (sin GC remoto).
-- Depende de los relojes de los browsers (`modified` vs `deletedAt`); un desfase
-  grande puede hacer que un borrado o un cambio gane cuando no debía, pero sin
-  pérdida de datos porque todo borrado va a la papelera.
+An option in the dialog, "Check the remote automatically; sync after 5 minutes
+without activity" (on by default, saved as `auto`, applied on the next
+*Connect*). It only acts while the connection is established in this session
+(diagram 5).
 
-Además, las carpetas del remoto que faltan localmente (incluso vacías) ahora se
-importan, no sólo las que traen entradas.
+- **Change marker = the ETag** of the main file (`library.json` or
+  `workspace.a8e`). `checkRemote()` sends a `HEAD` (no body) and compares with
+  the last own ETag. There is no "last updated" field, which avoids clock skew.
+- **Triggers:** every 60 s, on window focus and when the tab becomes visible. A
+  network failure while polling is ignored; the manual sync diagnoses it.
+- **Remote change detected:** the control shows *Update* (yellow LED) and a
+  status message. Nothing is touched while the user is active.
+- **Idle:** after 5 minutes without keyboard, pointer, wheel or touch input the
+  pending sync (pull and/or push) runs by itself. A merge the user vetoed is not
+  launched again automatically.
+- Limitation: gamepad activity is not detected, so someone playing only with a
+  gamepad for more than 5 minutes could receive an automatic sync. In
+  whole-library scope mounts are untouched, and a fast-forward of a mounted disk
+  keeps its drive.
 
-Pendiente de esta fase: propagar renombres y movimientos de entradas y carpetas
-(necesita una marca de tiempo de metadatos por entrada; `modified` sólo se
-actualiza con el contenido y los movimientos de archivo).
+## User interface
 
-## Diseño original del repositorio incremental (referencia)
+Right end of the Disk Library panel title bar: LED + button (`Configure`,
+`Connect`, `Sync`, `Update`, `Syncing`, `Review`) and a gear that opens the
+dialog (URL, scope, user, application password, auto option). The LED reuses
+`assets/leds.png` and is also shown as a badge on the toolbar Disk Library
+button and the mobile `Disks` entry. Tooltip and `aria-label` carry the detail
+("synchronized 3 min ago", "local changes pending", the error text). The control
+sits in the title bar, not in the toolbar, because the toolbar row already
+holds the file actions and is horizontally dense.
 
-`library.json` + `blobs/<sha256>.<tipo>` como describe «Formato remoto
-propuesto». Cambios respecto al MVP: subir primero los blobs ausentes
-(`PUT … If-None-Match: *`, inmutables e idempotentes) y luego el manifiesto con
-`If-Match`; descargar sólo los blobs que falten; fusionar manifiestos con el
-grafo de revisiones (`parentId`/hash), no con `libraryVersion`, que es un
-contador local y no permite detectar divergencia entre browsers. El lector de
-manifiestos debe verificar SHA-256 y límites de tamaño igual que el importador
-de paquetes. Sin `PROPFIND`: la lista de blobs se deriva del manifiesto, y
-`MKCOL` sólo se necesita si se opta por crear `blobs/` automáticamente.
+| LED | State |
+|---|---|
+| Grey | Not configured, or not connected this session |
+| Solid green | Connected and in sync |
+| Pulsing green | Sync in progress |
+| Solid yellow | Local changes pending, or the remote changed (*Update*) |
+| Pulsing red | Error or conflict needing attention |
 
-## Paridad con A8E nativo
+The existing media activity LED keeps its own meaning (green reads, yellow SIO
+writes) and is never reused for network traffic. The visible Library UI uses the
+classic four-drive view (`D1:` to `D4:`); sync controls are never mixed with the
+drive slots.
 
-Se acepta entregar primero la versión web. Requisito pendiente para declarar
-paridad con la Full Library: un cliente WebDAV con HTTPS sin dependencias en A8E
-nativo que use el mismo layout, el mismo `.a8e-remote.json` y las mismas reglas
-de ETag/If-Match, con fixtures compartidos. Mientras tanto, A8E nativo puede
-importar/exportar manualmente el mismo `workspace.a8e`.
+## Known limitations
+
+- Renames and moves do not propagate yet.
+- No remote garbage collection of blobs; tombstones expire after 90 days.
+- `getManifest()` rehashes the whole library on every sync (a per-revision hash
+  cache is a pending optimization).
+- Workspace scope: whoever merges a diverged branch keeps their edit plus a `(1)`
+  copy of the remote one, and the edit of the other side only travels if mounted.
+- No gamepad activity detection for the idle timer.
+- `emulator_worker.js` handlers and the UI timers have no direct automated test.
+
+## Native parity
+
+Only the web version is delivered. To declare parity with the Full Library,
+native A8E needs a dependency-free HTTPS WebDAV client using the same layout,
+the same `.a8e-remote.json`, the same ETag/If-Match rules, the fast-forward
+logic in `planImport`, tombstones and shared fixtures. Meanwhile native A8E can
+import and export the same `workspace.a8e` manually. The parity debt is also
+tracked in `full_library.md`.
