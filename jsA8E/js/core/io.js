@@ -52,11 +52,6 @@
     const IO_HPOSP3_M3PF = cfg.IO_HPOSP3_M3PF;
     const IO_HSCROL = cfg.IO_HSCROL;
     const IO_IRQEN_IRQST = cfg.IO_IRQEN_IRQST;
-    const IRQ_TIMER_1 = cfg.IRQ_TIMER_1;
-    const IRQ_TIMER_2 = cfg.IRQ_TIMER_2;
-    const IRQ_TIMER_4 = cfg.IRQ_TIMER_4;
-    const IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE =
-      cfg.IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
     const IO_NMIEN = cfg.IO_NMIEN;
     const IO_NMIRES_NMIST = cfg.IO_NMIRES_NMIST;
     const IO_PACTL = cfg.IO_PACTL;
@@ -87,7 +82,6 @@
     const pokeyPotPrepareSkctlWrite = cfg.pokeyPotPrepareSkctlWrite;
     const pokeyPotStartScan = cfg.pokeyPotStartScan;
     const pokeyTraceEvent = cfg.pokeyTraceEvent;
-    const pokeyRestartTimers = cfg.pokeyRestartTimers;
     const pokeyEnterInitialization = cfg.pokeyEnterInitialization;
     const pokeyArmInactiveTimers = cfg.pokeyArmInactiveTimers;
     const pokeySyncLfsr17 = cfg.pokeySyncLfsr17;
@@ -343,7 +337,7 @@
       const positiveEdge = isLine2 ? mode >= 2 : !!(ctx.sram[controlAddress] & 0x02);
       if (isLine2) {
         if (mode < 4 && positive === positiveEdge)
-          io[statusKey] |= PIA_IRQ2_STATUS;
+          {io[statusKey] |= PIA_IRQ2_STATUS;}
       } else if (positive === positiveEdge) {
         io[statusKey] |= PIA_IRQ1_STATUS;
       }
@@ -353,7 +347,7 @@
         ? mode < 4 && !!(mode & 0x01)
         : !!(ctx.sram[controlAddress] & 0x01);
       if (enabled && ((io[statusKey] & (isLine2 ? PIA_IRQ2_STATUS : PIA_IRQ1_STATUS)) !== 0))
-        CPU.irq(ctx);
+        {CPU.irq(ctx);}
     }
 
     function piaWriteControl(ctx, address, value) {
@@ -369,9 +363,9 @@
       if (newMode >= 4) io[statusKey] &= ~PIA_IRQ2_STATUS;
 
       if (isA && oldMode === 6 && newMode >= 2 && newMode <= 3 && !io[levelKey])
-        io[statusKey] |= PIA_IRQ2_STATUS;
+        {io[statusKey] |= PIA_IRQ2_STATUS;}
       if (!isA && oldMode === 7 && newMode < 4 && io.piaCb2WasRaisedOutput)
-        io[statusKey] |= PIA_IRQ2_STATUS;
+        {io[statusKey] |= PIA_IRQ2_STATUS;}
 
       if (newMode >= 4) {
         io[levelKey] = newMode === 7 ? 1 : 0;
@@ -488,7 +482,7 @@
           // level-sensitive blitter-complete source. Reconcile every VBXE
           // write so its clear takes effect before the following instruction.
           if (value != null && CPU && typeof CPU.reconcileIrq === "function")
-            CPU.reconcileIrq(ctx);
+            {CPU.reconcileIrq(ctx);}
           return vbxeValue & 0xff;
         }
       }
@@ -496,17 +490,17 @@
         const ramboLocalAddress = vbxeRamboAddress
           ? vbxeRamboAddress(io.vbxe, addr, sram[IO_PORTB]) : -1;
         if (ramboLocalAddress >= 0) {
-          if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe,
+          if (vbxeNoteMemacAccess) {vbxeNoteMemacAccess(io.vbxe,
             value == null ? "cpu-read" : "cpu-write",
-            ctx.cycleCounter, io.displayListFetchCycle);
+            ctx.cycleCounter, io.displayListFetchCycle);}
           if (value != null) io.vbxe.vram[ramboLocalAddress] = value & 0xff;
           return io.vbxe.vram[ramboLocalAddress] & 0xff;
         }
         const localAddress = vbxeMemacAddress(io.vbxe, addr, false);
         if (localAddress >= 0) {
-          if (vbxeNoteMemacAccess) vbxeNoteMemacAccess(io.vbxe,
+          if (vbxeNoteMemacAccess) {vbxeNoteMemacAccess(io.vbxe,
             value == null ? "cpu-read" : "cpu-write",
-            ctx.cycleCounter, io.displayListFetchCycle);
+            ctx.cycleCounter, io.displayListFetchCycle);}
           if (value != null) io.vbxe.vram[localAddress] = value & 0xff;
           return io.vbxe.vram[localAddress] & 0xff;
         }
@@ -684,14 +678,14 @@
             // XMTDONE is level-sensitive and remains active while the
             // output shift register is idle, even when IRQEN bit 3 is off.
             if (io.serialOutputTransmissionDoneCycle === CYCLE_NEVER)
-              ram[addr] &= ~0x08;
+              {ram[addr] &= ~0x08;}
             // POKEY IRQ is level-sensitive. Reconcile both disabling and
             // re-enabling so an already asserted source remains visible.
             if (CPU && typeof CPU.reconcileIrq === "function")
-              CPU.reconcileIrq(ctx);
+              {CPU.reconcileIrq(ctx);}
             break;
 
-          case IO_SKCTL_SKSTAT:
+          case IO_SKCTL_SKSTAT: {
             const previousSkctl = sram[addr] & 0xff;
             const wasPokeyInitializing = (previousSkctl & 0x03) === 0;
             pokeySyncLfsr17(ctx);
@@ -745,6 +739,7 @@
             }
             pokeyArmInactiveTimers(ctx);
             break;
+          }
 
           // --- PIA ---
           case IO_PORTA:

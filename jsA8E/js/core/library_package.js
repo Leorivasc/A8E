@@ -3,7 +3,6 @@
 
   const FORMAT = "a8e-library-export";
   const SCHEMA_VERSION = 1;
-  const HASH_LENGTH = 64;
   const DEFAULT_MAX_PACKAGE_BYTES = 256 * 1024 * 1024;
   const DEFAULT_MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
   const DEFAULT_MAX_PAYLOAD_BYTES = 64 * 1024 * 1024;
@@ -620,7 +619,6 @@
     (records || []).forEach(function (record, index) {
       reportProgress(config, "export", completed, total, record.name);
       const bytes = cloneBytes(record.bytes);
-      const type = manifest.library[index].type;
       const path = manifest.library[index].path;
       if (!seen.has(path)) {
         seen.add(path);
@@ -668,7 +666,7 @@
       enforcePackageLimits(entries, manifestBytes, config);
       let manifest;
       try { manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes)); }
-      catch (err) { fail("library.json is not valid UTF-8 JSON"); }
+      catch { fail("library.json is not valid UTF-8 JSON"); }
       validateManifest(manifest);
       const result = [];
       const total = manifest.library.reduce(function (count, entry) {

@@ -183,6 +183,12 @@ cmake --build build -j
 ctest --test-dir build -R 'library_(archive|package|repository|image)' --output-on-failure
 ```
 
+The browser build can also keep the library in sync with a WebDAV server
+(for example Nextcloud), either as a single `workspace.a8e` or as the whole
+library, with non-destructive merging and deletions that land in Trash. The
+native emulator does not have this yet; see [Remote library sync](jsA8E/README.md)
+and [implementation/OnlineDrive.md](implementation/OnlineDrive.md).
+
 For native key bindings and the complete package workflow, see the [native
 README](A8E/README.md) and [Full Library implementation notes](implementation/full_library.md).
 

@@ -363,7 +363,6 @@
   const pokeySerialOutputClockTimerExpired =
     pokeyAudioApi.serialOutputClockTimerExpired;
   const pokeyTraceEvent = pokeyAudioApi.traceEvent;
-  const pokeyRestartTimers = pokeyAudioApi.restartTimers;
   const pokeyEnterInitialization = pokeyAudioApi.enterInitialization;
   const pokeyApplyTimerReset = pokeyAudioApi.applyTimerReset;
   const pokeyArmInactiveTimers = pokeyAudioApi.armInactiveTimers;
@@ -425,11 +424,6 @@
           IO_HPOSP3_M3PF: IO_HPOSP3_M3PF,
           IO_HSCROL: IO_HSCROL,
           IO_IRQEN_IRQST: IO_IRQEN_IRQST,
-          IRQ_TIMER_1: IRQ_TIMER_1,
-          IRQ_TIMER_2: IRQ_TIMER_2,
-          IRQ_TIMER_4: IRQ_TIMER_4,
-          IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE:
-            IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE,
           IO_NMIEN: IO_NMIEN,
           IO_NMIRES_NMIST: IO_NMIRES_NMIST,
           IO_PACTL: IO_PACTL,
@@ -460,7 +454,6 @@
           pokeyTraceEvent: pokeyTraceEvent,
           pokeyPotPrepareSkctlWrite: pokeyPotPrepareSkctlWrite,
           pokeyPotStartScan: pokeyPotStartScan,
-          pokeyRestartTimers: pokeyRestartTimers,
           pokeyEnterInitialization: pokeyEnterInitialization,
           pokeyArmInactiveTimers: pokeyArmInactiveTimers,
           pokeySyncLfsr17: pokeySyncLfsr17,

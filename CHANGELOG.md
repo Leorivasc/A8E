@@ -26,6 +26,13 @@ All notable changes to this project will be documented in this file.
   diagnostics.
 - Browser headless automation and MCP coverage for grouped lifecycle, media,
   debugger, HostFS, assembler, snapshot, artifact, and memory-profile flows.
+- jsA8E optional remote Disk Library sync over WebDAV (tested against
+  Nextcloud): workspace or whole-library scope, content-addressed blobs,
+  ETag-guarded publishing, non-destructive merge, tombstoned deletions (remote
+  deletions go to the local Trash), folder renames and entry moves, automatic
+  ETag polling with an "Update" indicator and idle sync, an opt-in remembered
+  password, and a manual remote cleanup of unreferenced blobs. The native A8E
+  has no WebDAV client yet (see `implementation/OnlineDrive.md`).
 
 ### Documentation
 - VBXE is documented as experimental and opt-in. The roadmap now holds the list

@@ -340,26 +340,6 @@
         });
       }
 
-      function deleteRecord(id) {
-        if (!db) return Promise.resolve();
-        let tx;
-        try {
-          tx = db.transaction(STORE_NAME, "readwrite");
-        } catch (err) {
-          return Promise.reject(err);
-        }
-        return new Promise(function (resolve, reject) {
-          const request = tx.objectStore(STORE_NAME).delete(id);
-          tx.oncomplete = function () { resolve(); };
-          tx.onabort = function () {
-            reject(tx.error || new Error("Disk library IndexedDB delete aborted"));
-          };
-          request.onerror = function () {
-            reject(request.error || new Error("Disk library IndexedDB delete failed"));
-          };
-        });
-      }
-
       function persistDeleteAtomically(entry) {
         if (!db || !entry) return Promise.resolve();
         let tx;
@@ -522,7 +502,7 @@
             let tx;
             try {
               tx = db.transaction([STORE_NAME, TRASH_STORE_NAME, FOLDER_STORE_NAME], "readonly");
-            } catch (err) {
+            } catch {
               ready = true;
               emitChange();
               resolve();
@@ -566,7 +546,7 @@
               let metadataTx;
               try {
                 metadataTx = db.transaction(META_STORE_NAME, "readonly");
-              } catch (err) {
+              } catch {
                 ready = true;
                 emitChange();
                 resolve();

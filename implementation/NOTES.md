@@ -1,5 +1,26 @@
 # NOTES.md
 
+- 2026-11-10 (jsA8E: cleanup pass, no behavior change): removed dead code found
+  by ESLint and a manual sweep: `drawPlayerSpan`, `drawMissileSpan`, `playerStep`
+  and `missileWidth` (`gtia.js`, superseded by the span queue), `zeroPageAddress`
+  (`memory.js`), `deleteRecord` (`disk_library.js`), the unused IRQ constants and
+  `pokeyRestartTimers` that `atari.js` passed to `io.js`, two unused panel
+  constants in `assembler_ui.js`, the write-only `mobilePanelSyncing` flag in
+  `ui.js`, a stale local in `antic.js` and `library_package.js`, and unused
+  `catch (err)` bindings. `no-case-declarations` in `io.js` (SKCTL write) fixed
+  with a block; `eslint --fix` added braces to single-line `if`/`for` bodies
+  (formatting only). `npm run lint` now reports zero errors. Eleven passing
+  tests that no npm script ran (`pokey_pot_cpu_dispatch`, `pokey_pot_io_path`,
+  `antic_vscrol_timing`, `ahrm07_pmg_{xex,boot}`, `ahrm08_pokey_{xex,matrix_xex,
+  stage2_xex}`, `ahrm10_priority_collision_boot`,
+  `vbxe_blitter_short_attrmap_timing_{asm,boot}`) are now in `test:automation`
+  and `test:vbxe:full`. AHRM review: this cleanup removes only code with no
+  caller, so no hardware behavior changes; the core changes made after the
+  2026-11-04 AHRM review are VBXE hooks (PIA IRQ and PORTB remap, citing AHRM
+  5.7 and 12.4) and the gamepad, which only drives PORTA/TRIG0 active-low bits.
+  Docs: root `README.md` and `CHANGELOG.md` now mention the remote library sync.
+  Verified: `test:automation` and `test:vbxe` pass, lint clean. Not run: native
+  `ctest` (no C changes) and `test:vbxe:full`.
 - 2026-11-07 (A8E native: gamepad support): the native build now has the same
   feature. New `A8E/Gamepad.c/.h` (in `A8E_CORE_SOURCES`) uses the SDL joystick
   API, not SDL_GameController, so plain USB joysticks work without a mapping

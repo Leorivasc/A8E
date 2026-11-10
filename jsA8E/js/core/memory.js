@@ -797,7 +797,7 @@
     initialPortB,
   ) {
     if (typeof initAddr !== "number" || initAddr <= 0 || initAddr > 0xffff)
-      return null;
+      {return null;}
     if (!loadedRam || !loadedMask) return null;
 
     const unknown = -1;
@@ -820,7 +820,7 @@
 
     function readAccumulator(address) {
       if ((address & 0xffff) === XEX_PORTB_ADDRESS)
-        return sanitizePortB(initialPortB | 0);
+        {return sanitizePortB(initialPortB | 0);}
       return unknown;
     }
 
@@ -832,10 +832,6 @@
     }
 
     function immediate() {
-      return readByte(pc + 1);
-    }
-
-    function zeroPageAddress() {
       return readByte(pc + 1);
     }
 
@@ -1552,9 +1548,9 @@
             ? api.ramboAddress(vbxe, addr, ctx.sram[IO_PORTB]) : -1;
         if (vbxeRamboAddress >= 0) {
           if (typeof api.noteMemacAccess === "function")
-            api.noteMemacAccess(vbxe,
+            {api.noteMemacAccess(vbxe,
               isAnticRead ? "antic-read" : "cpu-read",
-              ctx.cycleCounter, ctx.ioData.displayListFetchCycle);
+              ctx.cycleCounter, ctx.ioData.displayListFetchCycle);}
           return vbxe.vram[vbxeRamboAddress] & 0xff;
         }
         const u1mbWindowOwnsAddress =
@@ -1562,9 +1558,9 @@
           (mem.sharedWindow ? mem.cpuWindowEnabled : mem.anticWindowEnabled);
         if (vbxeLocalAddress >= 0 && !u1mbWindowOwnsAddress) {
           if (typeof api.noteMemacAccess === "function")
-            api.noteMemacAccess(vbxe,
+            {api.noteMemacAccess(vbxe,
               isAnticRead ? "antic-read" : "cpu-read",
-              ctx.cycleCounter, ctx.ioData.displayListFetchCycle);
+              ctx.cycleCounter, ctx.ioData.displayListFetchCycle);}
           return vbxe.vram[vbxeLocalAddress] & 0xff;
         }
         if (!mem.enabled || addr < 0x4000 || addr > 0x7fff) {
@@ -2317,19 +2313,19 @@
         io.timer2Cycle = state.timer2Cycle;
         io.timer4Cycle = state.timer4Cycle;
         if (state.pokeyTimerResetCycle !== undefined)
-          io.pokeyTimerResetCycle = state.pokeyTimerResetCycle;
+          {io.pokeyTimerResetCycle = state.pokeyTimerResetCycle;}
         if (state.pokeySlowClockOriginCycle !== undefined)
-          io.pokeySlowClockOriginCycle = state.pokeySlowClockOriginCycle;
+          {io.pokeySlowClockOriginCycle = state.pokeySlowClockOriginCycle;}
         if (state.serialOutputClockHigh !== undefined)
-          io.serialOutputClockHigh = !!state.serialOutputClockHigh;
+          {io.serialOutputClockHigh = !!state.serialOutputClockHigh;}
         if (state.serialOutputBytePending !== undefined)
-          io.serialOutputBytePending = !!state.serialOutputBytePending;
+          {io.serialOutputBytePending = !!state.serialOutputBytePending;}
         if (state.serialOutputShiftActive !== undefined)
-          io.serialOutputShiftActive = !!state.serialOutputShiftActive;
+          {io.serialOutputShiftActive = !!state.serialOutputShiftActive;}
         if (state.serialOutputRegisterValue !== undefined)
-          io.serialOutputRegisterValue = state.serialOutputRegisterValue & 0xff;
+          {io.serialOutputRegisterValue = state.serialOutputRegisterValue & 0xff;}
         if (state.serialOutputShiftValue !== undefined)
-          io.serialOutputShiftValue = state.serialOutputShiftValue & 0xff;
+          {io.serialOutputShiftValue = state.serialOutputShiftValue & 0xff;}
         io.valuePortA = state.valuePortA | 0;
         io.valuePortB = state.valuePortB | 0;
         io.outputPortB =
@@ -2338,11 +2334,11 @@
         io.sioOutIndex = state.sioOutIndex | 0;
         io.sioOutPhase = state.sioOutPhase | 0;
         if (state.sioCommandLineControlled !== undefined)
-          io.sioCommandLineControlled = !!state.sioCommandLineControlled;
+          {io.sioCommandLineControlled = !!state.sioCommandLineControlled;}
         if (state.sioCommandLineAsserted !== undefined)
-          io.sioCommandLineAsserted = !!state.sioCommandLineAsserted;
+          {io.sioCommandLineAsserted = !!state.sioCommandLineAsserted;}
         if (state.sioCommandFrameReady !== undefined)
-          io.sioCommandFrameReady = !!state.sioCommandFrameReady;
+          {io.sioCommandFrameReady = !!state.sioCommandFrameReady;}
         io.sioDataIndex = state.sioDataIndex | 0;
         io.sioPendingDevice = state.sioPendingDevice | 0;
         io.sioPendingCmd = state.sioPendingCmd | 0;
