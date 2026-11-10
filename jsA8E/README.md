@@ -207,6 +207,26 @@ preserved non-destructively; an incoming name collision in the same folder is
 renamed with filesystem-style suffixes such as `file(1).atr` and
 `file(2).atr`. No generic binary merge is attempted for ATR/XEX files.
 
+### Remote library sync (optional, WebDAV)
+
+The title bar of the Disk Library has a sync control (LED + button, gear for
+settings). It synchronizes the library with a WebDAV folder (tested with
+Nextcloud) so several browsers can share one library:
+
+- **Mounted disks only** (one `workspace.a8e`) or **Whole library**
+  (`library.json` + `blobs/`, only missing files are transferred);
+- writes are guarded by ETag preconditions, merges are non-destructive
+  (divergent edits keep both variants, deletions go to Trash, a later edit
+  always beats a delete);
+- deletions, folder renames and entry moves propagate; the remote is polled
+  every minute and an *Update* indicator appears when it changed, with an
+  automatic sync after 5 minutes without activity (optional);
+- the application password is kept in memory only; the server must allow CORS
+  for the jsA8E origin.
+
+Server setup, protocol, sequence diagrams and limitations are documented in
+`implementation/OnlineDrive.md`. Native A8E does not have remote sync yet.
+
 The browser library is backed by IndexedDB and preserves folders, revisions,
 preferred revisions, metadata, and workspace assignments between sessions.
 For the shared package contract and native parity details, see the [Full

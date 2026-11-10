@@ -11,6 +11,17 @@ Status (jsA8E, branch `OnlineDrive`):
 | 3 | Automatic sync (ETag polling, "Update" indicator, idle sync) | Implemented in jsA8E; polling covered by unit tests, UI timers not covered by automated tests |
 | - | Native A8E WebDAV client | Not started (accepted parity debt) |
 
+## Where things live
+
+| Piece | Location |
+|---|---|
+| WebDAV client, workspace sync, fingerprint, `checkRemote` | `jsA8E/js/app/remote_workspace.js` |
+| Whole-library sync (blobs, tombstones, metadata merge) | `jsA8E/js/app/remote_library.js` |
+| Control, LED, dialog, polling and idle timers | `jsA8E/js/app/remote_sync_ui.js` (markup in `index.html`, styles in `style.css`) |
+| Library core support (`getManifest`, `readBlob`, tombstones, `applyMetadata`, fast-forward import) | `jsA8E/js/core/disk_library.js`, `library_package.js` |
+| Worker bridge | `jsA8E/js/core/app_proxy.js`, `jsA8E/emulator_worker.js` |
+| Tests | `remote_workspace`, `remote_library`, `remote_library_tombstones`, `remote_library_metadata` (+ `remote_test_support.js`, a simulated ETag/MKCOL/Basic-auth server), `app_proxy_library_export`, `disk_library_api_parity` |
+
 ## Decisions (2026-11-08)
 
 - Start with the **workspace MVP** (a single `workspace.a8e`), then grow.
@@ -113,6 +124,7 @@ sequenceDiagram
             S->>S: verify SHA-256 (a corrupt blob aborts everything)
         end
         S->>L: importPackage (fast-forward, duplicates, conflict copies)
+        S->>L: applyMetadata (newer remote moves and renames)
         S->>L: dropTombstones (resurrected), applyTombstones (remote deletions)
         opt local had changes before the pull
             S->>R: upload missing blobs
@@ -417,10 +429,11 @@ A8E does not have it yet** (parity debt).
 ### New Disk Library APIs (core and worker proxy)
 
 `getManifest()`, `readBlob(sha256)`, `getTombstones()`, `applyTombstones(list)`,
-`dropTombstones(ids)` and `applyMetadata(remote)`, with worker messages `diskLibraryManifest`,
-`diskLibraryReadBlob`, `diskLibraryTombstones`, `diskLibraryApplyTombstones`,
-`diskLibraryDropTombstones` and `diskLibraryApplyMetadata`. `disk_library_api_parity.test.js` also scans
-the remote modules for methods they use. The proxy side is covered by
+`dropTombstones(ids)` and `applyMetadata(remote)`, with worker messages
+`diskLibraryManifest`, `diskLibraryReadBlob`, `diskLibraryTombstones`,
+`diskLibraryApplyTombstones`, `diskLibraryDropTombstones` and
+`diskLibraryApplyMetadata`. `disk_library_api_parity.test.js` also scans the
+remote modules for methods they use. The proxy side is covered by
 `app_proxy_library_export.test.js`; `emulator_worker.js` itself has no direct
 automated test (manual use in Chromium exercises it).
 
@@ -559,7 +572,11 @@ writes) and is never reused for network traffic. The visible Library UI uses the
 classic four-drive view (`D1:` to `D4:`); sync controls are never mixed with the
 drive slots.
 
-## Known limitations
+## Known limitations and next steps
+
+Next candidates: a per-revision hash cache, cache-busting of the worker URL,
+gamepad activity for the idle timer, remote blob garbage collection, the optional
+"remember password" setting and the native client.
 
 - Renames and moves use browser clocks (newest change wins); there is no folder move and no standalone entry rename to merge.
 - No remote garbage collection of blobs; tombstones expire after 90 days.
