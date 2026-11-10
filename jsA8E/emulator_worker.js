@@ -1107,6 +1107,10 @@
         const library = requireDiskLibrary();
         return library.applyTombstones(data.tombstones || []);
       }
+      case "diskLibraryApplyMetadata": {
+        const library = requireDiskLibrary();
+        return library.applyMetadata(data.metadata || {});
+      }
       case "diskLibraryDropTombstones": {
         const library = requireDiskLibrary();
         return library.dropTombstones(data.ids || []);

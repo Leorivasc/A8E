@@ -224,6 +224,7 @@
       if (!Number.isInteger(entry.size) || entry.size < 0) fail("invalid entry size");
       if (!/^[0-9a-f]{64}$/.test(entry.sha256) || entry.sha256 !== entry.path.substring(6, 70)) fail("invalid entry sha256");
       if (!validTime(entry.createdAt) || !validTime(entry.modifiedAt)) fail("invalid entry timestamp");
+      if (entry.metaModifiedAt !== undefined && !validTime(entry.metaModifiedAt)) fail("invalid entry metadata timestamp");
       if (entry.mountedSlot !== undefined && (!Number.isInteger(entry.mountedSlot) || entry.mountedSlot < -1 || entry.mountedSlot > 7)) fail("invalid mountedSlot");
       if (entry.folderId !== undefined && !folderIds.has(entry.folderId)) fail("invalid entry folder");
       if (entry.revisions !== undefined) {
@@ -275,6 +276,8 @@
         mountedSlot: typeof record.mountedSlot === "number" ? record.mountedSlot | 0 : -1,
         folderId: record.folderId || "root",
       };
+      // Optional: when the folder/name last changed (drives metadata merge).
+      if (record.metaModified) result.metaModifiedAt = new Date(record.metaModified).toISOString();
       if (Array.isArray(record.revisions) && record.revisions.length) {
         result.revisions = record.revisions.map(function (revision) {
           const revisionBytes = cloneBytes(revision.bytes);
@@ -549,6 +552,7 @@
         bytes: cloneBytes(item.bytes),
         created: Date.parse(manifest.createdAt),
         modified: Date.parse(manifest.modifiedAt),
+        metaModified: Date.parse(manifest.metaModifiedAt || "") || 0,
         mountedSlot: typeof manifest.mountedSlot === "number" ? manifest.mountedSlot : -1,
         folderId: targetFolderId,
         sha256: hash,

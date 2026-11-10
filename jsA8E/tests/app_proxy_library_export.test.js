@@ -87,6 +87,7 @@ async function main() {
           message.cmd === "diskLibraryTombstones" ||
           message.cmd === "diskLibraryApplyTombstones" ||
           message.cmd === "diskLibraryDropTombstones" ||
+          message.cmd === "diskLibraryApplyMetadata" ||
           message.cmd === "diskLibraryCancel") {
         setTimeout(() => {
           this.onmessage({
@@ -160,6 +161,7 @@ async function main() {
   assert.equal((await app.diskLibrary.getTombstones()).cmd, "diskLibraryTombstones");
   assert.deepEqual((await app.diskLibrary.applyTombstones([{ id: "x" }])).payload.tombstones, [{ id: "x" }]);
   assert.deepEqual((await app.diskLibrary.dropTombstones(["x"])).payload.ids, ["x"]);
+  assert.deepEqual((await app.diskLibrary.applyMetadata({ entries: [] })).payload.metadata, { entries: [] });
 
   const progress = [];
   let cancelRequested = false;

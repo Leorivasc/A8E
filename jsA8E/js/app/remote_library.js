@@ -110,6 +110,29 @@
       return map;
     }
 
+    /* Remote folders keep the local name/parent when the id exists here, so the
+     * importer never duplicates a renamed folder; renames are merged separately. */
+    function foldersForImport(remoteManifest, localMan, localTombs, used) {
+      const local = new Map((localMan.folders || []).map(function (folder) { return [folder.id, folder]; }));
+      return (remoteManifest.folders || []).filter(function (folder) {
+        return !localTombs.has(folder.id) || used.has(folder.id);
+      }).map(function (folder) {
+        const mine = local.get(folder.id);
+        return mine ? Object.assign({}, folder, { name: mine.name, parentId: mine.parentId }) : folder;
+      });
+    }
+
+    /* Merges renames and moves (newest change wins); resolves to
+     * {changed, newer}: applied changes, and local values newer than the remote. */
+    function applyMetadata(remoteManifest) {
+      const entries = (remoteManifest.library || []).map(function (entry) {
+        return { id: entry.id, name: entry.name, folderId: entry.folderId, metaModifiedAt: entry.metaModifiedAt };
+      });
+      return library.applyMetadata({ entries: entries, folders: remoteManifest.folders || [] }).then(function (result) {
+        return { changed: result.moved + result.renamed, newer: result.newer };
+      });
+    }
+
     /* Applies the remote deletions after the merge; resolves to the count of
      * entries and folders moved to the trash or removed. */
     function applyDeletions(remoteManifest, resurrected) {
@@ -140,7 +163,7 @@
       });
       const added = pending.filter(function (entry) { return !localEntries.has(entry.id); }).length;
       const summary = { added: added, conflicts: pending.length - added, duplicates: 0 };
-      const result = { added: added, conflicts: summary.conflicts, downloaded: 0, deleted: 0 };
+      const result = { added: added, conflicts: summary.conflicts, downloaded: 0, deleted: 0, moved: 0, metaNewer: 0 };
       // Remote folders the library lacks (even empty ones) are merged too.
       const localFolders = new Set((localMan.folders || []).map(function (folder) { return folder.id; }));
       const newFolders = (remoteManifest.folders || []).filter(function (folder) {
@@ -149,9 +172,14 @@
       result.folders = newFolders.length;
       if (!pending.length) {
         const folderImport = newFolders.length
-          ? importBatch([], remoteManifest, localHashes, new Map(), { done: 0, total: 0 }, opts)
+          ? importBatch([], Object.assign({}, remoteManifest, { folders: foldersForImport(remoteManifest, localMan, localTombs, new Set()) }),
+            localHashes, new Map(), { done: 0, total: 0 }, opts)
           : null;
         return Promise.resolve(folderImport).then(function () {
+          return applyMetadata(remoteManifest);
+        }).then(function (meta) {
+          result.moved = meta.changed;
+          result.metaNewer = meta.newer;
           return applyDeletions(remoteManifest, resurrected);
         }).then(function (deleted) {
           result.deleted = deleted;
@@ -191,15 +219,16 @@
 
         // Folders the local side deleted stay deleted unless a pulled entry lives in them.
         const used = new Set(pending.map(function (entry) { return entry.folderId || "root"; }));
-        const folders = (remoteManifest.folders || []).filter(function (folder) {
-          return !localTombs.has(folder.id) || used.has(folder.id);
-        });
-        const base = Object.assign({}, remoteManifest, { folders: folders });
+        const base = Object.assign({}, remoteManifest, { folders: foldersForImport(remoteManifest, localMan, localTombs, used) });
         let chain = Promise.resolve();
         batches.forEach(function (group) {
           chain = chain.then(function () { return importBatch(group, base, localHashes, wanted, counters, opts); });
         });
         return chain.then(function () {
+          return applyMetadata(remoteManifest);
+        }).then(function (meta) {
+          result.moved = meta.changed;
+          result.metaNewer = meta.newer;
           return applyDeletions(remoteManifest, resurrected);
         }).then(function (deleted) {
           result.downloaded = counters.done;
@@ -315,13 +344,14 @@
                 report.canceled = true;
                 return null;
               }
-              report.pulled = pulled.added > 0 || pulled.conflicts > 0 || pulled.deleted > 0 || pulled.folders > 0;
+              report.pulled = pulled.added > 0 || pulled.conflicts > 0 || pulled.deleted > 0 || pulled.folders > 0 || pulled.moved > 0;
               report.deleted = pulled.deleted;
+              report.moved = pulled.moved;
               report.conflicts = pulled.conflicts;
               report.downloaded = pulled.downloaded;
               report.summary = pulled;
               return localManifest().then(function (after) {
-                if (!isDirty(local)) {
+                if (!isDirty(local) && !pulled.metaNewer) {
                   state.lastEtag = remote.etag;
                   state.lastFingerprint = fingerprint(after);
                   state.remoteBlobs = Array.from(known);

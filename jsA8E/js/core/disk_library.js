@@ -249,6 +249,7 @@
           slot: entry.slot | 0,
           created: entry.created || Date.now(),
           modified: entry.modified || Date.now(),
+          metaModified: entry.metaModified || 0,
           revisions: (entry.revisions || []).map(function (revision) {
             return {
               id: revision.id,
@@ -468,6 +469,7 @@
           flushTimer: 0,
           created: raw.created || Date.now(),
           modified: raw.modified || Date.now(),
+          metaModified: Number(raw.metaModified) || 0, // last folder/name change, see applyMetadata
           revisions: revisions,
           preferredRevisionId: raw.preferredRevisionId || revisions[revisions.length - 1].id,
         };
@@ -817,6 +819,7 @@
         if (!target) return Promise.reject(new Error("Target folder not found"));
         entry.folderId = target.id;
         entry.modified = Date.now();
+        entry.metaModified = entry.modified;
         return persistRecord(entry).then(function () {
           emitChange();
           return getFileInfo(entry.id);
@@ -872,6 +875,7 @@
         return replace.then(function () {
           const format = getExtension(normalized);
           const bytes = cloneBytes(data);
+          if (normalized !== entry.name) entry.metaModified = Date.now();
           entry.name = normalized;
           entry.logicalName = logicalName(normalized);
           entry.format = format;
@@ -1382,6 +1386,7 @@
         restored.imageIndex = -1;
         restored.dirty = false;
         restored.modified = Date.now(); // outranks the tombstone other browsers hold
+        restored.metaModified = restored.modified;
         delete restored.deletedAt;
         entries.set(restored.id, restored);
         trash.delete(entry.id);
@@ -1514,6 +1519,7 @@
                 bytes: currentBytes(entry),
                 created: entry.created,
                 modified: entry.modified,
+                metaModified: entry.metaModified || 0,
                 folderId: entry.folderId || ROOT_FOLDER_ID,
                 mountedSlot: entry.slot,
                 revisions: (entry.revisions || []).map(function (revision) {
@@ -1576,6 +1582,66 @@
         return exportPackage(config);
       }
 
+      // Remote metadata merge: the side that changed an entry's folder or name,
+      // or a folder's name, last wins (clock based, content is never touched).
+      // `remote` is {entries:[{id, name, folderId, metaModifiedAt}],
+      // folders:[{id, name, modifiedAt}]}. Resolves to {moved, renamed, newer}, where
+      // `newer` counts values the local side keeps because its own change is newer
+      // (the caller must republish them).
+      function applyMetadata(remote) {
+        const data = remote && typeof remote === "object" ? remote : {};
+        const result = { moved: 0, renamed: 0, newer: 0 };
+        let pending = Promise.resolve();
+        (data.folders || []).forEach(function (item) {
+          const folder = getFolder(item && item.id);
+          const name = normalizeFolderName(item && item.name);
+          const at = Date.parse(item && item.modifiedAt || "") || 0;
+          if (!folder || folder.id === ROOT_FOLDER_ID || !name || name === folder.name) return;
+          if (at < (folder.modified || 0)) result.newer++;
+          if (at <= (folder.modified || 0) || hasFolderName(name, folder.parentId, folder.id)) return;
+          pending = pending.then(function () {
+            folder.name = name;
+            folder.modified = at;
+            result.renamed++;
+            return persistFolder(folder);
+          });
+        });
+        (data.entries || []).forEach(function (item) {
+          const entry = getEntry(item && item.id);
+          const at = Date.parse(item && item.metaModifiedAt || "") || 0;
+          if (!entry) return;
+          if (at < (entry.metaModified || 0) && (item.folderId !== (entry.folderId || ROOT_FOLDER_ID) || normalizeName(item.name) !== currentName(entry))) {
+            result.newer++;
+          }
+          if (at <= (entry.metaModified || 0)) return;
+          pending = pending.then(function () {
+            const folderId = item.folderId && getFolder(item.folderId) ? item.folderId : (entry.folderId || ROOT_FOLDER_ID);
+            const name = normalizeName(item.name) || entry.name;
+            const sameFormat = getExtension(name) === entry.format;
+            const newName = sameFormat ? name : entry.name;
+            const taken = findByLogicalName(newName, folderId);
+            if (taken && taken.id !== entry.id) return null; // never create a duplicate name
+            const nameChanged = newName !== entry.name;
+            const folderChanged = folderId !== (entry.folderId || ROOT_FOLDER_ID);
+            if (!nameChanged && !folderChanged) return null;
+            entry.folderId = folderId;
+            if (nameChanged) {
+              entry.name = newName;
+              entry.logicalName = logicalName(newName);
+              if (entry.format === "atr" && entry.runtimeName) entry.runtimeName = newName;
+            }
+            entry.metaModified = at;
+            if (folderChanged) result.moved++;
+            else result.renamed++;
+            return persistRecord(entry);
+          });
+        });
+        return pending.then(function () {
+          if (result.moved || result.renamed) emitChange();
+          return result;
+        });
+      }
+
       // Library manifest without bytes, mounts or trash, used by remote
       // synchronization to compare against the remote `library.json`.
       function getManifest() {
@@ -1595,6 +1661,7 @@
               bytes: currentBytes(entry),
               created: entry.created,
               modified: entry.modified,
+              metaModified: entry.metaModified || 0,
               folderId: entry.folderId || ROOT_FOLDER_ID,
               revisions: (entry.revisions || []).map(function (revision) {
                 return {
@@ -1662,6 +1729,7 @@
             bytes: cloneBytes(currentBytes(entry)),
             created: entry.created,
             modified: entry.modified,
+            metaModified: entry.metaModified || 0,
             folderId: entry.folderId || ROOT_FOLDER_ID,
             revisions: (entry.revisions || []).map(function (revision) {
               return {
@@ -1714,6 +1782,7 @@
         entry.folderId = record.folderId || ROOT_FOLDER_ID;
         entry.created = Number.isFinite(record.created) ? record.created : Date.now();
         entry.modified = Number.isFinite(record.modified) ? record.modified : entry.created;
+        entry.metaModified = Number(record.metaModified) || 0;
         entry.slot = -1;
         if (Array.isArray(record.revisions) && record.revisions.length) {
           entry.revisions = record.revisions.map(function (revision) {
@@ -1928,6 +1997,7 @@
         getManifest: getManifest,
         getTombstones: getTombstones,
         applyTombstones: applyTombstones,
+        applyMetadata: applyMetadata,
         dropTombstones: dropTombstones,
         readBlob: readBlob,
         inspectPackage: inspectPackage,

@@ -260,6 +260,7 @@
           const parts = [];
           if (report.empty) parts.push("remote is empty and there is nothing to publish");
           if (report.pulled) parts.push("pulled");
+          if (report.moved) parts.push(report.moved + " rename(s)/move(s) applied");
           if (report.deleted) parts.push(report.deleted + " deletion(s) applied (see Trash)");
           if (report.pushed) parts.push("published");
           if (report.downloaded) parts.push(report.downloaded + " file(s) downloaded");

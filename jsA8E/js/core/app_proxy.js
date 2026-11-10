@@ -55,6 +55,7 @@
     diskLibraryReadBlob: 30000,
     diskLibraryApplyTombstones: 60000,
     diskLibraryDropTombstones: 30000,
+    diskLibraryApplyMetadata: 30000,
     diskLibraryCancel: 5000,
     diskLibraryRenameFolder: 15000,
     diskLibrarySelectRevision: 15000,
@@ -1162,6 +1163,11 @@
         { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryApplyTombstones });
     }
 
+    function applyMetadata(remote) {
+      return sendRequest("diskLibraryApplyMetadata", { metadata: remote || {} }, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryApplyMetadata });
+    }
+
     function dropTombstones(ids) {
       return sendRequest("diskLibraryDropTombstones", { ids: ids || [] }, null,
         { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryDropTombstones });
@@ -1355,6 +1361,7 @@
         getTombstones: getTombstones,
         applyTombstones: applyTombstones,
         dropTombstones: dropTombstones,
+        applyMetadata: applyMetadata,
         renameFolder: renameFolder,
         listRevisions: listRevisions,
         selectRevision: selectRevision,

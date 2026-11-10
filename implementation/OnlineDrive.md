@@ -7,7 +7,7 @@ Status (jsA8E, branch `OnlineDrive`):
 | 1 | Workspace sync (`workspace.a8e`, mounted disks only) | Implemented, validated on a real Nextcloud (Firefox + Chromium) |
 | 2a | Whole-library incremental sync (`library.json` + `blobs/`) | Implemented, validated on a real Nextcloud (2026-11-09; the proxy must allow `MKCOL` in CORS) |
 | 2b | Deletions through tombstones | Implemented, validated on a real Nextcloud (delete, edit-beats-delete) |
-| 2b | Renames / moves of entries and folders | Not implemented |
+| 2b | Renames / moves (entry folder and name, folder name) | Implemented, covered by unit tests, pending real-server validation |
 | 3 | Automatic sync (ETag polling, "Update" indicator, idle sync) | Implemented in jsA8E; polling covered by unit tests, UI timers not covered by automated tests |
 | - | Native A8E WebDAV client | Not started (accepted parity debt) |
 
@@ -416,10 +416,10 @@ A8E does not have it yet** (parity debt).
 
 ### New Disk Library APIs (core and worker proxy)
 
-`getManifest()`, `readBlob(sha256)`, `getTombstones()`, `applyTombstones(list)`
-and `dropTombstones(ids)`, with worker messages `diskLibraryManifest`,
-`diskLibraryReadBlob`, `diskLibraryTombstones`, `diskLibraryApplyTombstones`
-and `diskLibraryDropTombstones`. `disk_library_api_parity.test.js` also scans
+`getManifest()`, `readBlob(sha256)`, `getTombstones()`, `applyTombstones(list)`,
+`dropTombstones(ids)` and `applyMetadata(remote)`, with worker messages `diskLibraryManifest`,
+`diskLibraryReadBlob`, `diskLibraryTombstones`, `diskLibraryApplyTombstones`,
+`diskLibraryDropTombstones` and `diskLibraryApplyMetadata`. `disk_library_api_parity.test.js` also scans
 the remote modules for methods they use. The proxy side is covered by
 `app_proxy_library_export.test.js`; `emulator_worker.js` itself has no direct
 automated test (manual use in Chromium exercises it).
@@ -465,9 +465,53 @@ optional field):
 - Remote folders the library lacks (even empty ones) are now merged too.
 - Test: `tests/remote_library_tombstones.test.js`.
 
-Pending in this phase: propagating **renames and moves** of entries and folders.
-It needs a per-entry metadata timestamp (`modified` currently follows content
-and file moves only).
+### Renames and moves (metadata merge)
+
+What the library can actually change: moving an entry to another folder
+(`moveFile`), renaming a folder (`renameFolder`), and a different name that
+comes with a replacement (`replaceFile`). There is no folder move and no
+standalone entry rename in the UI, so those are not handled.
+
+- Each entry has a `metaModified` timestamp (persisted, exported in the manifest
+  as the optional `metaModifiedAt`) set by `moveFile`, by `replaceFile` when the
+  name changes and by `restoreTrash`. It is separate from `modified` (content
+  and any change) on purpose: an unrelated later edit on another browser must not
+  undo a move. Folders already carry `modified`, which only changes on rename.
+- `library.applyMetadata({entries, folders})` (core, proxy and worker) applies a
+  remote change only when the remote timestamp is **newer** than the local one:
+  the newest change wins and content is never touched. The remote timestamp is
+  adopted (not "now"), so applying a change never counts as a new local edit.
+- Safeguards: a move or rename is skipped when it would create a duplicate name
+  in the target folder, when the target folder does not exist, or (entries) when
+  the new name has a different format extension. Nothing is ever merged or
+  overwritten.
+- When the local value is newer than the remote one (it was kept), the sync
+  republishes so the other browser receives it (`metaNewer`). Equal values are
+  not counted, so two idle browsers cannot ping-pong.
+- Remote folders that already exist locally are handed to the importer with the
+  **local** name, otherwise a renamed folder was imported as a duplicate
+  (`<id>-import`) whenever an entry was pulled in the same round.
+- Test: `tests/remote_library_metadata.test.js` (move, folder rename, rename plus
+  edit in the same round without duplicating the folder, newest move wins).
+
+```mermaid
+sequenceDiagram
+    participant A as Browser A
+    participant R as WebDAV server
+    participant B as Browser B
+
+    Note over A,B: both hold X.ATR in folder GAMES, in sync
+    A->>A: move X.ATR to root (metaModified = t1)
+    A->>R: PUT library.json (X folderId root, metaModifiedAt t1)
+    B->>B: rename GAMES to ARCADE, move X.ATR (metaModified = t2, t2 later than t1)
+    B->>R: GET library.json
+    R-->>B: X in root at t1
+    B->>B: t1 older than t2, keep local value and flag it as newer
+    B->>R: PUT library.json (If-Match, X in ARCADE at t2)
+    A->>R: GET library.json
+    R-->>A: X in ARCADE at t2
+    A->>A: t2 newer than t1, apply the move and the folder rename (content untouched)
+```
 
 ## Phase 3: automatic sync
 
@@ -517,7 +561,7 @@ drive slots.
 
 ## Known limitations
 
-- Renames and moves do not propagate yet.
+- Renames and moves use browser clocks (newest change wins); there is no folder move and no standalone entry rename to merge.
 - No remote garbage collection of blobs; tombstones expire after 90 days.
 - `getManifest()` rehashes the whole library on every sync (a per-revision hash
   cache is a pending optimization).

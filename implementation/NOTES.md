@@ -51,6 +51,15 @@
   ArrowRight press (keyboard, also via the gamepad path) was ignored once while
   later ones worked; left, up and down did not show it. ESLint could not run
   (no `node_modules`); `node --check` passes.
+- 2026-11-10 (jsA8E: remote renames and moves, Phase 2b): entries carry a
+  persisted `metaModified` (set by `moveFile`, name-changing `replaceFile`,
+  `restoreTrash`; manifest field `metaModifiedAt`, validated as optional).
+  `library.applyMetadata()` (core + proxy + worker + parity test) applies remote
+  moves/renames only when newer, never creating duplicate names, and reports
+  `newer` values so the sync republishes them. Remote folders already known
+  locally are passed to the importer under their local name (avoids `-import`
+  duplicates). Native A8E still lacks fast-forward, tombstones and metadata merge.
+  Test: `tests/remote_library_metadata.test.js`.
 - 2026-11-10 (jsA8E: automatic remote sync, Phase 3): `client.head()` and
   `sync.checkRemote()` (HEAD + ETag compare, both scopes). `remote_sync_ui.js`
   polls every 60 s and on focus/visibility, shows "Update" when the remote moved,
