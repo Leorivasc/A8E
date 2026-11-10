@@ -37,7 +37,7 @@
     let url;
     try {
       url = new URL(String(value || "").trim());
-    } catch (err) {
+    } catch {
       throw new RemoteError("bad-url", "The WebDAV folder URL is not valid.");
     }
     if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalHost(url.hostname))) {
@@ -199,7 +199,7 @@
           let parsed = null;
           try {
             parsed = JSON.parse(new TextDecoder().decode(identity.bytes));
-          } catch (err) {
+          } catch {
             parsed = null;
           }
           if (!parsed || parsed.format !== IDENTITY_FORMAT || typeof parsed.repoId !== "string") {

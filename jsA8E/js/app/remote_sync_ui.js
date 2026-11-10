@@ -17,7 +17,7 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
       return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (err) {
+    } catch {
       return {};
     }
   }
@@ -25,7 +25,7 @@
   function saveConfig(config) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-    } catch (err) {
+    } catch {
       /* Persistence is a convenience; sync still works for this session. */
     }
   }
@@ -33,7 +33,7 @@
   function clearConfig() {
     try {
       localStorage.removeItem(STORAGE_KEY);
-    } catch (err) {
+    } catch {
       /* Ignore. */
     }
   }
