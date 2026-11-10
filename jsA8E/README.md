@@ -221,8 +221,11 @@ Nextcloud) so several browsers can share one library:
 - deletions, folder renames and entry moves propagate; the remote is polled
   every minute and an *Update* indicator appears when it changed, with an
   automatic sync after 5 minutes without activity (optional);
-- the application password is kept in memory only; the server must allow CORS
-  for the jsA8E origin.
+- the application password is kept in memory only unless you opt in to
+  "Remember the password on this device" (stored unencrypted, reconnects on
+  load); the server must allow CORS for the jsA8E origin;
+- "Clean up remote" removes remote files that no entry references any more
+  (older than 7 days; needs `DELETE` in the server CORS methods).
 
 Server setup, protocol, sequence diagrams and limitations are documented in
 `implementation/OnlineDrive.md`. Native A8E does not have remote sync yet.
@@ -343,6 +346,8 @@ Worker-backed control calls now acknowledge completion before `system.start()`, 
 Flat compatibility aliases still exist, so earlier calls such as `start()`, `runUntilPc()`, or `captureScreenshot()` continue to work.
 
 ### MCP server
+
+Full guide: [implementation/MCP.md](../implementation/MCP.md).
 
 For Codex-style MCP clients, `mcp_server.js` exposes the same headless runtime through a local stdio bridge. Start it with `npm run mcp` from `jsA8E/`. It keeps the server surface small and maps grouped automation actions through `get_capabilities`, `get_system_state`, and `call_automation`.
 

@@ -39,6 +39,8 @@ For browser-less Node usage, `jsA8E/headless.js` exports `createHeadlessAutomati
 
 ## MCP Bridge
 
+See [MCP.md](../implementation/MCP.md) for the full guide (startup options, ROM lookup, protocol behavior, the argument mapping for every action, results and errors, and examples).
+
 For Codex-style MCP clients, `mcp_server.js` exposes the same headless runtime through a local stdio bridge. The server advertises three tools: `get_capabilities`, `get_system_state`, and `call_automation`.
 
 `call_automation` accepts `{ domain, action, args }`. The supported domains are `system`, `media`, `input`, `debug`, `dev`, and `artifacts`. Actions mirror the grouped jsA8E methods documented below. Binary inputs should use base64 strings or local file paths, and `artifacts.captureScreenshot` returns an MCP image content block plus base64 data in `structuredContent`.

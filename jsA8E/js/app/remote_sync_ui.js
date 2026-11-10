@@ -5,8 +5,10 @@
    * Sync is manual, plus an optional automatic mode: while connected the
    * remote ETag is polled (HEAD) every minute and when the tab regains focus.
    * A change shows "Update"; after IDLE_MS without user input the pending
-   * pull/push runs by itself. Only URL, user name and settings are persisted
-   * (localStorage, per-viewer); the application password stays in memory. */
+   * pull/push runs by itself. URL, user name and settings are persisted
+   * (localStorage, per-viewer). The application password stays in memory unless
+   * the user opts in to "remember" it, which stores it unencrypted in this browser
+   * and reconnects automatically on load. */
 
   const STORAGE_KEY = "a8e.remoteWorkspace.v1";
   const CHECK_MS = 60000;
@@ -65,6 +67,8 @@
     const urlInput = dialog.querySelector(".remote-url");
     const scopeSelect = dialog.querySelector(".remote-scope");
     const autoInput = dialog.querySelector(".remote-auto");
+    const rememberInput = dialog.querySelector(".remote-remember");
+    const cleanupBtn = dialog.querySelector(".remote-cleanup");
     const userInput = dialog.querySelector(".remote-user");
     const passwordInput = dialog.querySelector(".remote-password");
     const messageEl = dialog.querySelector(".remote-message");
@@ -154,6 +158,8 @@
       userInput.value = saved.user || "";
       scopeSelect.value = saved.scope === "library" ? "library" : "workspace";
       autoInput.checked = saved.auto !== false;
+      rememberInput.checked = !!saved.password;
+      cleanupBtn.hidden = !(sync && sync.collectGarbage);
       passwordInput.value = "";
       showMessage(phase === "error" ? errorText : "", phase === "error" ? "error" : "");
       if (typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
@@ -161,7 +167,11 @@
     }
 
     function errorMessage(err) {
-      return err && err.message ? err.message : String(err);
+      const text = err && err.message ? err.message : String(err);
+      // A cached emulator_worker.js older than the page scripts answers this.
+      return /Unknown worker request/.test(text)
+        ? text + ". The emulator worker is out of date: reload the page without cache (Ctrl+Shift+R) or clear the site cache."
+        : text;
     }
 
     function connect() {
@@ -180,49 +190,73 @@
       }
       showMessage("Testing connection...", "");
       connectBtn.disabled = true;
-      let client;
-      try {
-        client = remoteApi.createClient({ url: url, user: user, password: pass });
-      } catch (err) {
-        connectBtn.disabled = false;
+      establish({
+        url: url,
+        user: user,
+        pass: pass,
+        scope: scopeSelect.value === "library" ? "library" : "workspace",
+        auto: autoInput.checked,
+        remember: rememberInput.checked,
+      }).then(function (identity) {
+        passwordInput.value = "";
+        showMessage(identity.created ? "Connected. A new remote repository was initialized." : "Connected.", "success");
+        dialog.close();
+      }).catch(function (err) {
+        sync = null;
         showMessage(errorMessage(err), "error");
-        return;
-      }
-      const scope = scopeSelect.value === "library" ? "library" : "workspace";
-      client.connect().then(function (identity) {
-        const sameRemote = saved.url === url && saved.user === user &&
-          saved.repoId === identity.repoId && (saved.scope || "workspace") === scope;
+      }).then(function () {
+        connectBtn.disabled = false;
+      });
+    }
+
+    /* Verifies the remote, builds the coordinator and starts the first sync.
+     * Shared by the dialog and by the automatic reconnection on load. */
+    function establish(params) {
+      const client = remoteApi.createClient({ url: params.url, user: params.user, password: params.pass });
+      return client.connect().then(function (identity) {
+        const sameRemote = saved.url === params.url && saved.user === params.user &&
+          saved.repoId === identity.repoId && (saved.scope || "workspace") === params.scope;
         saved = {
-          url: url,
-          user: user,
-          scope: scope,
-          auto: autoInput.checked,
+          url: params.url,
+          user: params.user,
+          scope: params.scope,
+          auto: params.auto,
           repoId: identity.repoId,
           lastEtag: sameRemote ? saved.lastEtag : "",
           lastFingerprint: sameRemote ? saved.lastFingerprint : "",
           syncedAt: sameRemote ? saved.syncedAt : 0,
           remoteBlobs: sameRemote ? saved.remoteBlobs || [] : [],
         };
+        if (params.remember) saved.password = params.pass;
         saveConfig(saved);
-        password = pass;
-        const factory = scope === "library" ? window.A8ERemoteLibrary : remoteApi;
+        password = params.pass;
+        const factory = params.scope === "library" ? window.A8ERemoteLibrary : remoteApi;
         if (!factory) throw new Error("Library synchronization is unavailable in this build.");
         sync = factory.createSync({ client: client, library: library, state: saved, save: persistState });
         return (sync.prepare ? sync.prepare() : Promise.resolve()).then(function () {
           phase = "connected";
           pending = true;
           errorText = "";
-          passwordInput.value = "";
-          showMessage(identity.created ? "Connected. A new remote repository was initialized." : "Connected.", "success");
           refresh();
-          dialog.close();
           runSync();
+          return identity;
         });
+      });
+    }
+
+    function cleanup() {
+      if (!sync || !sync.collectGarbage || running) return;
+      if (!confirm("Delete remote files that no library entry references (only files older than 7 days)? " +
+          "Your local library is not affected.")) return;
+      cleanupBtn.disabled = true;
+      showMessage("Cleaning up...", "");
+      sync.collectGarbage().then(function (report) {
+        showMessage("Removed " + report.deleted + " unused remote file(s)" +
+          (report.young ? "; " + report.young + " recent one(s) kept" : "") + ".", "success");
       }).catch(function (err) {
-        sync = null;
         showMessage(errorMessage(err), "error");
       }).then(function () {
-        connectBtn.disabled = false;
+        cleanupBtn.disabled = false;
       });
     }
 
@@ -275,6 +309,10 @@
         if (err && (err.code === "auth" || err.code === "forbidden")) {
           password = "";
           sync = null;
+          if (saved.password) { // a rejected stored password is useless
+            delete saved.password;
+            saveConfig(saved);
+          }
         }
       }).then(function () {
         running = false;
@@ -291,6 +329,7 @@
     });
     settingsBtn.addEventListener("click", openDialog);
     connectBtn.addEventListener("click", connect);
+    cleanupBtn.addEventListener("click", cleanup);
     closeBtn.addEventListener("click", function () { dialog.close(); });
     forgetBtn.addEventListener("click", function () {
       clearConfig();
@@ -343,6 +382,22 @@
       });
     }
 
+    // Gamepad input raises no DOM events, so sample it every few seconds.
+    function gamepadActive() {
+      if (typeof navigator.getGamepads !== "function") return false;
+      const pads = navigator.getGamepads() || [];
+      for (let i = 0; i < pads.length; i++) {
+        const pad = pads[i];
+        if (!pad) continue;
+        if (pad.buttons.some(function (button) { return button.pressed; })) return true;
+        if (pad.axes.some(function (axis) { return Math.abs(axis) > 0.5; })) return true;
+      }
+      return false;
+    }
+    setInterval(function () {
+      if (sync && gamepadActive()) lastInput = Date.now();
+    }, 2000);
+
     ["keydown", "pointerdown", "wheel", "touchstart"].forEach(function (name) {
       window.addEventListener(name, function () { lastInput = Date.now(); }, { passive: true, capture: true });
     });
@@ -355,6 +410,27 @@
       autoTick();
     }, CHECK_MS);
     refresh();
+
+    // Opt-in "remember password": reconnect (and sync) when the page loads.
+    if (saved.url && saved.user && saved.password) {
+      establish({
+        url: saved.url,
+        user: saved.user,
+        pass: saved.password,
+        scope: saved.scope === "library" ? "library" : "workspace",
+        auto: saved.auto !== false,
+        remember: true,
+      }).catch(function (err) {
+        sync = null;
+        phase = "error";
+        errorText = errorMessage(err);
+        if (err && (err.code === "auth" || err.code === "forbidden")) {
+          delete saved.password;
+          saveConfig(saved);
+        }
+        refresh();
+      });
+    }
   }
 
   window.A8ERemoteSyncUI = { init: init };

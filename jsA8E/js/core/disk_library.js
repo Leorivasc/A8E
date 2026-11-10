@@ -340,26 +340,6 @@
         });
       }
 
-      function deleteRecord(id) {
-        if (!db) return Promise.resolve();
-        let tx;
-        try {
-          tx = db.transaction(STORE_NAME, "readwrite");
-        } catch (err) {
-          return Promise.reject(err);
-        }
-        return new Promise(function (resolve, reject) {
-          const request = tx.objectStore(STORE_NAME).delete(id);
-          tx.oncomplete = function () { resolve(); };
-          tx.onabort = function () {
-            reject(tx.error || new Error("Disk library IndexedDB delete aborted"));
-          };
-          request.onerror = function () {
-            reject(request.error || new Error("Disk library IndexedDB delete failed"));
-          };
-        });
-      }
-
       function persistDeleteAtomically(entry) {
         if (!db || !entry) return Promise.resolve();
         let tx;
@@ -522,7 +502,7 @@
             let tx;
             try {
               tx = db.transaction([STORE_NAME, TRASH_STORE_NAME, FOLDER_STORE_NAME], "readonly");
-            } catch (err) {
+            } catch {
               ready = true;
               emitChange();
               resolve();
@@ -566,7 +546,7 @@
               let metadataTx;
               try {
                 metadataTx = db.transaction(META_STORE_NAME, "readonly");
-              } catch (err) {
+              } catch {
                 ready = true;
                 emitChange();
                 resolve();
@@ -1257,8 +1237,8 @@
 
       // Every content hash an entry has ever held that is still retained.
       function entryHashes(entry) {
-        const hashes = new Set([hashOfBytes(currentBytes(entry))]);
-        (entry.revisions || []).forEach(function (revision) { hashes.add(hashOfBytes(revision.bytes)); });
+        const hashes = new Set([getPackageApi().sha256(currentBytes(entry))]);
+        (entry.revisions || []).forEach(function (revision) { hashes.add(hashOfRevision(revision.bytes)); });
         return Array.from(hashes);
       }
 
@@ -1679,6 +1659,7 @@
             libraryVersion: libraryVersion,
             folders: Array.from(folders.values()),
             scope: "library",
+            revisionHash: hashOfRevision, // cached: only changed content is rehashed
           });
         }).then(function (manifest) {
           const list = getTombstones();
@@ -1687,14 +1668,15 @@
         });
       }
 
-      // Bytes of the current or retained revision whose SHA-256 is `hash`, or
-      // null. Hashes are cached per byte array so repeated lookups are cheap.
-      const blobHashes = new WeakMap();
-      function hashOfBytes(bytes) {
-        let hash = blobHashes.get(bytes);
+      // Retained revisions are immutable, so their SHA-256 is cached per byte
+      // array. The current bytes of a mounted entry are mutated in place by
+      // sector writes and must always be hashed fresh.
+      const revisionHashes = new WeakMap();
+      function hashOfRevision(bytes) {
+        let hash = revisionHashes.get(bytes);
         if (!hash) {
           hash = getPackageApi().sha256(bytes);
-          blobHashes.set(bytes, hash);
+          revisionHashes.set(bytes, hash);
         }
         return hash;
       }
@@ -1704,11 +1686,12 @@
         let found = null;
         entries.forEach(function (entry) {
           if (found) return;
-          const candidates = [currentBytes(entry)];
-          (entry.revisions || []).forEach(function (revision) { candidates.push(revision.bytes); });
-          for (let i = 0; i < candidates.length && !found; i++) {
-            if (hashOfBytes(candidates[i]) === wanted) found = candidates[i];
-          }
+          (entry.revisions || []).forEach(function (revision) {
+            if (!found && hashOfRevision(revision.bytes) === wanted) found = revision.bytes;
+          });
+          // After a flush the current bytes equal the last revision; hash them
+          // only when no revision matched (e.g. a converted XEX runtime image).
+          if (!found && getPackageApi().sha256(currentBytes(entry)) === wanted) found = currentBytes(entry);
         });
         return Promise.resolve(found ? cloneBytes(found) : null);
       }

@@ -4401,6 +4401,9 @@ canvas.crtEnabled {
 .remote-form .remote-check input {
   padding: 0;
 }
+.remote-actions .disklib-btn[hidden] {
+  display: none;
+}
 .remote-message {
   margin: 0;
   min-height: 1.2em;

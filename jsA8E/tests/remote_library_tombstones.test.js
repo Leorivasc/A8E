@@ -83,6 +83,23 @@ async function main() {
     await syncB.sync();
     assert.equal(names(b), "Y.ATR");
 
+    // Remote cleanup: unreferenced blobs go, young ones are protected, referenced ones stay.
+    const blobsBefore = Array.from(remote.files.keys()).filter(function (n) { return n.startsWith("blobs/"); }).length;
+    let gc = await syncA.collectGarbage();
+    assert.equal(gc.deleted, 0);
+    assert.ok(gc.young >= 1, "fresh blobs are not removed");
+    gc = await syncA.collectGarbage({ minAgeMs: 0 });
+    assert.ok(gc.deleted >= 1);
+    const blobsAfter = Array.from(remote.files.keys()).filter(function (n) { return n.startsWith("blobs/"); }).length;
+    assert.equal(blobsAfter, blobsBefore - gc.deleted);
+    const manifest = JSON.parse(remote.files.get("library.json").body.toString());
+    for (const entry of manifest.library) {
+      assert.ok(remote.files.has(entry.path), "referenced blob " + entry.path + " is kept");
+      for (const revision of entry.revisions || []) assert.ok(remote.files.has(revision.path));
+    }
+    await syncB.sync();
+    assert.equal(names(b), "Y.ATR");
+
     // Folder deletions follow the same path.
     const folder = await a.createFolder("GAMES", "root");
     await syncA.sync();

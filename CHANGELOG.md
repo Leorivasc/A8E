@@ -26,8 +26,18 @@ All notable changes to this project will be documented in this file.
   diagnostics.
 - Browser headless automation and MCP coverage for grouped lifecycle, media,
   debugger, HostFS, assembler, snapshot, artifact, and memory-profile flows.
+- jsA8E optional remote Disk Library sync over WebDAV (tested against
+  Nextcloud): workspace or whole-library scope, content-addressed blobs,
+  ETag-guarded publishing, non-destructive merge, tombstoned deletions (remote
+  deletions go to the local Trash), folder renames and entry moves, automatic
+  ETag polling with an "Update" indicator and idle sync, an opt-in remembered
+  password, and a manual remote cleanup of unreferenced blobs. The native A8E
+  has no WebDAV client yet (see `implementation/OnlineDrive.md`).
 
 ### Documentation
+- `implementation/MCP.md`: guide to the MCP server (`mcp_server.js`): startup options,
+  ROM lookup, protocol behavior and limits, argument mapping for every
+  action, results and errors, security notes, and a worked session.
 - VBXE is documented as experimental and opt-in. The roadmap now holds the list
   of known differences from Altirra 4.40, unaudited areas, validation gaps and
   test-infrastructure issues (`implementation/VBXE_ROADMAP.md`, "Known issues
@@ -56,6 +66,9 @@ All notable changes to this project will be documented in this file.
   `vbxe_blitter_midline_start`.
 
 ### Changed
+- jsA8E MCP server: file arguments are confined to `--cwd` by default
+  (`--allow-any-path` lifts it) and `--no-network` disables the URL loading
+  actions.
 - Faster VBXE paths for software that toggles MEMAC windows or uses attribute
   maps on every line: MEMAC B remapping is decided per window, the attribute
   map is looked up once per cell run, and decoded cells are kept on the row

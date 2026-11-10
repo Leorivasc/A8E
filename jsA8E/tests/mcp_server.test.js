@@ -157,6 +157,64 @@ async function main() {
     const unknownDomain = await session.handlePayload({ jsonrpc: '2.0', id: 13, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'missing', action: 'noop', args: {} } } });
     assert.equal(unknownDomain.error.code, -32602);
 
+    // Path confinement: relative escapes, absolute paths and symlinks that
+    // lead out of the working directory are refused; nothing reaches the runtime.
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jsa8e-mcp-outside-'));
+    fs.writeFileSync(path.join(outsideDir, 'SECRET.BIN'), 'secret');
+    fs.symlinkSync(outsideDir, path.join(tempDir, 'LINK'));
+    fs.mkdirSync(path.join(tempDir, 'SUB'));
+    fs.writeFileSync(path.join(tempDir, 'SUB', 'IN.BIN'), 'ok');
+    const callsBefore = stub.calls.length;
+    async function hostWrite(id, args, targetSession) {
+      return (targetSession || session).handlePayload({
+        jsonrpc: '2.0', id: id, method: 'tools/call',
+        params: { name: 'call_automation', arguments: { domain: 'dev', action: 'writeHostFile', args: Object.assign({ name: 'X.BIN' }, args) } },
+      });
+    }
+    for (const bad of ['../x', path.join(outsideDir, 'SECRET.BIN'), 'LINK/SECRET.BIN', 'SUB/../../x']) {
+      const refused = await hostWrite(20, { path: bad });
+      assert.equal(refused.error.code, -32602, bad);
+      assert.match(refused.error.message, /outside the working directory/, bad);
+    }
+    assert.equal(stub.calls.length, callsBefore);
+    const inside = await hostWrite(21, { path: 'SUB/IN.BIN' });
+    assert.equal(inside.result.structuredContent.result.written, true);
+    const insideAbs = await hostWrite(22, { path: path.join(tempDir, 'SUB', 'IN.BIN') });
+    assert.equal(insideAbs.result.structuredContent.result.written, true);
+    const sourceOutside = await session.handlePayload({
+      jsonrpc: '2.0', id: 23, method: 'tools/call',
+      params: { name: 'call_automation', arguments: { domain: 'dev', action: 'assembleSource', args: { path: '../x.asm' } } },
+    });
+    assert.equal(sourceOutside.error.code, -32602);
+
+    const open = createMcpSession(stub.runtime, { cwd: tempDir, confinePaths: false });
+    await open.handlePayload({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+    const allowed = await hostWrite(24, { path: path.join(outsideDir, 'SECRET.BIN') }, open);
+    assert.equal(allowed.result.structuredContent.result.written, true);
+
+    // Network switch: every URL action is refused, local actions still work.
+    const offline = createMcpSession(stub.runtime, { cwd: tempDir, allowNetwork: false });
+    await offline.handlePayload({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+    const urlCalls = [['media', 'loadRomFromUrl'], ['media', 'loadOsRomFromUrl'], ['media', 'loadBasicRomFromUrl'], ['media', 'mountDiskFromUrl'], ['dev', 'runXexFromUrl']];
+    for (const pair of urlCalls) {
+      const blocked = await offline.handlePayload({
+        jsonrpc: '2.0', id: 25, method: 'tools/call',
+        params: { name: 'call_automation', arguments: { domain: pair[0], action: pair[1], args: { url: 'http://127.0.0.1/x' } } },
+      });
+      assert.equal(blocked.error.code, -32602, pair[1]);
+      assert.match(blocked.error.message, /disabled/, pair[1]);
+    }
+    const localOk = await hostWrite(26, { base64: 'AAAA' }, offline);
+    assert.equal(localOk.result.structuredContent.result.written, true);
+
+    const cli = require('../mcp_server').parseArgs(['node', 'mcp_server.js', '--allow-any-path', '--no-network']);
+    assert.equal(cli.confinePaths, false);
+    assert.equal(cli.allowNetwork, false);
+    const defaults = require('../mcp_server').parseArgs(['node', 'mcp_server.js']);
+    assert.equal(defaults.confinePaths, true);
+    assert.equal(defaults.allowNetwork, true);
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+
     await session.dispose();
     assert.equal(stub.calls[stub.calls.length - 1][0], 'dispose');
 

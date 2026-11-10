@@ -25,9 +25,23 @@ function toBuffer(value) {
   throw new TypeError("Unsupported binary input");
 }
 
-function resolvePath(cwd, inputPath) {
+// Resolves a path argument against the working directory. When `confine` is
+// set, anything that lands outside that directory is refused, both by name
+// and after following symbolic links.
+function resolvePath(cwd, inputPath, confine) {
   const base = cwd && typeof cwd === "string" ? cwd : DEFAULT_WORKSPACE_CWD;
-  return path.isAbsolute(inputPath) ? inputPath : path.resolve(base, inputPath);
+  const full = path.isAbsolute(inputPath) ? path.normalize(inputPath) : path.resolve(base, inputPath);
+  if (!confine) return full;
+  const outside = function (root, target) {
+    const rel = path.relative(root, target);
+    return rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+  };
+  const root = path.resolve(base);
+  if (outside(root, full)) throw protocolError(-32602, "Path is outside the working directory: " + String(inputPath));
+  // A symbolic link inside the directory must not lead out of it.
+  const realFull = fs.existsSync(full) ? fs.realpathSync(full) : full;
+  if (outside(fs.realpathSync(root), realFull)) throw protocolError(-32602, "Path is outside the working directory: " + String(inputPath));
+  return realFull;
 }
 
 function omitKeys(source, keys) {
@@ -39,10 +53,10 @@ function omitKeys(source, keys) {
   return out;
 }
 
-function readBinaryInput(args, cwd) {
+function readBinaryInput(args, resolveInput) {
   if (!args || typeof args !== "object") return null;
-  if (typeof args.path === "string" && args.path.length > 0) return fs.readFileSync(resolvePath(cwd, args.path));
-  if (typeof args.file === "string" && args.file.length > 0) return fs.readFileSync(resolvePath(cwd, args.file));
+  if (typeof args.path === "string" && args.path.length > 0) return fs.readFileSync(resolveInput(args.path));
+  if (typeof args.file === "string" && args.file.length > 0) return fs.readFileSync(resolveInput(args.file));
   if (typeof args.base64 === "string") return Buffer.from(args.base64, "base64");
   if (typeof args.dataBase64 === "string") return Buffer.from(args.dataBase64, "base64");
   if (typeof args.bytesBase64 === "string") return Buffer.from(args.bytesBase64, "base64");
@@ -185,6 +199,12 @@ function createMcpSession(runtime, options) {
   if (!runtime || !runtime.api) throw new Error("A runtime with an attached automation API is required");
   const api = runtime.api;
   const cwd = options && typeof options.cwd === "string" ? options.cwd : DEFAULT_WORKSPACE_CWD;
+  const confine = !options || options.confinePaths !== false;
+  const allowNetwork = !options || options.allowNetwork !== false;
+  const resolveInput = function (inputPath) { return resolvePath(cwd, inputPath, confine); };
+  const requireNetwork = function (action) {
+    if (!allowNetwork) throw protocolError(-32602, "URL loading is disabled (--no-network): " + action);
+  };
   const tools = buildTools();
   const toolMap = new Map(tools.map(function (tool) { return [tool.name, tool]; }));
   let disposed = false;
@@ -201,7 +221,7 @@ function createMcpSession(runtime, options) {
           case "boot": return api.system.boot(payload);
           case "saveSnapshot": return api.system.saveSnapshot(payload);
           case "loadSnapshot": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "system.loadSnapshot requires binary data");
             return api.system.loadSnapshot(binary, omitKeys(payload, ["path", "file", "base64", "dataBase64", "bytesBase64", "buffer", "bytes", "data"]));
           }
@@ -218,32 +238,32 @@ function createMcpSession(runtime, options) {
           case "loadRom": {
             const kind = payload.kind;
             if (kind !== "os" && kind !== "basic") throw protocolError(-32602, 'media.loadRom requires kind = "os" or "basic"');
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "media.loadRom requires binary data");
             return api.media.loadRom(kind, binary);
           }
           case "loadOsRom": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "media.loadOsRom requires binary data");
             return api.media.loadOsRom(binary);
           }
           case "loadBasicRom": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "media.loadBasicRom requires binary data");
             return api.media.loadBasicRom(binary);
           }
-          case "loadRomFromUrl": return api.media.loadRomFromUrl(payload.url, omitKeys(payload, ["url"]));
-          case "loadOsRomFromUrl": return api.media.loadOsRomFromUrl(payload.url, omitKeys(payload, ["url"]));
-          case "loadBasicRomFromUrl": return api.media.loadBasicRomFromUrl(payload.url, omitKeys(payload, ["url"]));
+          case "loadRomFromUrl": requireNetwork("loadRomFromUrl"); return api.media.loadRomFromUrl(payload.url, omitKeys(payload, ["url"]));
+          case "loadOsRomFromUrl": requireNetwork("loadOsRomFromUrl"); return api.media.loadOsRomFromUrl(payload.url, omitKeys(payload, ["url"]));
+          case "loadBasicRomFromUrl": requireNetwork("loadBasicRomFromUrl"); return api.media.loadBasicRomFromUrl(payload.url, omitKeys(payload, ["url"]));
           case "mountDisk": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "media.mountDisk requires binary data");
             const nameOrOptions = payload.nameOrOptions !== undefined ? payload.nameOrOptions : (payload.name !== undefined || payload.slot !== undefined ? { name: payload.name, slot: payload.slot } : undefined);
             return api.media.mountDisk(binary, nameOrOptions, payload.slot);
           }
-          case "mountDiskFromUrl": return api.media.mountDiskFromUrl(payload.url, omitKeys(payload, ["url"]));
+          case "mountDiskFromUrl": requireNetwork("mountDiskFromUrl"); return api.media.mountDiskFromUrl(payload.url, omitKeys(payload, ["url"]));
           case "loadDisk": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "media.loadDisk requires binary data");
             return api.media.loadDisk(binary, omitKeys(payload, ["path", "file", "base64", "dataBase64", "bytesBase64", "buffer", "bytes", "data"]));
           }
@@ -284,7 +304,7 @@ function createMcpSession(runtime, options) {
           case "readWordSigned": return api.debug.readWordSigned(payload.address, omitKeys(payload, ["address"]));
           case "writeMemory": return api.debug.writeMemory(payload.address, payload.value);
           case "writeRange": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "debug.writeRange requires binary data");
             return api.debug.writeRange(payload.start, binary);
           }
@@ -304,7 +324,7 @@ function createMcpSession(runtime, options) {
           case "writeHostFile": {
             const options = omitKeys(payload, ["name", "text", "base64", "dataBase64", "bytesBase64", "buffer", "bytes", "data", "path", "file"]);
             if (payload.text !== undefined) return api.dev.writeHostFile(payload.name, { text: String(payload.text) }, options);
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "dev.writeHostFile requires text or binary data");
             return api.dev.writeHostFile(payload.name, binary, options);
           }
@@ -316,15 +336,15 @@ function createMcpSession(runtime, options) {
           case "waitForHostFsFile": return api.dev.waitForHostFsFile(payload.name, omitKeys(payload, ["name"]));
           case "assembleSource": {
             const spec = omitKeys(payload, ["path", "file", "sourcePath"]);
-            if (payload.path || payload.file || payload.sourcePath) spec.text = fs.readFileSync(resolvePath(cwd, payload.path || payload.file || payload.sourcePath), "utf8");
+            if (payload.path || payload.file || payload.sourcePath) spec.text = fs.readFileSync(resolveInput(payload.path || payload.file || payload.sourcePath), "utf8");
             return api.dev.assembleSource(spec);
           }
           case "assembleHostFile": return api.dev.assembleHostFile(payload.name, omitKeys(payload, ["name"]));
           case "getLastBuildResult": return api.dev.getLastBuildResult(payload);
-          case "runXexFromUrl": return api.dev.runXexFromUrl(payload.url, omitKeys(payload, ["url"]));
+          case "runXexFromUrl": requireNetwork("runXexFromUrl"); return api.dev.runXexFromUrl(payload.url, omitKeys(payload, ["url"]));
           case "runXex": {
             const spec = omitKeys(payload, ["path", "file", "base64", "dataBase64", "bytesBase64", "buffer", "bytes", "data"]);
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (binary) spec.buffer = binary;
             return api.dev.runXex(spec);
           }
@@ -332,7 +352,7 @@ function createMcpSession(runtime, options) {
             const source = payload.text !== undefined ? String(payload.text) : payload.source;
             if (source === undefined && !(payload.path || payload.file || payload.sourcePath)) throw protocolError(-32602, "dev.buildAndRun requires source text or a path");
             const spec = omitKeys(payload, ["path", "file", "sourcePath", "text", "source"]);
-            if (payload.path || payload.file || payload.sourcePath) spec.text = fs.readFileSync(resolvePath(cwd, payload.path || payload.file || payload.sourcePath), "utf8");
+            if (payload.path || payload.file || payload.sourcePath) spec.text = fs.readFileSync(resolveInput(payload.path || payload.file || payload.sourcePath), "utf8");
             return api.dev.buildAndRun(spec.text !== undefined ? spec.text : source, spec);
           }
           case "sym": return api.dev.sym(payload.name, payload.fallback);
@@ -448,7 +468,7 @@ async function createMcpServer(options) {
 }
 
 function parseArgs(argv) {
-  const args = { cwd: DEFAULT_WORKSPACE_CWD, turbo: true, skipRendering: true, frameDelayMs: 0, audioEnabled: false, sioTurbo: true, optionOnStart: false, keyboardMappingMode: "translated" };
+  const args = { cwd: DEFAULT_WORKSPACE_CWD, turbo: true, skipRendering: true, frameDelayMs: 0, audioEnabled: false, sioTurbo: true, optionOnStart: false, keyboardMappingMode: "translated", confinePaths: true, allowNetwork: true };
   for (let i = 2; i < argv.length; i++) {
     const token = argv[i];
     if (token === "--cwd" && i + 1 < argv.length) args.cwd = path.resolve(argv[++i]);
@@ -461,6 +481,8 @@ function parseArgs(argv) {
     else if (token === "--audio-enabled") args.audioEnabled = true;
     else if (token === "--no-audio") args.audioEnabled = false;
     else if (token === "--no-sio-turbo") args.sioTurbo = false;
+    else if (token === "--allow-any-path") args.confinePaths = false;
+    else if (token === "--no-network") args.allowNetwork = false;
     else if (token === "--option-on-start") args.optionOnStart = true;
     else if (token === "--keyboard-mapping-mode" && i + 1 < argv.length) args.keyboardMappingMode = String(argv[++i]);
     else if (token === "--frame-delay-ms" && i + 1 < argv.length) args.frameDelayMs = Number(argv[++i]);
@@ -475,7 +497,7 @@ async function main() {
   const basicRom = cli.basicRom || process.env.JSA8E_BASIC_ROM || (fs.existsSync(DEFAULT_BASIC_ROM) ? DEFAULT_BASIC_ROM : null);
   if (osRom) roms.os = osRom;
   if (basicRom) roms.basic = basicRom;
-  const runtime = await createMcpServer({ cwd: cli.cwd, turbo: cli.turbo, skipRendering: cli.skipRendering, frameDelayMs: cli.frameDelayMs, audioEnabled: cli.audioEnabled, sioTurbo: cli.sioTurbo, optionOnStart: cli.optionOnStart, keyboardMappingMode: cli.keyboardMappingMode, roms: Object.keys(roms).length ? roms : undefined });
+  const runtime = await createMcpServer({ cwd: cli.cwd, turbo: cli.turbo, skipRendering: cli.skipRendering, frameDelayMs: cli.frameDelayMs, audioEnabled: cli.audioEnabled, sioTurbo: cli.sioTurbo, optionOnStart: cli.optionOnStart, keyboardMappingMode: cli.keyboardMappingMode, confinePaths: cli.confinePaths, allowNetwork: cli.allowNetwork, roms: Object.keys(roms).length ? roms : undefined });
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 
   async function writeResponse(payload) {

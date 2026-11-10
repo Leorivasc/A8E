@@ -9,7 +9,8 @@ Status (jsA8E, branch `OnlineDrive`):
 | 2b | Deletions through tombstones | Implemented, validated on a real Nextcloud (delete, edit-beats-delete) |
 | 2b | Renames / moves (entry folder and name, folder name) | Implemented, covered by unit tests, pending real-server validation |
 | 3 | Automatic sync (ETag polling, "Update" indicator, idle sync) | Implemented in jsA8E; polling covered by unit tests, UI timers not covered by automated tests |
-| - | Native A8E WebDAV client | Not started (accepted parity debt) |
+| 3b | Remote cleanup (blob GC), remember-password opt-in with auto-reconnect, gamepad idle detection, hash cache, stale-worker hint | Implemented in jsA8E, covered by unit tests where logic is testable (cleanup, hash cache); pending real-server validation |
+| - | Native A8E WebDAV client | Not started (accepted parity debt, see "Native parity" for the blocker) |
 
 ## Where things live
 
@@ -298,11 +299,16 @@ a possible XSS), so it is not considered secure storage.
 - HTTPS is required (only `localhost`, `127.0.0.1` and `[::1]` may use `http`);
   credentials inside the URL are rejected; requests use `credentials: "omit"`
   and `redirect: "error"` with a manual `Authorization: Basic` header.
-- After a reload the control returns to "Connect" because the password is not
-  persisted. Discarded alternative: a "Remember on this device" option storing
-  the password in `localStorage`; it could be offered later as an explicit
-  opt-in for revocable application passwords. A backend with an `HttpOnly`
-  session, or OAuth/OIDC with PKCE, would be safer but needs extra
+- By default, after a reload the control returns to "Connect" because the
+  password is not persisted.
+- **Opt-in "Remember the password on this device"** (dialog checkbox, off by
+  default): stores the password **unencrypted** in `localStorage` (same key as the
+  settings) and reconnects and syncs automatically when the page loads. Anyone
+  with access to the browser profile, or any script running in this origin,
+  can read it, so only use a revocable application password. The password is
+  deleted when the box is cleared and Connect is pressed again, on "Disconnect
+  and forget", and automatically if the server rejects it. A backend with an
+  `HttpOnly` session, or OAuth/OIDC with PKCE, would be safer but needs extra
   infrastructure.
 
 ## Server requirements: CORS and Nextcloud
@@ -314,7 +320,7 @@ must answer for the jsA8E origin:
 
 ```text
 Access-Control-Allow-Origin:   https://<jsA8E origin>   (or http://localhost:<port>)
-Access-Control-Allow-Methods:  GET, HEAD, PUT, MKCOL, OPTIONS
+Access-Control-Allow-Methods:  GET, HEAD, PUT, MKCOL, DELETE, OPTIONS
 Access-Control-Allow-Headers:  Authorization, If-Match, If-None-Match, Content-Type
 Access-Control-Expose-Headers: ETag
 ```
@@ -322,6 +328,9 @@ Access-Control-Expose-Headers: ETag
 - `MKCOL` is only needed by the whole-library scope (creates `blobs/` once; a
   `405` on later runs is normal and is treated as success, although the browser
   console shows it).
+- `DELETE` is only needed by "Clean up remote" (see Remote cleanup); everything
+  else works without it. `Last-Modified` is a CORS-safelisted response header and
+  needs no `Expose-Headers` entry.
 - Do not send `Allow-Credentials`: the client omits credentials and sends
   `Authorization` itself.
 - Nextcloud/ownCloud do not add these headers for arbitrary origins: add them
@@ -332,6 +341,9 @@ Access-Control-Expose-Headers: ETag
 - **Deployments:** upload `emulator_worker.js` together with `js/`, and reload
   without cache. A stale cached worker answers `Unknown worker request` to the
   newer proxy messages (neither the worker nor the scripts are version-busted).
+  The sync dialog recognizes that error and adds "the emulator worker is out of
+  date: reload without cache". The durable fix is server-side: send
+  `Cache-Control: no-cache` (revalidate) for `.js` files and the worker.
 
 Connection diagnosis (`client.connect()`): invalid or non-HTTPS URL, credentials
 in the URL, network/CORS failure (the browser cannot tell them apart and the
@@ -355,6 +367,11 @@ whose `.a8e-remote.json` is not an A8E repo, and a newer protocol.
 8. Automatic mode: edit in one browser and sync; in the other the control must
    show *Update* within a minute (or when the tab regains focus), and after 5
    idle minutes it must update by itself.
+9. "Remember the password": tick it, Connect, reload the page: it must
+   reconnect and sync by itself; a wrong stored password must be discarded.
+10. "Clean up remote" (library scope, DELETE allowed in CORS): delete and purge a
+    disk, sync, then clean up; blobs older than 7 days that nothing references
+    disappear and referenced ones stay.
 
 ## Phase 1: workspace sync
 
@@ -543,10 +560,40 @@ without activity" (on by default, saved as `auto`, applied on the next
 - **Idle:** after 5 minutes without keyboard, pointer, wheel or touch input the
   pending sync (pull and/or push) runs by itself. A merge the user vetoed is not
   launched again automatically.
-- Limitation: gamepad activity is not detected, so someone playing only with a
-  gamepad for more than 5 minutes could receive an automatic sync. In
-  whole-library scope mounts are untouched, and a fast-forward of a mounted disk
-  keeps its drive.
+- Gamepad activity counts as activity: while connected, the pads are sampled
+  every 2 s (any pressed button or an axis beyond 0.5) because gamepads raise no
+  DOM events. In whole-library scope mounts are untouched, and a fast-forward of
+  a mounted disk keeps its drive.
+
+### Remote cleanup (blob garbage collection)
+
+Blobs of deleted (and purged) entries stay on the server, because without
+`PROPFIND` the client cannot list the folder. The dialog button **Clean up
+remote** (whole-library scope, while connected) runs
+`sync.collectGarbage({minAgeMs})`:
+
+- Candidates are only the blobs this client knows (`remoteBlobs`: uploaded by
+  it or seen in a manifest it pulled) that neither the **current remote
+  manifest** nor the **local manifest** reference (so a local entry not yet
+  published is safe).
+- A blob younger than 7 days (`Last-Modified` from `HEAD`) is kept, so another
+  browser that just uploaded blobs for a publish still in flight cannot lose
+  them. A server that sends no `Last-Modified` gets no age protection.
+- The type of an unreferenced blob is not recorded, so `blobs/<sha>.atr` and
+  `.xex` are both tried (`HEAD`, then `DELETE`).
+- Manual on purpose and behind a confirmation: it is the only operation that
+  deletes remote data. A restore or a re-add simply uploads the blob again.
+- Needs `DELETE` in the server CORS methods.
+
+### Hash cache
+
+`getManifest()` no longer rehashes the whole history on every sync. Retained
+revisions are immutable, so their SHA-256 is cached per byte array in a
+`WeakMap` (`hashOfRevision`) and passed to `makeManifest` (`revisionHash`
+option); only each entry's current bytes are hashed fresh. The same rule fixed a
+latent bug in `readBlob` and the tombstone hashes: the current bytes of a mounted
+disk are mutated in place by sector writes, so caching their hash could return a
+stale value and break an upload with "local blob unavailable".
 
 ## User interface
 
@@ -574,20 +621,28 @@ drive slots.
 
 ## Known limitations and next steps
 
-Next candidates: a per-revision hash cache, cache-busting of the worker URL,
-gamepad activity for the idle timer, remote blob garbage collection, the optional
-"remember password" setting and the native client.
+The remaining candidate is the native client (see "Native parity").
 
 - Renames and moves use browser clocks (newest change wins); there is no folder move and no standalone entry rename to merge.
-- No remote garbage collection of blobs; tombstones expire after 90 days.
-- `getManifest()` rehashes the whole library on every sync (a per-revision hash
-  cache is a pending optimization).
+- Remote cleanup is manual and age-protected only when the server sends
+  `Last-Modified`; tombstones expire after 90 days.
+- `getManifest()` still hashes each entry's current bytes once per sync (the
+  revision history is cached).
 - Workspace scope: whoever merges a diverged branch keeps their edit plus a `(1)`
   copy of the remote one, and the edit of the other side only travels if mounted.
-- No gamepad activity detection for the idle timer.
-- `emulator_worker.js` handlers and the UI timers have no direct automated test.
+- `emulator_worker.js` handlers and the UI (timers, gamepad sampling, remembered
+  password reconnection, cleanup button) have no direct automated test.
 
 ## Native parity
+
+**Blocker to decide:** the native emulator needs an HTTPS client, and the project
+rule is "no external dependencies". The C standard library has no TLS, and
+writing TLS 1.2/1.3 from scratch is large and security-sensitive. The realistic
+options are (a) use the operating system's own stack (WinHTTP/SChannel on
+Windows, Network.framework or CFNetwork on macOS; Linux has no built-in one),
+(b) accept a system TLS library (OpenSSL/libcurl/mbedTLS) as a documented
+exception to the rule, or (b') talk plain `http` only to a local reverse
+proxy or loopback. None of this has been started.
 
 Only the web version is delivered. To declare parity with the Full Library,
 native A8E needs a dependency-free HTTPS WebDAV client using the same layout,

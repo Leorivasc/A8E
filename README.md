@@ -183,6 +183,12 @@ cmake --build build -j
 ctest --test-dir build -R 'library_(archive|package|repository|image)' --output-on-failure
 ```
 
+The browser build can also keep the library in sync with a WebDAV server
+(for example Nextcloud), either as a single `workspace.a8e` or as the whole
+library, with non-destructive merging and deletions that land in Trash. The
+native emulator does not have this yet; see [Remote library sync](jsA8E/README.md)
+and [implementation/OnlineDrive.md](implementation/OnlineDrive.md).
+
 For native key bindings and the complete package workflow, see the [native
 README](A8E/README.md) and [Full Library implementation notes](implementation/full_library.md).
 
@@ -298,6 +304,8 @@ It is intended to be the canonical shared control surface for debugger/introspec
 Current highlights include worker-acknowledged lifecycle control, URL-native ROM/disk/XEX loading, structured pause/fault events, schema-versioned failure artifacts, HostFS file automation, assembler/XEX helpers, and versioned full-machine snapshot save/load through `system.saveSnapshot()` / `system.loadSnapshot()`. The repository also includes a browser-less Node bootstrap at `jsA8E/headless.js` that instantiates the same automation API against the no-worker backend.
 
 For external agents, CI jobs, scripted regression runs, and other non-interactive control flows, prefer the browser-less bootstrap over driving the browser UI directly. It avoids DOM/worker/UI state, starts with an attached API immediately, and exposes the same grouped automation contract. For Codex-style MCP clients, `jsA8E/mcp_server.js` provides a local stdio bridge over the same runtime and grouped tool surface. See the [jsA8E README](jsA8E/README.md) for the overview and [jsA8E/AUTOMATION.md](jsA8E/AUTOMATION.md) for the full public API reference.
+
+AI agents can also drive the same runtime over MCP (`npm run mcp` in `jsA8E/`); see [implementation/MCP.md](implementation/MCP.md).
 
 ## Quick Start (Native)
 

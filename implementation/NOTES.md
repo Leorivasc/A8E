@@ -1,5 +1,55 @@
 # NOTES.md
 
+- 2026-11-10 (jsA8E: MCP server restrictions): file arguments (`path`, `file`,
+  `sourcePath`) are now confined to `--cwd` by default: the path is resolved,
+  checked by name and again on its real path (symbolic links), and refused with
+  `-32602` if it leaves the directory; `--allow-any-path` / `confinePaths: false`
+  lifts it. New `--no-network` / `allowNetwork: false` refuses the five `*FromUrl`
+  actions. Before this, an agent could load any readable local file or fetch any
+  URL and read it back through the emulator. `resolvePath` takes a `confine`
+  flag and `readBinaryInput` takes a resolver. `tests/mcp_server.test.js` covers
+  `..`, absolute paths, a symlink out, paths inside, the opt-out, every URL
+  action blocked and the CLI flags; a real stdio run confirmed `/etc/hostname`
+  is refused by default and accepted with `--allow-any-path`. Not covered:
+  limits on sizes and run time (a blocking program still blocks the process),
+  and the `bwrap` recipe in `implementation/MCP.md` was not run. Behavior
+  change: callers that passed paths outside `--cwd` now need `--allow-any-path`.
+- 2026-11-10 (jsA8E: MCP server documentation): `mcp_server.js` was only described
+  in two sentences. New `implementation/MCP.md` (linked from `AUTOMATION.md`, `jsA8E/README.md`,
+  the root `README.md` and `CHANGELOG.md`) documents startup options, ROM lookup,
+  the protocol and its limits, the per-action argument mapping, binary inputs,
+  results and errors, programmatic use, testing and security. The examples come
+  from real sessions. Findings recorded there, not changed: (1) the server
+  looks for `ATARIXL.ROM`/`ATARIBAS.ROM` in the repository root, not in
+  `jsA8E/`, so without `--os-rom` the machine starts with no ROMs; (2) requests
+  are handled concurrently and answers can arrive out of order; (3) the
+  standard `notifications/initialized` is not recognised (only `initialized`)
+  and `ping` is not implemented, so a standard client gets an error reply with
+  `id: null`; (4) `buildAndRun` with the default `awaitEntry: true` did not
+  return for a tight-loop program on the real ROM (use `awaitEntry: false`);
+  (5) `tests/mcp_server.test.js` uses a stub runtime, so it checks the mapping
+  but never boots the emulator.
+- 2026-11-10 (jsA8E: cleanup pass, no behavior change): removed dead code found
+  by ESLint and a manual sweep: `drawPlayerSpan`, `drawMissileSpan`, `playerStep`
+  and `missileWidth` (`gtia.js`, superseded by the span queue), `zeroPageAddress`
+  (`memory.js`), `deleteRecord` (`disk_library.js`), the unused IRQ constants and
+  `pokeyRestartTimers` that `atari.js` passed to `io.js`, two unused panel
+  constants in `assembler_ui.js`, the write-only `mobilePanelSyncing` flag in
+  `ui.js`, a stale local in `antic.js` and `library_package.js`, and unused
+  `catch (err)` bindings. `no-case-declarations` in `io.js` (SKCTL write) fixed
+  with a block; `eslint --fix` added braces to single-line `if`/`for` bodies
+  (formatting only). `npm run lint` now reports zero errors. Eleven passing
+  tests that no npm script ran (`pokey_pot_cpu_dispatch`, `pokey_pot_io_path`,
+  `antic_vscrol_timing`, `ahrm07_pmg_{xex,boot}`, `ahrm08_pokey_{xex,matrix_xex,
+  stage2_xex}`, `ahrm10_priority_collision_boot`,
+  `vbxe_blitter_short_attrmap_timing_{asm,boot}`) are now in `test:automation`
+  and `test:vbxe:full`. AHRM review: this cleanup removes only code with no
+  caller, so no hardware behavior changes; the core changes made after the
+  2026-11-04 AHRM review are VBXE hooks (PIA IRQ and PORTB remap, citing AHRM
+  5.7 and 12.4) and the gamepad, which only drives PORTA/TRIG0 active-low bits.
+  Docs: root `README.md` and `CHANGELOG.md` now mention the remote library sync.
+  Verified: `test:automation` and `test:vbxe` pass, lint clean. Not run: native
+  `ctest` (no C changes) and `test:vbxe:full`.
 - 2026-11-07 (A8E native: gamepad support): the native build now has the same
   feature. New `A8E/Gamepad.c/.h` (in `A8E_CORE_SOURCES`) uses the SDL joystick
   API, not SDL_GameController, so plain USB joysticks work without a mapping
@@ -51,6 +101,19 @@
   ArrowRight press (keyboard, also via the gamepad path) was ignored once while
   later ones worked; left, up and down did not show it. ESLint could not run
   (no `node_modules`); `node --check` passes.
+- 2026-11-11 (jsA8E: remote sync hardening, post-merge): (1) hash cache:
+  `getManifest()` passes `hashOfRevision` (WeakMap, revisions are immutable) to
+  `makeManifest({revisionHash})`; `readBlob` and the tombstone hashes no longer
+  cache the current bytes, which sector writes mutate in place (this fixed a
+  latent stale-hash bug). (2) `client.head()` returns `lastModified`,
+  `client.deleteFile()`, `sync.collectGarbage()` and the "Clean up remote" button
+  (age >= 7 days, never touches blobs referenced remotely or locally; needs
+  `DELETE` in CORS). (3) Opt-in "Remember the password" (unencrypted
+  localStorage) with automatic reconnection on load; rejected stored passwords
+  are discarded. (4) Gamepad sampling counts as activity for the idle sync.
+  (5) "Unknown worker request" now explains the stale-cache cause. Tests:
+  GC cases in `remote_library_tombstones.test.js`. Native client is blocked on
+  the HTTPS/TLS dependency decision (see `OnlineDrive.md`).
 - 2026-11-10 (jsA8E: remote renames and moves, Phase 2b): entries carry a
   persisted `metaModified` (set by `moveFile`, name-changing `replaceFile`,
   `restoreTrash`; manifest field `metaModifiedAt`, validated as optional).

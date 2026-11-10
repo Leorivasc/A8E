@@ -17,6 +17,7 @@
   const MANIFEST_FILE = "library.json";
   const BLOB_DIR = "blobs/";
   const MAX_ATTEMPTS = 5;
+  const GC_MIN_AGE_MS = 7 * 24 * 60 * 60 * 1000;
   const BATCH_BYTES = 48 * 1024 * 1024;
 
   function remoteError(code, message) {
@@ -384,8 +385,61 @@
       });
     }
 
+    /* Removes remote blobs that no manifest references any more (deleted entries
+     * whose tombstone-covered blobs linger). Only blobs this client knows it saw
+     * or uploaded are candidates, blobs referenced by the remote or the local
+     * manifest are never touched, and blobs younger than `minAgeMs` are kept so
+     * another browser's in-flight publish cannot lose a blob it just uploaded.
+     * Resolves to {deleted, young}. */
+    function collectGarbage(gcOptions) {
+      const minAgeMs = gcOptions && Number.isFinite(gcOptions.minAgeMs) ? gcOptions.minAgeMs : GC_MIN_AGE_MS;
+      const report = { deleted: 0, young: 0 };
+      return Promise.all([client.getFile(MANIFEST_FILE, ""), localManifest()]).then(function (both) {
+        if (both[0].status !== "ok") return report;
+        let remoteManifest;
+        try {
+          remoteManifest = JSON.parse(new TextDecoder().decode(both[0].bytes));
+          packageApi.validateManifest(remoteManifest);
+        } catch (err) {
+          throw remoteError("bad-manifest", "The remote library.json is not valid: " + (err && err.message ? err.message : err));
+        }
+        const referenced = new Set(blobsOf(remoteManifest).keys());
+        blobsOf(both[1]).forEach(function (blob, sha) { referenced.add(sha); });
+        const gone = new Set();
+        let chain = Promise.resolve();
+        state.remoteBlobs.forEach(function (sha) {
+          if (referenced.has(sha)) return;
+          // The blob type is not recorded for unreferenced hashes: try both.
+          ["atr", "xex"].forEach(function (type) {
+            const path = BLOB_DIR + sha + "." + type;
+            chain = chain.then(function () {
+              return client.head(path).then(function (info) {
+                if (info.status !== "ok") return null;
+                if (info.lastModified && Date.now() - info.lastModified < minAgeMs) {
+                  report.young++;
+                  return null;
+                }
+                return client.deleteFile(path).then(function (existed) {
+                  if (existed) report.deleted++;
+                  gone.add(sha);
+                });
+              });
+            });
+          });
+        });
+        return chain.then(function () {
+          if (gone.size) {
+            state.remoteBlobs = state.remoteBlobs.filter(function (sha) { return !gone.has(sha); });
+            persist();
+          }
+          return report;
+        });
+      });
+    }
+
     return {
       sync: sync,
+      collectGarbage: collectGarbage,
       /* Creates blobs/ when the library repository is first used. */
       prepare: function () { return client.mkcol(BLOB_DIR); },
       checkRemote: function () { return window.A8ERemoteWorkspace.hasRemoteChanged(client, MANIFEST_FILE, state); },

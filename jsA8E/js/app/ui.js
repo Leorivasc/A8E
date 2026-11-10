@@ -74,7 +74,7 @@
     if (profile === "fx1.24" || profile === "fx124") return "fx1.24" + page;
     if (profile === "fx1.26r" || profile === "fx126r" || profile === "r") return "fx1.26r" + page;
     if (profile === "fx1.26" || profile === "fx126" || text === "d600" || text === "d700")
-      return "fx1.26" + page;
+      {return "fx1.26" + page;}
     return "off";
   }
 
@@ -859,7 +859,6 @@
       snapshotPanel: { button: "btnSnapshots", title: "Snapshots" },
     });
     let mobilePanelId = null;
-    let mobilePanelSyncing = false;
     let mobileViewportState = null;
 
     function getKeyboardMappingModeFromUi() {
@@ -981,7 +980,7 @@
       } else {
         document.body.classList.remove("mobile-tools-open");
         if (!mobilePanelId && mobilePanelBackdrop)
-          mobilePanelBackdrop.hidden = true;
+          {mobilePanelBackdrop.hidden = true;}
       }
     }
 
@@ -990,11 +989,9 @@
         const config = mobilePanelConfigs[mobilePanelId];
         const panel = document.getElementById(mobilePanelId);
         const button = config && document.getElementById(config.button);
-        mobilePanelSyncing = true;
         if (button && button.classList.contains("active")) button.click();
         if (panel) panel.hidden = true;
         if (button) button.classList.remove("active");
-        mobilePanelSyncing = false;
       }
       mobilePanelId = null;
       document.body.classList.remove("mobile-panel-open");
@@ -1023,11 +1020,9 @@
       const panel = document.getElementById(panelId);
       const button = document.getElementById(config.button);
       if (!panel || !button) return;
-      mobilePanelSyncing = true;
       if (!button.classList.contains("active")) button.click();
       panel.hidden = false;
       button.classList.add("active");
-      mobilePanelSyncing = false;
       mobilePanelId = panelId;
       document.body.classList.add("mobile-panel-open");
       if (mobilePanelClose) {
@@ -2409,7 +2404,7 @@
         systemKeyboardKey("Backspace");
       }
       if (shared < next.length)
-        sendSystemKeyboardText(next.slice(shared).join(""));
+        {sendSystemKeyboardText(next.slice(shared).join(""));}
       systemKeyboardCompositionValue = next.join("");
     }
 
@@ -2799,7 +2794,7 @@
         systemKeyboardInput.value = "";
         window.setTimeout(function () {
           if (systemKeyboardIgnoredValue === value)
-            systemKeyboardIgnoredValue = "";
+            {systemKeyboardIgnoredValue = "";}
         }, 0);
       });
       systemKeyboardInput.addEventListener("keydown", function (e) {

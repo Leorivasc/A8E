@@ -72,7 +72,7 @@
 
     function serialOutputIsAvailable(ctx) {
       if (typeof serialOutputClockAvailable === "function")
-        return !!serialOutputClockAvailable(ctx);
+        {return !!serialOutputClockAvailable(ctx);}
       return true;
     }
 
@@ -93,7 +93,7 @@
         io.serialOutputNeedDataCycle = CYCLE_NEVER;
         io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
         if (ctx.ram && IO_IRQEN_IRQST !== undefined)
-          ctx.ram[IO_IRQEN_IRQST] &= ~0x08;
+          {ctx.ram[IO_IRQEN_IRQST] &= ~0x08;}
         cycleTimedEventUpdate(ctx);
         return false;
       }
@@ -133,7 +133,7 @@
         io.serialOutputNeedDataCycle = CYCLE_NEVER;
         io.serialOutputTransmissionDoneCycle = CYCLE_NEVER;
         if (ctx.ram && IO_IRQEN_IRQST !== undefined)
-          ctx.ram[IO_IRQEN_IRQST] &= ~0x08;
+          {ctx.ram[IO_IRQEN_IRQST] &= ~0x08;}
         cycleTimedEventUpdate(ctx);
         return false;
       }
@@ -223,7 +223,7 @@
       // AHRM 9.1: the disk validates the five bytes and starts ACK/NAK only
       // after the host releases COMMAND. No extra serial byte is consumed.
       if (wasAsserted && io.sioCommandFrameReady)
-        transmitSioByte(ctx, 0);
+        {transmitSioByte(ctx, 0);}
     }
 
     function handleAbsentDevice(ctx) {
@@ -262,7 +262,7 @@
         if (trace.length > 128) trace.splice(0, trace.length - 128);
       }
       if (typeof traceSerialEvent === "function")
-        traceSerialEvent(ctx, event, fields);
+        {traceSerialEvent(ctx, event, fields);}
     }
 
     function queueSerinResponse(ctx, now, size) {
@@ -394,7 +394,7 @@
       // 1..dataSize+1. Move the sector down one byte for the data phase.
       buf[0] = CHAR_COMPLETE;
       for (let i = 0; i < dataSize; i++)
-        buf[i + 1] = buf[i + 2] & 0xff;
+        {buf[i + 1] = buf[i + 2] & 0xff;}
       buf[dataSize + 1] = sioChecksum(buf.subarray(1, dataSize + 1), dataSize);
       io.sioPendingReadSize = 0;
       queueSerinResponse(ctx, now, dataSize + 2);
@@ -788,7 +788,7 @@
       let outIdx = io.sioOutIndex | 0;
       if (!commandFrameReady && outIdx === 0) {
         if (commandLineIsControlled(io) && !io.sioCommandLineAsserted)
-          return;
+          {return;}
         if (value > 0 && value < 255) {
           buf[0] = value & 0xff;
           io.sioOutIndex = 1;
@@ -907,7 +907,7 @@
           io.sioInIndex = 0;
           const now = effectiveEventCycle(ctx);
           if (!queuePendingReadData(ctx, now))
-            queuePendingWriteResult(ctx, now);
+            {queuePendingWriteResult(ctx, now);}
           traceSio(ctx, "SIO_RESPONSE_PHASE_COMPLETE", {
             pendingReadSize: io.sioPendingReadSize | 0,
             pendingWriteResult: io.sioPendingWriteResult | 0,
