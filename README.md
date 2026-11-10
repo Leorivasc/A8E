@@ -305,6 +305,8 @@ Current highlights include worker-acknowledged lifecycle control, URL-native ROM
 
 For external agents, CI jobs, scripted regression runs, and other non-interactive control flows, prefer the browser-less bootstrap over driving the browser UI directly. It avoids DOM/worker/UI state, starts with an attached API immediately, and exposes the same grouped automation contract. For Codex-style MCP clients, `jsA8E/mcp_server.js` provides a local stdio bridge over the same runtime and grouped tool surface. See the [jsA8E README](jsA8E/README.md) for the overview and [jsA8E/AUTOMATION.md](jsA8E/AUTOMATION.md) for the full public API reference.
 
+AI agents can also drive the same runtime over MCP (`npm run mcp` in `jsA8E/`); see [implementation/MCP.md](implementation/MCP.md).
+
 ## Quick Start (Native)
 
 Building requires **SDL 2** development headers. See the [A8E README](A8E/README.md) for full build instructions covering Windows (MSVC, MinGW), macOS (Homebrew), and Linux.

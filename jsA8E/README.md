@@ -347,6 +347,8 @@ Flat compatibility aliases still exist, so earlier calls such as `start()`, `run
 
 ### MCP server
 
+Full guide: [implementation/MCP.md](../implementation/MCP.md).
+
 For Codex-style MCP clients, `mcp_server.js` exposes the same headless runtime through a local stdio bridge. Start it with `npm run mcp` from `jsA8E/`. It keeps the server surface small and maps grouped automation actions through `get_capabilities`, `get_system_state`, and `call_automation`.
 
 Binary inputs use base64 strings or local file paths, and screenshot results return an MCP image content block plus base64 data in `structuredContent`.

@@ -1,5 +1,34 @@
 # NOTES.md
 
+- 2026-11-10 (jsA8E: MCP server restrictions): file arguments (`path`, `file`,
+  `sourcePath`) are now confined to `--cwd` by default: the path is resolved,
+  checked by name and again on its real path (symbolic links), and refused with
+  `-32602` if it leaves the directory; `--allow-any-path` / `confinePaths: false`
+  lifts it. New `--no-network` / `allowNetwork: false` refuses the five `*FromUrl`
+  actions. Before this, an agent could load any readable local file or fetch any
+  URL and read it back through the emulator. `resolvePath` takes a `confine`
+  flag and `readBinaryInput` takes a resolver. `tests/mcp_server.test.js` covers
+  `..`, absolute paths, a symlink out, paths inside, the opt-out, every URL
+  action blocked and the CLI flags; a real stdio run confirmed `/etc/hostname`
+  is refused by default and accepted with `--allow-any-path`. Not covered:
+  limits on sizes and run time (a blocking program still blocks the process),
+  and the `bwrap` recipe in `implementation/MCP.md` was not run. Behavior
+  change: callers that passed paths outside `--cwd` now need `--allow-any-path`.
+- 2026-11-10 (jsA8E: MCP server documentation): `mcp_server.js` was only described
+  in two sentences. New `implementation/MCP.md` (linked from `AUTOMATION.md`, `jsA8E/README.md`,
+  the root `README.md` and `CHANGELOG.md`) documents startup options, ROM lookup,
+  the protocol and its limits, the per-action argument mapping, binary inputs,
+  results and errors, programmatic use, testing and security. The examples come
+  from real sessions. Findings recorded there, not changed: (1) the server
+  looks for `ATARIXL.ROM`/`ATARIBAS.ROM` in the repository root, not in
+  `jsA8E/`, so without `--os-rom` the machine starts with no ROMs; (2) requests
+  are handled concurrently and answers can arrive out of order; (3) the
+  standard `notifications/initialized` is not recognised (only `initialized`)
+  and `ping` is not implemented, so a standard client gets an error reply with
+  `id: null`; (4) `buildAndRun` with the default `awaitEntry: true` did not
+  return for a tight-loop program on the real ROM (use `awaitEntry: false`);
+  (5) `tests/mcp_server.test.js` uses a stub runtime, so it checks the mapping
+  but never boots the emulator.
 - 2026-11-10 (jsA8E: cleanup pass, no behavior change): removed dead code found
   by ESLint and a manual sweep: `drawPlayerSpan`, `drawMissileSpan`, `playerStep`
   and `missileWidth` (`gtia.js`, superseded by the span queue), `zeroPageAddress`
