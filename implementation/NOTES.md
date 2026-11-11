@@ -1,5 +1,18 @@
 # NOTES.md
 
+- 2026-11-11 (jsA8E: on-screen console keys overlay): new `js/app/console_keys_ui.js`
+  (loaded from `index.html`, initialised in `ui.js` like the disk activity
+  indicator), markup `#consoleKeys` inside `.screenOverlay`, styles at the end of
+  `style.css`. Five slanted keys (HELP, START, SELECT, OPTION, RESET) at the top
+  right of the screen, hidden by default, shown while the pointer is over the top
+  strip (56 px) and faded out on leave; on touch a first tap on the strip reveals
+  them (hidden again after 3 s) and does not press a key. A key is held while the
+  pointer is down (`onKeyDown`/`onKeyUp` with F1-F5 and SDL syms 282/285/284/283/286,
+  the same ones the virtual keyboard sends) and takes the write-activity orange
+  (`#ff9d2e`) while pressed; idle keys use the read-activity yellow (`#ffe04b`).
+  `tests/console_keys_ui.test.js` (in `test:automation`) covers hidden-by-default,
+  hover, press/release, staying visible while held, and the touch rules; rendering
+  checked with a headless Chromium screenshot. Not checked: a real touch device.
 - 2026-11-11 (jsA8E: no extra cycle for decimal ADC/SBC): the 6502 MIPS
   Benchmark 1.3 scored jsA8E at 0.240 (86%) on "Integer arithmetic", while real
   hardware, Altirra and the native A8E score 0.261 (94%). Cause: `adcValue` and

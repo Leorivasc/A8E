@@ -3529,6 +3529,16 @@
       });
     }
 
+    if (window.A8EConsoleKeysUI && app) {
+      window.A8EConsoleKeysUI.init({
+        app: app,
+        zone: document.getElementById("consoleKeys"),
+        focusCanvas: function () {
+          focusCanvas(true);
+        },
+      });
+    }
+
     if (window.A8EAssemblerUI && app) {
       window.A8EAssemblerUI.init({
         app: app,

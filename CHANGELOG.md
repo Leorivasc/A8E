@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- jsA8E: on-screen console keys (HELP, START, SELECT, OPTION, RESET) in the top right of the emulator screen. Hidden by default, they fade in on hover (or on a touch of the top strip on touch screens). They are slanted like the 65XE keys, yellow like the D1: disk indicator and orange while pressed, and drive the same F1-F5 keys as the on-screen keyboard.
 - Native A8E: first stage of the VBXE device (`--vbxe[=fx1.20|fx1.24|fx1.26]`,
   `--vbxe-d7`): registers, 512 KiB VRAM, MEMAC A/B for CPU, ANTIC and
   instruction fetch, blitter with collision code and completion IRQ.
