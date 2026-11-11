@@ -493,7 +493,6 @@
 
       cpu.a = sum & 0xff;
       ps = setZNBits(ps, bin);
-      ctx.cycleCounter++;
     } else {
       const s = (cpu.a & 0xff) + value + ~~hasFlag(ps, FLAG_C);
       ps = setFlag(
@@ -526,7 +525,6 @@
       cpu.a = diff & 0xff;
       ps = setFlag(ps, FLAG_C, carry);
       ps = setZNBits(ps, bin);
-      ctx.cycleCounter++;
     } else {
       const a2 = cpu.a & 0xff;
       const d2 = a2 - value - (1 ^ ~~hasFlag(ps, FLAG_C));
@@ -883,7 +881,6 @@
     let v = (readAccess(ctx) + 1) & 0xff;
     v = writeAccess(ctx, v);
     sbcValue(ctx, v);
-    if (hasFlag(ctx.cpu.ps, FLAG_D)) ctx.cycleCounter--;
   }
   function opSRE(ctx) {
     let v = readAccess(ctx);
@@ -925,7 +922,6 @@
     if (oldCarry) v |= 0x80;
     v = writeAccess(ctx, v);
     adcValue(ctx, v);
-    if (hasFlag(ctx.cpu.ps, FLAG_D)) ctx.cycleCounter--;
   }
   function opSBX(ctx) {
     const cpu = ctx.cpu;

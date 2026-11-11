@@ -1,5 +1,19 @@
 # NOTES.md
 
+- 2026-11-11 (jsA8E: no extra cycle for decimal ADC/SBC): the 6502 MIPS
+  Benchmark 1.3 scored jsA8E at 0.240 (86%) on "Integer arithmetic", while real
+  hardware, Altirra and the native A8E score 0.261 (94%). Cause: `adcValue` and
+  `sbcValue` in `js/core/cpu.js` added one cycle when the D flag was set. AHRM 3.2
+  and 3.6 say that extra cycle exists only on the 65C02; the NMOS 6502 does not
+  take it (the native `6502.c` never did). That test runs 18 decimal ADC/SBC per
+  203-cycle iteration, so the error was about 9%. Removed the cycle, and the
+  `cycleCounter--` in `opISC`/`opRRA` that only cancelled it, so their net timing
+  is unchanged. `cpu_undocumented_opcodes.test.js` now expects 2 cycles for
+  `ADC #`/`SBC #` in decimal mode (it asserted 3, from the fake6502 reference,
+  which models the 65C02). Verified by running the benchmark XEX headless: before
+  0.240 / 86% (average 92%), after 0.261 / 94% (average 94%), other lines
+  unchanged. `test:automation` and lint pass. The 2026-03-26 note on
+  "RRA/ISC decimal-cycle cancellation" no longer applies.
 - 2026-11-10 (jsA8E: MCP server restrictions): file arguments (`path`, `file`,
   `sourcePath`) are now confined to `--cwd` by default: the path is resolved,
   checked by name and again on its real path (symbolic links), and refused with
