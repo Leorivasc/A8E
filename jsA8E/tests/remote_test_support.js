@@ -82,13 +82,17 @@ function startServer(options) {
   });
 }
 
-async function makeBrowser(context) {
+/* `options.convertXex(bytes)` models the app turning a mounted XEX into its
+ * runtime ATR image, which the library then keeps as `runtimeBytes`. */
+async function makeBrowser(context, options) {
+  const convertXex = options && options.convertXex;
   const mounted = new Map();
   let next = 0;
   const library = context.window.A8EDiskLibrary.createApi().create({
     mountDisk: function (bytes, name, slot) {
       const imageIndex = next++;
-      mounted.set(slot, { imageIndex: imageIndex, bytes: new Uint8Array(bytes) });
+      const isXex = convertXex && /\.xex$/i.test(name);
+      mounted.set(slot, { imageIndex: imageIndex, bytes: isXex ? convertXex(bytes) : new Uint8Array(bytes) });
       return { imageIndex: imageIndex, deviceSlot: slot };
     },
     unmountDisk: function (slot) { mounted.delete(slot); },

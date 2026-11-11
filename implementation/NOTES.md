@@ -1,5 +1,21 @@
 # NOTES.md
 
+- 2026-11-11 (jsA8E: remote sync, converted XEX blob extension): a third browser
+  failed with "The remote is missing blobs/<sha>.atr" although `blobs/<sha>.xex`
+  was on the server. Cause: an XEX that was run is kept as an ATR runtime image
+  (`runtimeBytes`), so the library exports it as `format: "atr"` while its
+  revisions still hold the original XEX bytes; `makeManifest` names those
+  revision blobs with the entry type, giving `blobs/<sha>.atr`. The first browser
+  had uploaded the same bytes as `.xex`, and publish tracks remote blobs by hash,
+  so nobody re-uploaded it under the new name. Fix in `remote_library.js`
+  (`downloadBlob`): when the named blob is missing, the same hash under the other
+  type (`atr`/`xex`, shared `BLOB_TYPES`, also used by the cleanup) is tried; the
+  SHA-256 check still applies. This also heals remotes already in that state.
+  New `tests/remote_library_xex_blobs.test.js` (three browsers, XEX converted by
+  the second; fails without the fix with the reported message) and a
+  `convertXex` option in `tests/remote_test_support.js`. Not changed: a
+  converted XEX still appears as `.ATR` in other browsers, and the manifest
+  still names the revision `.atr`; only the lookup became tolerant.
 - 2026-11-11 (jsA8E: on-screen console keys overlay): new `js/app/console_keys_ui.js`
   (loaded from `index.html`, initialised in `ui.js` like the disk activity
   indicator), markup `#consoleKeys` inside `.screenOverlay`, styles at the end of
