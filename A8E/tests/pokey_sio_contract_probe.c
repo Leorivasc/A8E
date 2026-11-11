@@ -126,6 +126,9 @@ static u8 TestSioChecksum(const u8 *pBuffer, u32 lSize)
 
 static u8 ReceiveSioByte(_6502_Context_t *pContext)
 {
+	/* The probe has no CPU event loop: deliver the next byte to SERIN as the
+	 * timed serial-input-ready event would, then read it like the CPU. */
+	Pokey_SerialInputReady(pContext);
 	return *Pokey_SEROUT_SERIN(pContext, NULL);
 }
 
@@ -163,6 +166,7 @@ static int RunStatusLatchContract(_6502_Context_t *pContext)
 	{
 		IoData_t *pIoData = (IoData_t *)pContext->pIoData;
 		u64 llExpectedDataPhase = pContext->llCycleCounter +
+			SIO_DISK_RESPONSE_TURNAROUND_CYCLES +
 			SERIAL_INPUT_FIRST_DATA_READY_CYCLES;
 		SendSioFrame(pContext, aHighSpeedFrame);
 		REQUIRE(ReceiveSioByte(pContext) == 'A', "speed query missing ACK");
