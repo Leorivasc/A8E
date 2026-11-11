@@ -1,5 +1,12 @@
 # NOTES.md
 
+- 2026-11-11 (jsA8E: console keys fit on mobile): on phones the five console keys
+  (about 380 px wide) overflowed the screen and HELP was cut off on the left.
+  `style.css` now has a `max-width: 780px` block (the layout's mobile breakpoint):
+  the bar spans 92% of the screen width, centered, and the keys share it equally
+  (`flex: 1 1 0`) at 34 px high, so it scales with the screen and stays
+  finger-sized. Desktop is unchanged. Checked with headless Chromium screenshots
+  at 360 and 412 px; not checked on a physical phone.
 - 2026-11-11 (jsA8E: remote sync, converted XEX blob extension): a third browser
   failed with "The remote is missing blobs/<sha>.atr" although `blobs/<sha>.xex`
   was on the server. Cause: an XEX that was run is kept as an ATR runtime image
