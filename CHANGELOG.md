@@ -45,6 +45,7 @@ All notable changes to this project will be documented in this file.
   lacks VBXE.
 
 ### Fixed
+- jsA8E: ADC and SBC in decimal mode no longer take an extra cycle. That is 65C02 behavior (AHRM 3.2, 3.6); the NMOS 6502 of the Atari 800XL takes the base cycles. The 6502 MIPS Benchmark 1.3 reported "Integer arithmetic" at 0.240 (86%) instead of 0.261 (94%) as on real hardware, Altirra and the native A8E. Decimal loops ran about 9% slower.
 - jsA8E VBXE: MEMAC A windows above $D800 (for example $E000 with the OS ROM
   off) are now routed, so Commando's terrain map is copied and the player is
   blocked by palms, rocks and the bridge as in A8E.
