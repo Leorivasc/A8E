@@ -4422,3 +4422,79 @@ canvas.crtEnabled {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* Console keys overlay: HELP/START/SELECT/OPTION/RESET, shown on hover. */
+.consoleKeys {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  height: 56px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 8px 12px 0;
+  pointer-events: auto;
+}
+
+.consoleKeysBar {
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 180ms ease, transform 180ms ease;
+  pointer-events: none;
+}
+
+.consoleKeys.visible .consoleKeysBar {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.consoleKey {
+  min-width: 64px;
+  height: 23px;
+  padding: 0 12px;
+  border: 2px solid #ffe04b;
+  border-radius: 2px;
+  background: rgba(255, 210, 48, 0.2);
+  box-shadow: 0 1px 7px rgba(0, 0, 0, 0.55);
+  color: #ffe04b;
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Slanted sides, like the 65XE console keys. */
+  transform: skewX(-20deg);
+}
+
+/* Keep the label upright inside the slanted key. */
+.consoleKey span {
+  display: block;
+  transform: skewX(20deg);
+}
+
+.consoleKey:hover {
+  background: rgba(255, 210, 48, 0.32);
+}
+
+.consoleKey:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.consoleKey.pressed {
+  border-color: #ff9d2e;
+  color: #ff9d2e;
+  background: rgba(255, 132, 28, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .consoleKeysBar {
+    transition: none;
+  }
+}

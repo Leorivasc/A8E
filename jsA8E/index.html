@@ -315,6 +315,15 @@
               tabindex="-1"
               aria-label="Restore device keyboard"
             ></button>
+            <div id="consoleKeys" class="consoleKeys" role="group" aria-label="Console keys">
+              <div class="consoleKeysBar">
+                <button type="button" class="consoleKey" data-key="F1" data-code="F1" data-sdl="282" aria-label="HELP" title="HELP"><span>HELP</span></button>
+                <button type="button" class="consoleKey" data-key="F4" data-code="F4" data-sdl="285" aria-label="START" title="START"><span>START</span></button>
+                <button type="button" class="consoleKey" data-key="F3" data-code="F3" data-sdl="284" aria-label="SELECT" title="SELECT"><span>SELECT</span></button>
+                <button type="button" class="consoleKey" data-key="F2" data-code="F2" data-sdl="283" aria-label="OPTION" title="OPTION"><span>OPTION</span></button>
+                <button type="button" class="consoleKey" data-key="F5" data-code="F5" data-sdl="286" aria-label="RESET" title="RESET"><span>RESET</span></button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -948,6 +957,7 @@
     <script src="js/app/remote_library.js"></script>
     <script src="js/app/remote_sync_ui.js"></script>
     <script src="js/app/disk_activity_ui.js"></script>
+    <script src="js/app/console_keys_ui.js"></script>
     <script src="js/app/assembler_ui.js"></script>
     <script src="js/app/snapshot_ui.js"></script>
     <script src="js/app/version.js"></script>
