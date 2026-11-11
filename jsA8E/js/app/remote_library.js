@@ -16,6 +16,7 @@
 
   const MANIFEST_FILE = "library.json";
   const BLOB_DIR = "blobs/";
+  const BLOB_TYPES = ["atr", "xex"];
   const MAX_ATTEMPTS = 5;
   const GC_MIN_AGE_MS = 7 * 24 * 60 * 60 * 1000;
   const BATCH_BYTES = 48 * 1024 * 1024;
@@ -88,17 +89,38 @@
       }
     }
 
+    /* The hash identifies a blob; the extension is only a hint. A converted XEX
+     * keeps its original bytes as a revision of an ATR entry, so the manifest
+     * can name `<sha>.atr` while the first uploader stored `<sha>.xex`. When the
+     * named file is missing, the same hash under the other type is tried; the
+     * SHA-256 check below still guarantees the content. */
+    function blobPaths(sha, blob) {
+      const paths = [blob.path];
+      BLOB_TYPES.forEach(function (type) {
+        const path = BLOB_DIR + sha + "." + type;
+        if (paths.indexOf(path) < 0) paths.push(path);
+      });
+      return paths;
+    }
+
+    function fetchBlob(paths) {
+      return client.getFile(paths[0], "", { requireEtag: false }).then(function (result) {
+        if (result.status === "ok" || paths.length === 1) return { result: result, path: paths[0] };
+        return fetchBlob(paths.slice(1));
+      });
+    }
+
     function downloadBlob(sha, blob, opts, counters) {
       progress(opts, "download", counters.done, counters.total, blob.path);
-      return client.getFile(blob.path, "", { requireEtag: false }).then(function (result) {
-        if (result.status !== "ok") {
+      return fetchBlob(blobPaths(sha, blob)).then(function (found) {
+        if (found.result.status !== "ok") {
           throw remoteError("missing-blob", "The remote is missing " + blob.path + ".");
         }
-        if (packageApi.sha256(result.bytes) !== sha) {
-          throw remoteError("corrupt-blob", "The remote blob " + blob.path + " failed its SHA-256 check.");
+        if (packageApi.sha256(found.result.bytes) !== sha) {
+          throw remoteError("corrupt-blob", "The remote blob " + found.path + " failed its SHA-256 check.");
         }
         counters.done++;
-        return result.bytes;
+        return found.result.bytes;
       });
     }
 
@@ -410,7 +432,7 @@
         state.remoteBlobs.forEach(function (sha) {
           if (referenced.has(sha)) return;
           // The blob type is not recorded for unreferenced hashes: try both.
-          ["atr", "xex"].forEach(function (type) {
+          BLOB_TYPES.forEach(function (type) {
             const path = BLOB_DIR + sha + "." + type;
             chain = chain.then(function () {
               return client.head(path).then(function (info) {
