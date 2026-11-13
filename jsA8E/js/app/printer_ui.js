@@ -2,7 +2,13 @@
   "use strict";
 
   // Printer button and paper viewer. The button appears once something has
-  // been printed; the panel shows the paper and saves it as text or HTML.
+  // been printed. The panel is docked as the last tool panel (next to the disk
+  // library, HostFS and the assembler) or floats anywhere over the page; the
+  // choice and the floating position are remembered. Narrow screens, where
+  // the tool panels are a full-screen sheet, always float.
+
+  const STORAGE_KEY = "a8e.printerPanel";
+  const MARGIN = 8;
 
   function download(name, mime, text) {
     const url = URL.createObjectURL(new Blob([text], { type: mime }));
@@ -17,6 +23,30 @@
     }, 1000);
   }
 
+  function loadState() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
+      if (saved && typeof saved === "object") {
+        return {
+          floating: saved.floating === true,
+          left: Number.isFinite(saved.left) ? saved.left : null,
+          top: Number.isFinite(saved.top) ? saved.top : null,
+        };
+      }
+    } catch {
+      // storage unavailable or corrupt: use the defaults
+    }
+    return { floating: false, left: null, top: null };
+  }
+
+  function saveState(state) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      // not persisted
+    }
+  }
+
   function init(opts) {
     const config = opts && typeof opts === "object" ? opts : {};
     const app = config.app;
@@ -26,8 +56,56 @@
     if (!paper || !button || !panel || panel.__a8ePrinterInit) return;
     panel.__a8ePrinterInit = true;
 
+    const dockHome = panel.parentElement;
     const view = panel.querySelector(".printerPaper");
     const count = panel.querySelector(".printerCount");
+    const bar = panel.querySelector(".printerBar");
+    const state = loadState();
+
+    function isNarrow() {
+      return (
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 980px)").matches
+      );
+    }
+
+    function isFloating() {
+      return state.floating || isNarrow() || !dockHome;
+    }
+
+    function clampPosition(left, top) {
+      const width = panel.offsetWidth || 560;
+      const height = panel.offsetHeight || 200;
+      return {
+        left: Math.min(Math.max(MARGIN, left), Math.max(MARGIN, window.innerWidth - width - MARGIN)),
+        top: Math.min(Math.max(MARGIN, top), Math.max(MARGIN, window.innerHeight - height - MARGIN)),
+      };
+    }
+
+    function placeFloating() {
+      const width = panel.offsetWidth || 560;
+      const height = panel.offsetHeight || 200;
+      const left = state.left === null ? window.innerWidth - width - 16 : state.left;
+      const top = state.top === null ? window.innerHeight - height - 16 : state.top;
+      const pos = clampPosition(left, top);
+      panel.style.left = pos.left + "px";
+      panel.style.top = pos.top + "px";
+    }
+
+    // A floating panel lives in <body>, because the tool column can be hidden
+    // (mobile) and must not clip or hide it.
+    function applyMode() {
+      const floating = isFloating();
+      panel.classList.toggle("floating", floating);
+      if (floating) {
+        if (panel.parentElement !== document.body) document.body.appendChild(panel);
+        placeFloating();
+      } else {
+        if (panel.parentElement !== dockHome) dockHome.appendChild(panel);
+        panel.style.left = "";
+        panel.style.top = "";
+      }
+    }
 
     function refresh() {
       view.textContent = paper.toText();
@@ -39,50 +117,46 @@
       panel.hidden = !open;
       button.classList.toggle("active", open);
       button.setAttribute("aria-pressed", open ? "true" : "false");
-      if (open) refresh();
+      if (open) {
+        applyMode();
+        refresh();
+      }
     }
 
-    // Drag the panel by its title bar. It starts anchored bottom right; the
-    // first drag switches it to explicit left/top inside its parent.
-    const bar = panel.querySelector(".printerBar");
+    // Drag by the title bar while floating, anywhere inside the browser window.
     let drag = null;
 
     bar.addEventListener("pointerdown", function (event) {
+      if (!panel.classList.contains("floating")) return;
       if (event.button !== 0 || event.target.closest("button")) return;
-      const parent = panel.offsetParent || panel.parentElement;
       const box = panel.getBoundingClientRect();
-      const parentBox = parent.getBoundingClientRect();
-      drag = {
-        dx: event.clientX - box.left,
-        dy: event.clientY - box.top,
-        parentLeft: parentBox.left,
-        parentTop: parentBox.top,
-        maxLeft: Math.max(0, parentBox.width - box.width),
-        maxTop: Math.max(0, parentBox.height - box.height),
-      };
-      panel.style.left = box.left - parentBox.left + "px";
-      panel.style.top = box.top - parentBox.top + "px";
-      panel.style.right = "auto";
-      panel.style.bottom = "auto";
+      drag = { dx: event.clientX - box.left, dy: event.clientY - box.top };
       bar.setPointerCapture(event.pointerId);
       event.preventDefault();
     });
 
     bar.addEventListener("pointermove", function (event) {
       if (!drag) return;
-      const left = event.clientX - drag.parentLeft - drag.dx;
-      const top = event.clientY - drag.parentTop - drag.dy;
-      panel.style.left = Math.min(Math.max(0, left), drag.maxLeft) + "px";
-      panel.style.top = Math.min(Math.max(0, top), drag.maxTop) + "px";
+      const pos = clampPosition(event.clientX - drag.dx, event.clientY - drag.dy);
+      panel.style.left = pos.left + "px";
+      panel.style.top = pos.top + "px";
     });
 
     function endDrag(event) {
       if (!drag) return;
       drag = null;
       if (bar.hasPointerCapture(event.pointerId)) bar.releasePointerCapture(event.pointerId);
+      const box = panel.getBoundingClientRect();
+      state.left = box.left;
+      state.top = box.top;
+      saveState(state);
     }
     bar.addEventListener("pointerup", endDrag);
     bar.addEventListener("pointercancel", endDrag);
+
+    window.addEventListener("resize", function () {
+      if (!panel.hidden) applyMode();
+    });
 
     paper.onChange(function (lines) {
       button.hidden = false;
@@ -95,6 +169,11 @@
     });
     panel.querySelector('[data-printer="close"]').addEventListener("click", function () {
       setOpen(false);
+    });
+    panel.querySelector('[data-printer="dock"]').addEventListener("click", function () {
+      state.floating = !isFloating();
+      saveState(state);
+      applyMode();
     });
     panel.querySelector('[data-printer="text"]').addEventListener("click", function () {
       download("printer.txt", "text/plain;charset=utf-8", paper.toText());

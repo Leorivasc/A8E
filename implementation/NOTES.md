@@ -18,9 +18,16 @@
   errors; the button/panel and the worker message path were NOT exercised in a
   browser. Not done: disk drive still uses its own handler, 1025/1029/1020,
   SVG output, native C core, snapshots, automation/MCP exposure; see
-  `implementation/PRINTER.md`. The printer panel can be dragged by its title
-  bar (pointer events, clamped to the screen area; position is not remembered).
-  Drag and clamping checked in headless Chromium with synthetic pointer events on a minimal page (not on a touch device).
+  `implementation/PRINTER.md`. The printer panel is now docked as the last
+  tool panel (after the disk library, HostFS, assembler and snapshots; `order: 10`)
+  or floats anywhere in the browser window (`position: fixed`, moved to `<body>`,
+  dragged by its title bar and clamped to the viewport); the dock button in the
+  title bar switches, and mode and floating position are kept in
+  `localStorage` (`a8e.printerPanel`). At 980 px or narrower, where the tool
+  column is a full-screen sheet, it always floats. Dock/float, drag, clamping and
+  the stored position were checked in headless Chromium on a page built from the
+  real panel markup and `style.css`; not checked inside the full emulator page,
+  on a touch device, or on mobile.
 
 - 2026-11-13 (jsA8E: MCP findings 1, 2, 4 and 5 closed): (4) the real cause of
   the `buildAndRun` hang was in `js/core/debugger.js`: `executeSingleInstruction`

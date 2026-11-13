@@ -13,7 +13,7 @@ OS P: handler  ->  SIO bus (pokey_sio.js)  ->  device (sio_printer.js)
                                                    v
                       app.onSioDeviceEvent  ->  paper (printer_paper.js)  ->  .txt / .html
                       (worker postMessage)       ^
-                                                 printer_ui.js (button + panel)
+                                                 printer_ui.js (button + panel, docked or floating)
 ```
 
 - **Bus** (`js/core/pokey_sio.js`): owns the command frame, ACK/NAK, the data

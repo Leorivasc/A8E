@@ -4523,35 +4523,50 @@ canvas.crtEnabled {
   }
 }
 
-/* Printer paper viewer */
+/* Printer paper viewer: docked as the last tool panel, or floating over the page */
 .printerPanel {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  z-index: 30;
-  pointer-events: auto;
+  width: 100%;
+  border: 1px solid var(--sub-panel-border);
+  border-radius: 6px;
+  background: var(--sub-panel-bg);
+  font-size: var(--fs-sm);
   display: flex;
   flex-direction: column;
-  width: min(560px, calc(100% - 16px));
-  max-height: 60%;
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  overflow: hidden;
+  align-self: stretch;
+  max-height: 60vh;
+}
+.layoutTools > .printerPanel {
+  order: 10;
 }
 .printerPanel[hidden] {
   display: none;
 }
+.printerPanel.floating {
+  position: fixed;
+  z-index: 240;
+  width: min(560px, calc(100vw - 16px));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
 .printerBar {
-  cursor: move;
-  touch-action: none;
-  user-select: none;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  padding: 6px 10px;
+  background: var(--sub-panel-header-bg);
+  border-bottom: 1px solid var(--sub-panel-border);
+  user-select: none;
+}
+.printerPanel.floating .printerBar {
+  cursor: move;
+  touch-action: none;
+}
+.printerIcon {
+  color: var(--accent);
+}
+.printerTitle {
+  font-weight: 600;
+  color: var(--text);
 }
 .printerBarSpacer {
   flex: 1;
