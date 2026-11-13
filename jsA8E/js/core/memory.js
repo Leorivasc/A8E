@@ -1251,6 +1251,8 @@
           : null;
       const diskActivityObserver =
         typeof opts.onDiskActivity === "function" ? opts.onDiskActivity : null;
+      const sioDeviceEventObserver =
+        typeof opts.onSioDeviceEvent === "function" ? opts.onSioDeviceEvent : null;
       let memoryWriteHook = null;
 
       function attachVbxeState(io) {
@@ -1364,6 +1366,7 @@
         io.memoryExpansion = machine.memoryExpansion;
         io.diskMediaChangeObserver = diskMediaChangeObserver;
         io.diskActivityObserver = diskActivityObserver;
+        io.sioDeviceEventObserver = sioDeviceEventObserver;
       }
 
       function getMemoryExpansionState() {

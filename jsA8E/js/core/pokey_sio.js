@@ -729,6 +729,101 @@
     ) {
       sioDeviceHandlers[devId] = diskDevice(devId);
     }
+
+    // Generic SIO device contract (AHRM 9.1). A device only describes what the
+    // command means; the bus owns ACK/NAK, the data frame, its checksum and
+    // the Complete/Error byte.
+    //
+    //   device.onCommand({ cmd, aux1, aux2 }, host) returns one of
+    //     null / { nak: true }          NAK the command
+    //     { complete: true }            ACK, Complete
+    //     { reply: Uint8Array }         ACK, Complete, data + checksum
+    //     { receive: length }           ACK, then read `length` bytes
+    //   device.onData(bytes, host)      after a good data frame; return false
+    //                                   to answer Error instead of Complete
+    //   device.onDataError(host)        optional, after a bad data checksum
+    //                                   (the bus answers NAK)
+    //   host.notify(event)              hands an event to the application
+    //                                   layer (io.sioDeviceEventObserver)
+    //
+    // A device never sees the command line, POKEY or timing, and a command
+    // frame with a bad checksum never reaches it (AHRM 9.1: stay silent).
+    function createDeviceHost(io, devId) {
+      return {
+        notify: function (event) {
+          if (typeof io.sioDeviceEventObserver !== "function") return;
+          try {
+            io.sioDeviceEventObserver({ device: devId & 0xff, event: event });
+          } catch {
+            // Observers must never affect emulated SIO behavior.
+          }
+        },
+      };
+    }
+
+    function genericDevice(devId, device) {
+      function onCommandFrame(ctx, now, cmd, aux1, aux2) {
+        const io = ctx.ioData;
+        const response = device.onCommand(
+          { cmd: cmd, aux1: aux1, aux2: aux2 },
+          createDeviceHost(io, devId),
+        );
+        if (!response || response.nak) {
+          queueDeviceNack(ctx, now);
+          return;
+        }
+        if (response.reply) {
+          const reply = response.reply;
+          if (reply.length === 0) {
+            queueAckComplete(ctx, now);
+            return;
+          }
+          io.sioBuffer.set(reply, 2);
+          queueAckData(ctx, now, 2, reply.length);
+          return;
+        }
+        if (response.receive > 0) {
+          io.sioOutPhase = 1;
+          io.sioDataIndex = 0;
+          io.sioPendingDevice = devId & 0xff;
+          io.sioPendingCmd = cmd & 0xff;
+          io.sioPendingSector = 0;
+          io.sioPendingBytes = response.receive | 0;
+          io.sioPendingWriteResult = 0;
+          queueSingleByteResponse(ctx, now, CHAR_ACK);
+          return;
+        }
+        queueAckComplete(ctx, now);
+      }
+
+      function onDataFrame(ctx, now, payloadOffset, payloadBytes, providedCrc) {
+        const io = ctx.ioData;
+        const host = createDeviceHost(io, devId);
+        const payload = io.sioBuffer.slice(payloadOffset, payloadOffset + payloadBytes);
+        if (sioChecksum(payload, payloadBytes) !== providedCrc) {
+          if (device.onDataError) device.onDataError(host);
+          queueDeviceNack(ctx, now);
+          return;
+        }
+        const ok = device.onData ? device.onData(payload, host) !== false : true;
+        io.sioPendingWriteResult = ok ? CHAR_COMPLETE : CHAR_ERROR;
+        queueSingleByteResponse(ctx, now, CHAR_ACK);
+      }
+
+      return { onCommandFrame: onCommandFrame, onDataFrame: onDataFrame };
+    }
+
+    function registerDevice(device) {
+      const ids = device.deviceIds || [];
+      for (let i = 0; i < ids.length; i++) {
+        sioDeviceHandlers[ids[i] & 0xff] = genericDevice(ids[i], device);
+      }
+    }
+
+    // Peripherals that are always present on the bus.
+    if (window.A8ESioPrinter && window.A8ESioPrinter.createDevice) {
+      registerDevice(window.A8ESioPrinter.createDevice());
+    }
     function seroutWrite(ctx, value, writeCycle) {
       const io = ctx.ioData;
       // I/O writes occur on the final bus cycle of a CPU instruction.  The
@@ -920,6 +1015,7 @@
     }
 
     return {
+      registerDevice: registerDevice,
       seroutWrite: seroutWrite,
       sioCommandLineChanged: sioCommandLineChanged,
       serialOutputTransmitNow: serialOutputTransmitNow,

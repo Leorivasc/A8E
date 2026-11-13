@@ -4522,3 +4522,46 @@ canvas.crtEnabled {
     letter-spacing: 0;
   }
 }
+
+/* Printer paper viewer */
+.printerPanel {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 30;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100% - 16px));
+  max-height: 60%;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.printerPanel[hidden] {
+  display: none;
+}
+.printerBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.printerBarSpacer {
+  flex: 1;
+}
+.printerCount {
+  color: var(--muted);
+}
+.printerPaper {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  background: #fbfaf5;
+  color: #111;
+  font: 13px/1.25 "Courier New", monospace;
+  min-height: 80px;
+}

@@ -216,6 +216,9 @@
               <button id="btnAssembler" class="toggle-btn" title="Toggle assembler editor. Read and write source files on HostFS (H:) and assemble executable XEX files to HostFS." aria-label="Toggle assembler editor panel.">
                 <i class="fa-solid fa-file-code"></i>
               </button>
+              <button id="btnPrinter" class="toggle-btn" hidden aria-pressed="false" title="Show the paper printed by the Atari printer (P:)." aria-label="Show printer output.">
+                <i class="fa-solid fa-print"></i>
+              </button>
               <button id="btnSnapshots" class="toggle-btn" title="Toggle snapshot controls. Save or restore a full paused emulator state, plus export or import snapshot files." aria-label="Toggle snapshot controls panel.">
                 <i class="fa-solid fa-camera-retro"></i>
               </button>
@@ -308,6 +311,18 @@
           <canvas id="screen" width="336" height="240"></canvas>
           <div class="screenOverlay">
             <div id="diskActivity" class="disk-activity" aria-live="polite" aria-atomic="true"></div>
+            <div id="printerPanel" class="printerPanel" hidden role="dialog" aria-label="Printer output">
+              <div class="printerBar">
+                <strong>Printer (P:)</strong><span class="printerCount"></span>
+                <span class="printerBarSpacer"></span>
+                <button type="button" data-printer="text" title="Save the paper as a text file.">.txt</button>
+                <button type="button" data-printer="html" title="Save the paper as an HTML page.">.html</button>
+                <button type="button" data-printer="print" title="Open the paper in a print dialog (print to paper or PDF).">Print</button>
+                <button type="button" data-printer="clear" title="Tear off the paper and start a new page.">Clear</button>
+                <button type="button" data-printer="close" aria-label="Close printer output">&times;</button>
+              </div>
+              <pre class="printerPaper"></pre>
+            </div>
             <button
               id="systemKeyboardTouchZone"
               class="systemKeyboardTouchZone"
@@ -910,6 +925,7 @@
     <script src="js/core/cpu.js"></script>
     <script src="js/render/gl.js"></script>
     <script src="js/core/disk_image.js"></script>
+    <script src="js/core/sio_printer.js"></script>
     <script src="js/core/pokey_sio.js"></script>
     <script src="js/core/pokey.js"></script>
     <script src="js/audio/runtime.js"></script>
@@ -957,6 +973,8 @@
     <script src="js/app/remote_library.js"></script>
     <script src="js/app/remote_sync_ui.js"></script>
     <script src="js/app/disk_activity_ui.js"></script>
+    <script src="js/app/printer_paper.js"></script>
+    <script src="js/app/printer_ui.js"></script>
     <script src="js/app/console_keys_ui.js"></script>
     <script src="js/app/assembler_ui.js"></script>
     <script src="js/app/snapshot_ui.js"></script>

@@ -1,5 +1,25 @@
 # NOTES.md
 
+- 2026-11-13 (jsA8E: printer P:, branch `Printer`): new generic SIO device
+  contract in `pokey_sio.js` (`registerDevice`; the device returns NAK / complete
+  / reply / receive-n and the bus owns ACK, data frame, checksum and C/E; command
+  frames with a bad checksum never reach a device). On it, `js/core/sio_printer.js`
+  implements the 820 / generic printer on `$40` per AHRM 9.3 (Write `$57` with
+  AUX1 `$4E`/`$53`, 40/29 bytes, character mapping, sideways right to left;
+  Status `$53` = flags, last AUX1, `$06`, `$00`). Output leaves as page events
+  (`io.sioDeviceEventObserver` -> `app.onSioDeviceEvent`, with the worker
+  `sioDeviceEvent` message and the `app_proxy` fan-out). `js/app/printer_paper.js`
+  collects them and renders text or a printable HTML page; `printer_ui.js` adds a
+  button (hidden until the first line) and a panel with .txt / .html / print /
+  clear. Tests: `sio_printer_device` (bus level: ACK/NAK, status, sideways, bad
+  data checksum, silent bad command frame), `printer_paper`, `printer_lprint`
+  (real OS ROM: `LPRINT` and `OPEN/PRINT #1/CLOSE` reach the paper); all in
+  `test:automation`, lint clean. The page loads in headless Chromium without
+  errors; the button/panel and the worker message path were NOT exercised in a
+  browser. Not done: disk drive still uses its own handler, 1025/1029/1020,
+  SVG output, native C core, snapshots, automation/MCP exposure; see
+  `implementation/PRINTER.md`.
+
 - 2026-11-13 (jsA8E: MCP findings 1, 2, 4 and 5 closed): (4) the real cause of
   the `buildAndRun` hang was in `js/core/debugger.js`: `executeSingleInstruction`
   waited for the instruction counter to equal `previous + 1`, but one

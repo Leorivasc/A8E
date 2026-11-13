@@ -1389,6 +1389,7 @@
     const debugListeners = new Set();
     const memoryAccessListeners = new Set();
     const diskActivityListeners = new Set();
+    const sioDeviceEventListeners = new Set();
     const diskLibraryProxy = createDiskLibraryProxy(sendRequest);
     let keyboardMappingMode =
       opts && opts.keyboardMappingMode === "original"
@@ -1493,6 +1494,16 @@
           fn(next);
         } catch {
           // ignore listener errors
+        }
+      });
+    }
+
+    function emitSioDeviceEvent(message) {
+      sioDeviceEventListeners.forEach(function (listener) {
+        try {
+          listener(message);
+        } catch {
+          // UI listeners must not affect worker communication.
         }
       });
     }
@@ -1721,6 +1732,11 @@
           data.trash || [],
           data.revisions || null,
         );
+        return;
+      }
+
+      if (data.type === "sioDeviceEvent") {
+        emitSioDeviceEvent({ device: data.device | 0, event: data.event || null });
         return;
       }
 
@@ -2087,6 +2103,13 @@
         return diskLibraryProxy.api;
       },
       diskLibrary: diskLibraryProxy.api,
+      onSioDeviceEvent: function (listener) {
+        if (typeof listener !== "function") return function () {};
+        sioDeviceEventListeners.add(listener);
+        return function () {
+          sioDeviceEventListeners.delete(listener);
+        };
+      },
       onDiskActivity: function (listener) {
         if (typeof listener !== "function") return function () {};
         diskActivityListeners.add(listener);
