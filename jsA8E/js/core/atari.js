@@ -778,6 +778,14 @@
       });
     }
 
+    // Settings the SIO peripherals read live (shared with the machine's I/O
+    // state, so they survive resets).
+    const sioDeviceSettings = { printerModel: "1025" };
+
+    function setPrinterModel(model) {
+      sioDeviceSettings.printerModel = model === "820" ? "820" : "1025";
+    }
+
     function onSioDeviceEvent(listener) {
       if (typeof listener !== "function") return function () {};
       sioDeviceEventListeners.add(listener);
@@ -935,6 +943,7 @@
       onDiskMediaChanged: onDiskMediaChanged,
       onDiskActivity: notifyDiskActivity,
       onSioDeviceEvent: notifySioDeviceEvent,
+      sioDeviceSettings: sioDeviceSettings,
       memoryExpansion: memoryExpansion,
       createVbxeState: function () {
         return vbxeApi.createState(vbxeConfig, video.paletteRgb);
@@ -1650,6 +1659,8 @@
       getDiskLibrary: function () { return diskLibrary; },
       onDiskActivity: onDiskActivity,
       onSioDeviceEvent: onSioDeviceEvent,
+      setPrinterModel: setPrinterModel,
+      getPrinterModel: function () { return sioDeviceSettings.printerModel; },
       hDevice: hDevice,
       hasOsRom: hasOsRom,
       hasBasicRom: hasBasicRom,

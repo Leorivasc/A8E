@@ -817,6 +817,10 @@
       case "setOptionOnStart":
         app.setOptionOnStart(!!data.value);
         break;
+      case "setPrinterModel":
+        if (app.setPrinterModel) app.setPrinterModel(data.model);
+        shouldPostState = false;
+        break;
       case "setKeyboardMappingMode":
         if (app.setKeyboardMappingMode) {
           app.setKeyboardMappingMode(

@@ -50,7 +50,14 @@ async function main() {
     await api.input.typeText("CLOSE #1\n", { interKeyDelayMs: 40 });
     await api.system.waitForCycles({ count: 4000000, timeoutMs: 30000 });
 
+    // A line longer than the 40 byte frames the OS sends (here with a left
+    // margin, as word processors print) reaches the paper as one line.
+    const long = "          NUESTRAS SOBREESPECIALIZADAS VIDAS HAN LOGRADO, SEA MUCHO O";
+    await api.input.typeText('LPRINT "' + long + '"\n', { interKeyDelayMs: 40 });
+    await api.system.waitForCycles({ count: 6000000, timeoutMs: 30000 });
+
     const text = paper.toText();
+    assert.ok(text.split("\n").includes(long), "long line joined by the 1025: " + JSON.stringify(text));
     assert.match(text, /^HELLO FROM BASIC$/m, "LPRINT reached the paper: " + JSON.stringify(text));
     assert.match(text, /^SECOND LINE$/m, "PRINT #1 reached the paper: " + JSON.stringify(text));
     console.log("printer_lprint.test.js passed");

@@ -17,14 +17,26 @@
   function createPaper(options) {
     const maxLines = Math.max(1, (options && options.maxLines) | 0 || 20000);
     let lines = [];
+    let frames = []; // TEMPORARY (raw-frame experiment): data frames as hex
     const listeners = new Set();
 
     function add(event) {
+      if (event && event.type === "frame") {
+        frames.push(String(event.raw || ""));
+        if (frames.length > maxLines) frames = frames.slice(frames.length - maxLines);
+        listeners.forEach(function (listener) {
+          listener(lines.length);
+        });
+        return;
+      }
       if (!event || event.type !== "line") return;
       lines.push({
         text: String(event.text || ""),
         sideways: !!event.sideways,
         columns: event.columns | 0,
+        cpi: Number(event.cpi) || 0,
+        lpi: Number(event.lpi) || 0,
+        shortLine: !!event.shortLine,
       });
       // A long session must not grow without bound: the oldest lines tear off.
       if (lines.length > maxLines) lines = lines.slice(lines.length - maxLines);
@@ -35,6 +47,7 @@
 
     function clear() {
       lines = [];
+      frames = [];
       listeners.forEach(function (listener) {
         listener(0);
       });
@@ -48,6 +61,15 @@
             })
             .join("\n") + "\n"
         : "";
+    }
+
+    // TEMPORARY (raw-frame experiment): one data frame per row, hex bytes.
+    function toRaw() {
+      return frames
+        .map(function (raw, index) {
+          return String(index + 1).padStart(3, "0") + ": " + raw;
+        })
+        .join("\n");
     }
 
     // A standalone page. Browsers print it to paper or PDF as is. Sideways
@@ -77,6 +99,7 @@
       add: add,
       clear: clear,
       toText: toText,
+      toRaw: toRaw,
       toHtml: toHtml,
       getLineCount: function () {
         return lines.length;

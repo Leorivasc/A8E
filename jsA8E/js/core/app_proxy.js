@@ -1390,6 +1390,7 @@
     const memoryAccessListeners = new Set();
     const diskActivityListeners = new Set();
     const sioDeviceEventListeners = new Set();
+    let printerModel = "1025";
     const diskLibraryProxy = createDiskLibraryProxy(sendRequest);
     let keyboardMappingMode =
       opts && opts.keyboardMappingMode === "original"
@@ -1886,6 +1887,13 @@
       },
       getVbxeConfig: function () {
         return Object.assign({}, state.vbxe);
+      },
+      setPrinterModel: function (model) {
+        printerModel = model === "820" ? "820" : "1025";
+        sendCommand("setPrinterModel", { model: printerModel });
+      },
+      getPrinterModel: function () {
+        return printerModel;
       },
       setKeyboardMappingMode: function (mode) {
         keyboardMappingMode = mode === "original" ? "original" : "translated";

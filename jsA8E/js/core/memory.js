@@ -1251,6 +1251,10 @@
           : null;
       const diskActivityObserver =
         typeof opts.onDiskActivity === "function" ? opts.onDiskActivity : null;
+      const sioDeviceSettings =
+        opts.sioDeviceSettings && typeof opts.sioDeviceSettings === "object"
+          ? opts.sioDeviceSettings
+          : {};
       const sioDeviceEventObserver =
         typeof opts.onSioDeviceEvent === "function" ? opts.onSioDeviceEvent : null;
       let memoryWriteHook = null;
@@ -1367,6 +1371,7 @@
         io.diskMediaChangeObserver = diskMediaChangeObserver;
         io.diskActivityObserver = diskActivityObserver;
         io.sioDeviceEventObserver = sioDeviceEventObserver;
+        io.sioDeviceSettings = sioDeviceSettings;
       }
 
       function getMemoryExpansionState() {

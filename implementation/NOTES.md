@@ -1,5 +1,31 @@
 # NOTES.md
 
+- 2026-11-13 (jsA8E: printer 1025 model, default): Atari Writer prints lines of
+  a 10 space left margin plus text (confirmed from the raw frames: real `$20`
+  bytes, `$9B` + spaces padding from the OS after each EOL, six blank lines as
+  top margin). The OS P: handler cuts those lines into 40 byte frames and the 820
+  model printed each frame as a separate line, so one line came out as two, the
+  second without the margin. New 1025 model in `sio_printer.js` (AHRM 9.6; checked
+  against Altirra `printer.cpp`): data frames are spliced into one line until an
+  EOL or a full line, 80/40/132 columns by density, text after an EOL ignored,
+  ESC CTRL+T/O/N, ESC L/S, ESC 6/8, ESC CTRL+W/X, an exactly full line plus EOL
+  prints no blank line, Status resets the settings, answers on `$40` and `$42`,
+  NAK for any AUX1 but `$4E`. Bus contract additions: the frame carries the
+  device ID, `{ignore:true}` makes a device act as absent (the absent-device
+  path was factored into `absentDeviceCommand`), `host.settings`
+  (`io.sioDeviceSettings`, live and shared across resets). Model selector in the
+  printer panel (`app.setPrinterModel`, worker message, `localStorage`
+  `a8e.printerModel`); default 1025, 820 kept for 40-column / sideways use.
+  Tests: `sio_printer_device` now covers both models (splicing with the real Atari
+  Writer shape, blank line, full line, escapes, short line, European characters,
+  Status reset, `$42` only on the 1025, run-time model switch) and
+  `printer_lprint` checks a long LPRINT line with margin on the real ROM;
+  `test:automation` and lint pass; the selector was exercised on a minimal page
+  in headless Chromium. The temporary raw view stays (now a `frame` event, one
+  row per data frame) until the 1029. Not done: 1029 / 1020, drawing of density,
+  spacing and short-line centering, out-of-paper errors, running Atari Writer or
+  Last Word themselves.
+
 - 2026-11-13 (jsA8E: printer P:, branch `Printer`): new generic SIO device
   contract in `pokey_sio.js` (`registerDevice`; the device returns NAK / complete
   / reply / receive-n and the bus owns ACK, data frame, checksum and C/E; command

@@ -62,6 +62,26 @@
     const bar = panel.querySelector(".printerBar");
     const state = loadState();
 
+    // The printer model is a machine setting; the choice is remembered.
+    const modelSelect = panel.querySelector('[data-printer="model"]');
+    let model = "1025";
+    try {
+      model = window.localStorage.getItem("a8e.printerModel") === "820" ? "820" : "1025";
+    } catch {
+      // not persisted
+    }
+    modelSelect.value = model;
+    if (typeof app.setPrinterModel === "function") app.setPrinterModel(model);
+    modelSelect.addEventListener("change", function () {
+      model = modelSelect.value === "820" ? "820" : "1025";
+      if (typeof app.setPrinterModel === "function") app.setPrinterModel(model);
+      try {
+        window.localStorage.setItem("a8e.printerModel", model);
+      } catch {
+        // not persisted
+      }
+    });
+
     function isNarrow() {
       return (
         typeof window.matchMedia === "function" &&
@@ -107,8 +127,10 @@
       }
     }
 
+    let showRaw = false; // TEMPORARY (raw-frame experiment)
+
     function refresh() {
-      view.textContent = paper.toText();
+      view.textContent = showRaw ? paper.toRaw() : paper.toText();
       view.scrollTop = view.scrollHeight;
       count.textContent = paper.getLineCount() + " lines";
     }
@@ -128,7 +150,7 @@
 
     bar.addEventListener("pointerdown", function (event) {
       if (!panel.classList.contains("floating")) return;
-      if (event.button !== 0 || event.target.closest("button")) return;
+      if (event.button !== 0 || event.target.closest("button, select")) return;
       const box = panel.getBoundingClientRect();
       drag = { dx: event.clientX - box.left, dy: event.clientY - box.top };
       bar.setPointerCapture(event.pointerId);
@@ -174,6 +196,10 @@
       state.floating = !isFloating();
       saveState(state);
       applyMode();
+    });
+    panel.querySelector('[data-printer="raw"]').addEventListener("click", function () {
+      showRaw = !showRaw;
+      refresh();
     });
     panel.querySelector('[data-printer="text"]').addEventListener("click", function () {
       download("printer.txt", "text/plain;charset=utf-8", paper.toText());

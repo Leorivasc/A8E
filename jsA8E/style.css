@@ -4583,3 +4583,7 @@ canvas.crtEnabled {
   font: 13px/1.25 "Courier New", monospace;
   min-height: 80px;
 }
+.printerModel {
+  max-width: 120px;
+  font-size: inherit;
+}

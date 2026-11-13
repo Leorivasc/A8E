@@ -734,7 +734,8 @@
     // command means; the bus owns ACK/NAK, the data frame, its checksum and
     // the Complete/Error byte.
     //
-    //   device.onCommand({ cmd, aux1, aux2 }, host) returns one of
+    //   device.onCommand({ device, cmd, aux1, aux2 }, host) returns one of
+    //     { ignore: true }              not for this device: act as if absent
     //     null / { nak: true }          NAK the command
     //     { complete: true }            ACK, Complete
     //     { reply: Uint8Array }         ACK, Complete, data + checksum
@@ -745,11 +746,15 @@
     //                                   (the bus answers NAK)
     //   host.notify(event)              hands an event to the application
     //                                   layer (io.sioDeviceEventObserver)
+    //   host.settings                   application settings for devices
+    //                                   (io.sioDeviceSettings), e.g.
+    //                                   { printerModel: "820" }
     //
     // A device never sees the command line, POKEY or timing, and a command
     // frame with a bad checksum never reaches it (AHRM 9.1: stay silent).
     function createDeviceHost(io, devId) {
       return {
+        settings: io.sioDeviceSettings || {},
         notify: function (event) {
           if (typeof io.sioDeviceEventObserver !== "function") return;
           try {
@@ -762,12 +767,16 @@
     }
 
     function genericDevice(devId, device) {
-      function onCommandFrame(ctx, now, cmd, aux1, aux2) {
+      function onCommandFrame(ctx, now, cmd, aux1, aux2, frameDevice) {
         const io = ctx.ioData;
         const response = device.onCommand(
-          { cmd: cmd, aux1: aux1, aux2: aux2 },
+          { device: frameDevice & 0xff, cmd: cmd, aux1: aux1, aux2: aux2 },
           createDeviceHost(io, devId),
         );
+        if (response && response.ignore) {
+          absentDeviceCommand(ctx, now, cmd);
+          return;
+        }
         if (!response || response.nak) {
           queueDeviceNack(ctx, now);
           return;
@@ -968,19 +977,24 @@
       });
       const handler2 = sioDeviceHandlers[dev];
       if (handler2 && handler2.onCommandFrame) {
-        handler2.onCommandFrame(ctx, now, cmd2, aux1, aux2);
+        handler2.onCommandFrame(ctx, now, cmd2, aux1, aux2, dev);
       } else {
-        // $3F/$40 are SIO poll commands. An absent peripheral must not be
-        // turned into a disk NACK; the OS uses the resulting timeout.
-        if (cmd2 === CMD_HIGH_SPEED_INDEX || cmd2 === CMD_POLL) {
-          // A missing peripheral must remain electrically silent. The OS
-          // owns the timeout and completion state; SIO only records that the
-          // response phase is pending.
-          handleAbsentDevice(ctx);
-          return;
-        }
-        queueDeviceNack(ctx, now);
+        absentDeviceCommand(ctx, now, cmd2);
       }
+    }
+
+    // No device answers this command frame.
+    function absentDeviceCommand(ctx, now, cmd) {
+      // $3F/$40 are SIO poll commands. An absent peripheral must not be
+      // turned into a disk NACK; the OS uses the resulting timeout.
+      if (cmd === CMD_HIGH_SPEED_INDEX || cmd === CMD_POLL) {
+        // A missing peripheral must remain electrically silent. The OS
+        // owns the timeout and completion state; SIO only records that the
+        // response phase is pending.
+        handleAbsentDevice(ctx);
+        return;
+      }
+      queueDeviceNack(ctx, now);
     }
 
     function serinRead(ctx) {

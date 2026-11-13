@@ -821,6 +821,11 @@
           <span class="printerTitle">Printer (P:)</span>
           <span class="printerCount"></span>
           <span class="printerBarSpacer"></span>
+          <select data-printer="model" class="printerModel" aria-label="Printer model" title="Printer model. The 1025 joins data frames into 80 column lines; the 820 prints each 40 byte frame as a line.">
+            <option value="1025">1025 (80 col)</option>
+            <option value="820">820 (40 col)</option>
+          </select>
+          <button type="button" data-printer="raw" title="TEMPORARY: show the untranslated frame bytes in hex.">raw</button>
           <button type="button" data-printer="text" title="Save the paper as a text file.">.txt</button>
           <button type="button" data-printer="html" title="Save the paper as an HTML page.">.html</button>
           <button type="button" data-printer="print" title="Open the paper in a print dialog (print to paper or PDF).">Print</button>

@@ -1,7 +1,8 @@
 # Printer (P:) and the generic SIO device contract
 
-jsA8E emulates the Atari 820 40-column printer on SIO device `$40`, which is
-also the generic P: printer (AHRM 9.1, 9.3). The OS P: handler in the ROM does
+jsA8E emulates two SIO printers (AHRM 9.1, 9.3, 9.6), chosen in the printer
+panel (`app.setPrinterModel`, remembered in `localStorage`): the **1025**
+(80 columns, the default) and the **820** (40 columns, also the generic P:). The OS P: handler in the ROM does
 the CIO work; the emulator only needs the SIO peripheral. The core C emulator
 does not have it yet.
 
@@ -41,26 +42,45 @@ Events reach the application as `{ device, event }` through
 `sioDeviceEvent` message). The disk drive still uses its own handler; moving it
 to this contract is open work.
 
-## Behavior (AHRM 9.3)
+## Models
 
-- Write `$57`: AUX1 `$4E` (normal, 40 bytes) or `$53` (sideways, 29 bytes);
-  anything else is NAK with the command-error flag. Bit 7 of each character is
-  ignored; normal prints `$20-$7E` and blanks everything else (EOL included);
-  sideways keeps `$30-$5F`, maps `$60-$7F` down by `$20` and prints right to left.
-- Status `$53`: `[error flags, last AUX1, $06, $00]`. Flag bit 0 is a command
-  error, bit 1 a data-frame error; both clear on the next valid Write.
-- Printing is instantaneous; the real 820 takes about 0.8 s per line.
+| | 820 / generic P: | 1025 |
+|---|---|---|
+| IDs | `$40` | `$40`, `$42` |
+| Write `$57` | AUX1 `$4E` (40 bytes) or `$53` (29 bytes, sideways); else NAK | AUX1 `$4E` only, 40 bytes; else NAK |
+| Data frames | each is one printed line | spliced into one line until an EOL or a full line (80/40/132 columns by density) |
+| After an EOL | n/a | the rest of the frame (the OS pads it) is ignored |
+| Status `$53` | `[flags, last AUX1, $06, $00]` | `[flags, $00, $0F, $30]` and it resets the settings and drops a partial line |
+| Escapes | none | at the start of a line: `ESC CTRL+T/O/N` (16.5/10/5 cpi), `ESC L/S` (long/short line), `ESC 6/8` (lpi); anywhere: `ESC CTRL+W/X` (European characters) |
+
+Common to both: bit 7 of each character is ignored, flag bit 0 is a command
+error and bit 1 a data-frame error. 820: normal prints `$20-$7E` and blanks the
+rest, sideways keeps `$30-$5F`, maps `$60-$7F` down and prints right to left.
+1025: `$00-$1F`, `$60`, `$7B` and `$7D-$7F` are blank or ignored unless European
+characters are on; a line that is exactly full prints at once and the EOL that
+follows does not add a blank line.
+
+Printing is instantaneous; the real printers take about 0.8 s (820) per line.
+
+Word processors send lines wider than 40 bytes (Atari Writer: 10 space margin
+plus text). The OS P: handler cuts them into 40 byte frames, so the 820 model
+prints one logical line as several; the 1025 joins them back.
 
 ## Page events
 
-Only `{type:"line", text, sideways, columns}` exists. A model with attributes,
+`{type:"line", text, sideways, columns}` exists; the 1025 adds `cpi`, `lpi` and
+`shortLine` (carried to the paper but not rendered yet). A model with attributes,
 dot columns (1029 bit image) or vectors (1020) adds event types here and a
 case in `printer_paper.js`; the bus does not change.
 
 ## Open work
 
-- 1025, 1029 and 1020 models; graphical (SVG) rendering of dot and vector events.
+- 1029 and 1020 models; graphical (SVG) rendering of dot and vector events.
 - Native C core (`Pokey.c` has the disks hard-wired; it needs the same registry).
+- Short-line centering, density and spacing are not drawn; out-of-paper errors are not modelled.
+- A TEMPORARY `frame` event and the `raw` button of the panel show the
+  untranslated data frames (marked `TEMPORARY (raw-frame experiment)`); remove
+  them once the 1029 is done.
 - Sideways lines are shown in reading order and tagged, not rotated.
 - Printer state (last orientation, error flags) is not stored in snapshots.
 - Not exposed through the automation API / MCP yet.
