@@ -42,6 +42,48 @@
       if (open) refresh();
     }
 
+    // Drag the panel by its title bar. It starts anchored bottom right; the
+    // first drag switches it to explicit left/top inside its parent.
+    const bar = panel.querySelector(".printerBar");
+    let drag = null;
+
+    bar.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0 || event.target.closest("button")) return;
+      const parent = panel.offsetParent || panel.parentElement;
+      const box = panel.getBoundingClientRect();
+      const parentBox = parent.getBoundingClientRect();
+      drag = {
+        dx: event.clientX - box.left,
+        dy: event.clientY - box.top,
+        parentLeft: parentBox.left,
+        parentTop: parentBox.top,
+        maxLeft: Math.max(0, parentBox.width - box.width),
+        maxTop: Math.max(0, parentBox.height - box.height),
+      };
+      panel.style.left = box.left - parentBox.left + "px";
+      panel.style.top = box.top - parentBox.top + "px";
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+      bar.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+
+    bar.addEventListener("pointermove", function (event) {
+      if (!drag) return;
+      const left = event.clientX - drag.parentLeft - drag.dx;
+      const top = event.clientY - drag.parentTop - drag.dy;
+      panel.style.left = Math.min(Math.max(0, left), drag.maxLeft) + "px";
+      panel.style.top = Math.min(Math.max(0, top), drag.maxTop) + "px";
+    });
+
+    function endDrag(event) {
+      if (!drag) return;
+      drag = null;
+      if (bar.hasPointerCapture(event.pointerId)) bar.releasePointerCapture(event.pointerId);
+    }
+    bar.addEventListener("pointerup", endDrag);
+    bar.addEventListener("pointercancel", endDrag);
+
     paper.onChange(function (lines) {
       button.hidden = false;
       if (!panel.hidden) refresh();

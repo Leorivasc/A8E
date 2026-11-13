@@ -4543,6 +4543,9 @@ canvas.crtEnabled {
   display: none;
 }
 .printerBar {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
   display: flex;
   align-items: center;
   gap: 6px;

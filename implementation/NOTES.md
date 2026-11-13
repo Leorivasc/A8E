@@ -18,7 +18,9 @@
   errors; the button/panel and the worker message path were NOT exercised in a
   browser. Not done: disk drive still uses its own handler, 1025/1029/1020,
   SVG output, native C core, snapshots, automation/MCP exposure; see
-  `implementation/PRINTER.md`.
+  `implementation/PRINTER.md`. The printer panel can be dragged by its title
+  bar (pointer events, clamped to the screen area; position is not remembered).
+  Drag and clamping checked in headless Chromium with synthetic pointer events on a minimal page (not on a touch device).
 
 - 2026-11-13 (jsA8E: MCP findings 1, 2, 4 and 5 closed): (4) the real cause of
   the `buildAndRun` hang was in `js/core/debugger.js`: `executeSingleInstruction`
