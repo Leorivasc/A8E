@@ -56,7 +56,13 @@ async function main() {
     await api.input.typeText('LPRINT "' + long + '"\n', { interKeyDelayMs: 40 });
     await api.system.waitForCycles({ count: 6000000, timeoutMs: 30000 });
 
+    // The same through the 1029 model (selected at run time).
+    runtime.app.setPrinterModel("1029");
+    await api.input.typeText('LPRINT "          1029 LINE THAT IS FAR LONGER THAN FORTY CHARACTERS"\n', { interKeyDelayMs: 40 });
+    await api.system.waitForCycles({ count: 6000000, timeoutMs: 30000 });
+
     const text = paper.toText();
+    assert.ok(text.split("\n").includes("          1029 LINE THAT IS FAR LONGER THAN FORTY CHARACTERS"), "1029 joins frames too: " + JSON.stringify(text));
     assert.ok(text.split("\n").includes(long), "long line joined by the 1025: " + JSON.stringify(text));
     assert.match(text, /^HELLO FROM BASIC$/m, "LPRINT reached the paper: " + JSON.stringify(text));
     assert.match(text, /^SECOND LINE$/m, "PRINT #1 reached the paper: " + JSON.stringify(text));

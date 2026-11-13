@@ -4565,6 +4565,7 @@ canvas.crtEnabled {
   color: var(--accent);
 }
 .printerTitle {
+  white-space: nowrap;
   font-weight: 600;
   color: var(--text);
 }
@@ -4572,6 +4573,7 @@ canvas.crtEnabled {
   flex: 1;
 }
 .printerCount {
+  white-space: nowrap;
   color: var(--muted);
 }
 .printerPaper {
@@ -4586,4 +4588,18 @@ canvas.crtEnabled {
 .printerModel {
   max-width: 120px;
   font-size: inherit;
+}
+.printerPaper .ul {
+  text-decoration: underline;
+}
+.printerPaper .wide {
+  display: inline-block;
+  transform: scaleX(2);
+  transform-origin: left;
+}
+.printerPaper .sideways {
+  font-style: italic;
+}
+.printerPaper .dots {
+  display: block;
 }

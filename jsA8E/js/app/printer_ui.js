@@ -64,16 +64,19 @@
 
     // The printer model is a machine setting; the choice is remembered.
     const modelSelect = panel.querySelector('[data-printer="model"]');
+    function normalizeModel(value) {
+      return value === "820" || value === "1029" ? value : "1025";
+    }
     let model = "1025";
     try {
-      model = window.localStorage.getItem("a8e.printerModel") === "820" ? "820" : "1025";
+      model = normalizeModel(window.localStorage.getItem("a8e.printerModel"));
     } catch {
       // not persisted
     }
     modelSelect.value = model;
     if (typeof app.setPrinterModel === "function") app.setPrinterModel(model);
     modelSelect.addEventListener("change", function () {
-      model = modelSelect.value === "820" ? "820" : "1025";
+      model = normalizeModel(modelSelect.value);
       if (typeof app.setPrinterModel === "function") app.setPrinterModel(model);
       try {
         window.localStorage.setItem("a8e.printerModel", model);
@@ -130,7 +133,8 @@
     let showRaw = false; // TEMPORARY (raw-frame experiment)
 
     function refresh() {
-      view.textContent = showRaw ? paper.toRaw() : paper.toText();
+      if (showRaw) view.textContent = paper.toRaw();
+      else view.innerHTML = paper.toHtmlBody();
       view.scrollTop = view.scrollHeight;
       count.textContent = paper.getLineCount() + " lines";
     }

@@ -1,5 +1,32 @@
 # NOTES.md
 
+- 2026-11-13 (jsA8E: printer 1029 model and graphics on the paper): new `"1029"`
+  model in `sio_printer.js` (AHRM 9.8, checked against Altirra `printer.cpp`):
+  `$40`/`$45`, any AUX1 with a 40 byte frame, fixed status `[0,0,$14,$29]`, Status
+  resets all state, escapes anywhere and across frames (CTRL+N/O wide, CTRL+Y/Z
+  underline, 6/9 lpi, CTRL+W/X international, CTRL+A bit image with a 16-bit MSB
+  length), bit 7 on an escape code not recognized, ESC ESC = ESC, ESC EOL = EOL, 480
+  dot column lines (5+1 columns per character, 10+2 wide; a character that does not
+  fit moves to the next line), ASCII `$20-$7F` with `$7F` as a block, line spacing
+  taken when the line ends, an exactly full line plus EOL prints no blank line.
+  Where AHRM and Altirra differ I followed the AHRM: bit image is ESC `$01`
+  (Altirra tests `$41`), the normal set is plain ASCII (Altirra blanks `$60`,
+  `$7B`, `$7D-$7F`), and bit 7 on the ESC code is not accepted. 1025 European
+  mode now also maps `$7D-$7F` to the arrows. The paper keeps the line events'
+  `runs` and `dots`; the panel and the saved HTML render wide text, underline and
+  bit images (SVG), plain text gets a `[bit image, N columns]` marker; the panel
+  now shows the HTML view (everything escaped). Selector gained "1029".
+  Tests: `sio_printer_device` (1029: status, IDs, joined frames, ASCII set,
+  escapes split across frames, EOL/underline, ESC ESC / unknown / bit 7 / ESC EOL,
+  international, bit image content and zero length, full lines, wide overflow,
+  clamped bit image, Status reset), `printer_paper` (runs, SVG orientation,
+  placeholder), `printer_lprint` (1029 on the real ROM); `test:automation` and
+  lint pass. A screenshot of the panel (headless Chromium, minimal page) showed
+  wide text, underline and a bit image. Not done: 1020, drawing text as dots (so a
+  line with text and graphics shows them one under the other), out-of-paper
+  errors, Polish firmware, running real 1029 software. The temporary raw view is
+  still there.
+
 - 2026-11-13 (jsA8E: printer 1025 model, default): Atari Writer prints lines of
   a 10 space left margin plus text (confirmed from the raw frames: real `$20`
   bytes, `$9B` + spaces padding from the OS after each EOL, six blank lines as

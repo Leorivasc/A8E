@@ -1889,7 +1889,7 @@
         return Object.assign({}, state.vbxe);
       },
       setPrinterModel: function (model) {
-        printerModel = model === "820" ? "820" : "1025";
+        printerModel = model === "820" || model === "1029" ? model : "1025";
         sendCommand("setPrinterModel", { model: printerModel });
       },
       getPrinterModel: function () {

@@ -10,6 +10,9 @@
   // Models, chosen with host.settings.printerModel:
   //   "820"   40 columns (29 sideways), every data frame is one printed line.
   //           Answers on $40 only. Also what a generic P: printer does.
+  //   "1029"  80 columns of dots: ESC commands at any position (elongated,
+  //           underline, 9 lpi, international) and bit image graphics. Answers
+  //           on $40 and $45.
   //   "1025"  80 columns by default. Data frames are spliced into one line
   //           until an EOL or until the line is full, and ESC commands change
   //           the density and line width. Answers on $40 and $42.
@@ -132,7 +135,7 @@
     0x14: "é", 0x15: "è", 0x16: "ñ", 0x17: "ê",
     0x18: "å", 0x19: "à", 0x1a: "Å", 0x1c: "↑",
     0x1d: "↓", 0x1e: "←", 0x1f: "→", 0x60: "¡",
-    0x7b: "Ä",
+    0x7b: "Ä", 0x7d: "↰", 0x7e: "◀", 0x7f: "▶",
   };
 
   function createPrinter1025() {
@@ -259,9 +262,7 @@
         let code = c & 0x7f;
         let char;
         if (european) {
-          char = EUROPEAN[code] || (code >= 0x20 && code !== 0x7d && code !== 0x7e && code !== 0x7f
-            ? String.fromCharCode(code)
-            : " ");
+          char = EUROPEAN[code] || (code >= 0x20 ? String.fromCharCode(code) : " ");
         } else {
           if (code < 0x20) continue;
           if (code === 0x60 || code === 0x7b || code >= 0x7d) code = 0x20;
@@ -286,15 +287,206 @@
     };
   }
 
+  // --------------------------------------------------------------- 1029
+
+  // AHRM 9.8: a fixed status of $00, $00, $14, $29 (no error flags).
+  const STATUS_1029 = [0x00, 0x00, 0x14, 0x29];
+  const DOT_COLUMNS = 480; // 80 characters of 6 dot columns
+  const ESC_NONE = 0;
+  const ESC_ESC = 1;
+  const ESC_BIT_LENGTH_HIGH = 2;
+  const ESC_BIT_LENGTH_LOW = 3;
+
+  function createPrinter1029() {
+    let european = false;
+    let elongated = false;
+    let underline = false;
+    let lpi = 6;
+    let escapeState = ESC_NONE;
+    let bitLengthHigh = 0;
+    let bitLength = 0; // bit image bytes still to come
+    let dotColumn = 0;
+    let dots = new Uint8Array(DOT_COLUMNS);
+    let anyDots = false;
+    let runs = []; // [{ text, elongated, underline }]
+    // Right after a full line was printed, an EOL adds no blank line.
+    let justFilled = false;
+
+    function resetState() {
+      european = false;
+      elongated = false;
+      underline = false;
+      lpi = 6;
+      escapeState = ESC_NONE;
+      bitLength = 0;
+      dotColumn = 0;
+      dots = new Uint8Array(DOT_COLUMNS);
+      anyDots = false;
+      runs = [];
+      justFilled = false;
+    }
+
+    // AHRM 9.8: the printable set is ASCII $20-$7F with $7F a solid block;
+    // $00-$1F are ignored. International mode adds $00-$1A and $1C-$1F and
+    // replaces $60, $7B and $7D-$7F.
+    function characterFor(code) {
+      if (european) {
+        return EUROPEAN[code] || (code >= 0x20 ? String.fromCharCode(code) : null);
+      }
+      if (code < 0x20) return null;
+      return code === 0x7f ? "█" : String.fromCharCode(code);
+    }
+
+    function flushLine(host, full) {
+      // Spaces at the end of a line are not significant, except underlined ones.
+      const text = runs.map(function (run) { return run.text; }).join("").replace(/ +$/, "");
+      const kept = [];
+      let remaining = text.length;
+      runs.forEach(function (run) {
+        if (remaining <= 0 && !run.underline) return;
+        let part = run.text;
+        if (part.length > remaining && !run.underline) part = part.slice(0, remaining);
+        kept.push({ text: part, elongated: run.elongated, underline: run.underline });
+        remaining -= run.text.length;
+      });
+      const event = {
+        type: "line",
+        text: text,
+        runs: kept,
+        sideways: false,
+        columns: 80,
+        lpi: lpi,
+      };
+      if (anyDots) {
+        let last = DOT_COLUMNS;
+        while (last > 0 && dots[last - 1] === 0) last--;
+        event.dots = Array.from(dots.subarray(0, last));
+      }
+      host.notify(event);
+      // Printing a line ends bit image mode; only an EOL ends underlining.
+      bitLength = 0;
+      dotColumn = 0;
+      dots = new Uint8Array(DOT_COLUMNS);
+      anyDots = false;
+      runs = [];
+      justFilled = !!full;
+    }
+
+    function addText(host, char) {
+      const needed = elongated ? 10 : 5;
+      if (dotColumn + needed > DOT_COLUMNS) flushLine(host, false);
+      const last = runs[runs.length - 1];
+      if (last && last.elongated === elongated && last.underline === underline) {
+        last.text += char;
+      } else {
+        runs.push({ text: char, elongated: elongated, underline: underline });
+      }
+      justFilled = false;
+      // The character's columns plus one blank column (two when elongated);
+      // that spacing may run past the right margin.
+      dotColumn += needed + (elongated ? 2 : 1);
+      if (dotColumn >= DOT_COLUMNS) flushLine(host, true);
+    }
+
+    function onCommand(frame) {
+      // AHRM 9.8: P1: ($40) and P6: ($45); all other printer IDs are ignored.
+      if (frame.device !== 0x40 && frame.device !== 0x45) return IGNORE;
+      if (frame.cmd === CMD_STATUS) {
+        // Also clears the line buffer and returns to the default state.
+        resetState();
+        return { reply: Uint8Array.from(STATUS_1029) };
+      }
+      if (frame.cmd === CMD_WRITE) {
+        // The mode byte in AUX1 is ignored; the frame is always 40 bytes.
+        return { receive: FRAME_1025 };
+      }
+      return null;
+    }
+
+    function onData(bytes, host) {
+      for (let i = 0; i < bytes.length; i++) {
+        const c = bytes[i] & 0xff;
+
+        if (bitLength > 0) {
+          // Escapes and EOL are suspended; bit 7 is ignored.
+          bitLength--;
+          dots[dotColumn++] = c & 0x7f;
+          anyDots = true;
+          justFilled = false;
+          if (dotColumn >= DOT_COLUMNS) flushLine(host, true);
+          continue;
+        }
+
+        if (c === EOL) {
+          // EOL wins over ESC. The rest of the frame, which the OS pads, is ignored.
+          escapeState = ESC_NONE;
+          if (dotColumn === 0 && runs.length === 0 && justFilled) justFilled = false;
+          else flushLine(host, false);
+          underline = false;
+          break;
+        }
+
+        if (escapeState === ESC_NONE) {
+          if (c === ESC) {
+            escapeState = ESC_ESC;
+            continue;
+          }
+        } else if (escapeState === ESC_ESC) {
+          // AHRM 9.8: bit 7 on the escape code is not recognized. ESC ESC is
+          // a single ESC; an unknown code is ignored along with the ESC.
+          escapeState = ESC_NONE;
+          switch (c) {
+            case 0x0f: elongated = false; break; // CTRL+O
+            case 0x0e: elongated = true; break; // CTRL+N
+            case 0x17: european = true; break; // CTRL+W
+            case 0x18: european = false; break; // CTRL+X
+            case 0x19: underline = true; break; // CTRL+Y
+            case 0x1a: underline = false; break; // CTRL+Z
+            case ESC: escapeState = ESC_ESC; break;
+            case 0x36: lpi = 6; break; // 6
+            case 0x39: lpi = 9; break; // 9
+            // CTRL+A starts bit image mode (AHRM 9.8). Altirra tests for
+            // 0x41 ("A") here, which contradicts its own comment.
+            case 0x01: escapeState = ESC_BIT_LENGTH_HIGH; break;
+            default: break;
+          }
+          continue;
+        } else if (escapeState === ESC_BIT_LENGTH_HIGH) {
+          bitLengthHigh = c;
+          escapeState = ESC_BIT_LENGTH_LOW;
+          continue;
+        } else if (escapeState === ESC_BIT_LENGTH_LOW) {
+          bitLength = (bitLengthHigh << 8) + c;
+          escapeState = ESC_NONE;
+          continue;
+        }
+
+        const char = characterFor(c & 0x7f);
+        if (char !== null) addText(host, char);
+      }
+      return true;
+    }
+
+    return {
+      onCommand: onCommand,
+      onData: onData,
+      onDataError: function () {},
+    };
+  }
+
   // ------------------------------------------------------------- device
 
   function createDevice() {
-    const models = { "820": createPrinter820(), "1025": createPrinter1025() };
+    const models = {
+      "820": createPrinter820(),
+      "1025": createPrinter1025(),
+      "1029": createPrinter1029(),
+    };
     let active = models["1025"];
 
     return {
       name: "printer",
-      deviceIds: [0x40, 0x42],
+      deviceIds: [0x40, 0x42, 0x45],
       onCommand: function (frame, host) {
         const name = host.settings && host.settings.printerModel;
         active = models[name] || models["1025"];
@@ -319,6 +511,6 @@
   window.A8ESioPrinter = {
     createDevice: createDevice,
     renderLine: renderLine,
-    MODELS: ["1025", "820"],
+    MODELS: ["1025", "1029", "820"],
   };
 })();

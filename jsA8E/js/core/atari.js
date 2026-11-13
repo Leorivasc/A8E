@@ -783,7 +783,8 @@
     const sioDeviceSettings = { printerModel: "1025" };
 
     function setPrinterModel(model) {
-      sioDeviceSettings.printerModel = model === "820" ? "820" : "1025";
+      sioDeviceSettings.printerModel =
+        model === "820" || model === "1029" ? model : "1025";
     }
 
     function onSioDeviceEvent(listener) {

@@ -39,6 +39,30 @@ paper.clear();
 assert.equal(paper.toText(), "");
 assert.equal(paper.getLineCount(), 0);
 
+// 1029 lines: attribute runs become spans, bit image columns an SVG, and
+// plain text gets a placeholder for the image.
+const rich = createPaper();
+rich.add({
+  type: "line",
+  text: "a<b",
+  columns: 80,
+  runs: [
+    { text: "a", elongated: false, underline: false },
+    { text: "<b", elongated: true, underline: true },
+  ],
+  dots: [0x7f, 0x01, 0x40],
+});
+rich.add({ type: "line", text: "", columns: 80, runs: [], dots: [0x08] });
+assert.equal(rich.toText(), "a<b [bit image, 3 columns]\n[bit image, 1 columns]\n");
+const body = rich.toHtmlBody();
+assert.ok(body.includes('a<span class="wide ul" style="margin-right:2ch">&lt;b</span>'), body);
+assert.ok(body.includes('viewBox="0 0 3 7"'));
+assert.ok(body.includes('<rect x="0" y="0" width="1" height="1"/>'), "bit 6 is the top pin");
+assert.ok(body.includes('<rect x="2" y="0" width="1" height="1"/>'));
+assert.ok(body.includes('<rect x="1" y="6" width="1" height="1"/>'), "bit 0 is the bottom pin");
+assert.ok(!body.includes("\n"), "lines are blocks: no newline between them");
+assert.ok(rich.toHtml("t").includes(".dots{display:block}"));
+
 // attach() feeds one paper per app from printer-range device events only.
 let listener = null;
 const app = { onSioDeviceEvent: function (fn) { listener = fn; return function () {}; } };

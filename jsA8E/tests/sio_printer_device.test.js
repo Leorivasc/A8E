@@ -271,6 +271,118 @@ function test1025() {
   assert.notEqual(ctx.ioData.sioBuffer[0], ACK, "$42 is absent again under the 820");
 }
 
+function write1029(api, ctx, bytes, device) {
+  command(api, ctx, device || 0x40, 0x57, 0x4e, 0);
+  assert.equal(readSerin(api, ctx), ACK);
+  const data = new Uint8Array(40).fill(0x9b);
+  data.set(bytes);
+  send(api, ctx, Array.from(data).concat([checksum(data)]));
+  assert.equal(readSerin(api, ctx), ACK);
+  assert.equal(readSerin(api, ctx), COMPLETE);
+}
+
+function test1029() {
+  const api = loadCore();
+  const events = [];
+  const ctx = makeContext(events, "1029");
+  const L = function () { return lines(events); };
+
+  // Fixed status, on $40 and $45 only.
+  assert.deepEqual(status(api, ctx), [0x00, 0x00, 0x14, 0x29]);
+  assert.deepEqual(status(api, ctx, 0x45), [0x00, 0x00, 0x14, 0x29]);
+  command(api, ctx, 0x42, 0x53, 0, 0);
+  assert.notEqual(ctx.ioData.sioBuffer[0], ACK, "$42 belongs to the 1025");
+
+  // Any AUX1 is accepted, and the frame is 40 bytes even for sideways.
+  command(api, ctx, 0x40, 0x57, 0x53, 0);
+  assert.equal(readSerin(api, ctx), ACK);
+  send(api, ctx, dataFrame("sideways ignored", 40));
+  assert.equal(readSerin(api, ctx), ACK);
+  assert.equal(readSerin(api, ctx), COMPLETE);
+  assert.equal(L()[0].text, "sideways ignored");
+
+  // Frames are joined into one line like the 1025; ASCII prints as is
+  // ($60 and $7B are not blanked) and $7F is a solid block.
+  const body = " ".repeat(10) + "Este texto empieza justo en la primera linea ` { } ~ \u007f";
+  write1029(api, ctx, ascii(body.slice(0, 40)));
+  assert.equal(L().length, 1, "partial line is not printed");
+  write1029(api, ctx, padded(ascii(body.slice(40)).concat([0x9b])));
+  assert.equal(L()[1].text, body.replace("\u007f", "\u2588"));
+  assert.equal(L()[1].lpi, 6);
+
+  // Escapes work anywhere, even split across frames (the ESC ends frame one
+  // and its code starts frame two): elongated, underline, 9 lpi. Runs carry
+  // the attributes; EOL ends the underline.
+  write1029(api, ctx, ascii("a".repeat(39)).concat([0x1b]));
+  write1029(api, ctx, [0x0e].concat(ascii("BC"), [0x1b, 0x0f], ascii("d"), [0x1b, 0x19], ascii("ef"), [0x1b, 0x39, 0x1b, 0x1a], ascii("g"), [0x9b]));
+  const mixed = L()[2];
+  assert.equal(mixed.text, "a".repeat(39) + "BCdefg");
+  assert.deepEqual(JSON.parse(JSON.stringify(mixed.runs)), [
+    { text: "a".repeat(39), elongated: false, underline: false },
+    { text: "BC", elongated: true, underline: false },
+    { text: "d", elongated: false, underline: false },
+    { text: "ef", elongated: false, underline: true },
+    { text: "g", elongated: false, underline: false },
+  ]);
+  assert.equal(mixed.lpi, 9, "the spacing active when the line ends applies to that line");
+  write1029(api, ctx, ascii("next").concat([0x9b]));
+  assert.equal(L()[3].lpi, 9);
+  write1029(api, ctx, [0x1b, 0x19].concat(ascii("under"), [0x9b]));
+  write1029(api, ctx, ascii("plain").concat([0x9b]));
+  assert.equal(L()[5].runs[0].underline, false, "EOL turns underlining off");
+
+  // ESC ESC is one ESC, an unknown code is eaten, bit 7 on the code is not
+  // recognized, ESC EOL is an EOL.
+  write1029(api, ctx, [0x1b, 0x1b, 0x0e].concat(ascii("w"), [0x1b, 0x7a], ascii("x"), [0x1b, 0x8e], ascii("y"), [0x1b, 0x9b]));
+  assert.deepEqual(L()[6].runs.map(function (r) { return [r.text, r.elongated]; }), [["wxy", true]]);
+
+  // International mode, switched mid-line.
+  write1029(api, ctx, [0x1b, 0x0f].concat(ascii("a"), [0x1b, 0x17, 0x00, 0x7b, 0x1b, 0x18], ascii("b"), [0x00, 0x9b]));
+  assert.equal(L()[7].text, "a\u00e1\u00c4b");
+
+  // Bit image: ESC CTRL+A, length MSB first, then one byte per column; bit 7
+  // is ignored and ESC/EOL are plain data inside. Text before and after it.
+  write1029(api, ctx, ascii("t").concat([0x1b, 0x01, 0x00, 0x03, 0x7f, 0x9b, 0x1b], ascii("u"), [0x9b]));
+  const graphic = L()[8];
+  assert.equal(graphic.text, "tu");
+  // The image starts after the 6 dot columns of the "t" before it.
+  assert.deepEqual(JSON.parse(JSON.stringify(graphic.dots)), [0, 0, 0, 0, 0, 0, 0x7f, 0x1b, 0x1b]);
+  write1029(api, ctx, [0x1b, 0x01, 0x00, 0x00].concat(ascii("z"), [0x9b]));
+  assert.equal(L()[9].dots, undefined, "a zero length bit image draws nothing");
+
+  // A full line of 480 dot columns: 80 characters, or 40 elongated ones.
+  const eighty = "x".repeat(80);
+  write1029(api, ctx, ascii(eighty.slice(0, 40)));
+  write1029(api, ctx, ascii(eighty.slice(40)));
+  assert.equal(L().length, 11);
+  assert.equal(L()[10].text, eighty);
+  write1029(api, ctx, padded([0x9b]));
+  assert.equal(L().length, 11, "no blank line after a full line");
+  write1029(api, ctx, [0x1b, 0x0e].concat(ascii("y".repeat(38))));
+  write1029(api, ctx, ascii("zzz"));
+  assert.equal(L()[11].text, "y".repeat(38) + "zz", "a 41st elongated character moves to the next line");
+  assert.equal(L()[12].text, "z");
+
+  // A bit image longer than the line is clamped at the line end, and what
+  // follows is text again.
+  write1029(api, ctx, padded([0x1b, 0x0f, 0x1b, 0x01, 0x02, 0x00]));
+  for (let i = 0; i < 12; i++) write1029(api, ctx, new Array(40).fill(0x41));
+  write1029(api, ctx, padded([0x9b])); // ends the text left after the image
+  const clamped = L().slice(13);
+  assert.equal(clamped[0].dots.length, 480);
+  assert.equal(clamped[1].text, "A".repeat(34), "the rest prints as text");
+
+  // STATUS resets underline, elongation, international mode and 9 lpi.
+  write1029(api, ctx, padded([0x9b]));
+  write1029(api, ctx, [0x1b, 0x0e, 0x1b, 0x19, 0x1b, 0x39, 0x1b, 0x17].concat(ascii("kept")));
+  status(api, ctx);
+  const before = L().length;
+  write1029(api, ctx, ascii("fresh").concat([0x9b]));
+  const fresh = L()[before];
+  assert.deepEqual([fresh.text, fresh.runs[0].elongated, fresh.runs[0].underline, fresh.lpi], ["fresh", false, false, 6]);
+}
+
 test820();
 test1025();
+test1029();
 console.log("sio_printer_device.test.js passed");
