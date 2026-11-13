@@ -178,12 +178,12 @@ function buildTools() {
     {
       name: "call_automation",
       title: "Call jsA8E Automation",
-      description: "Grouped bridge over the jsA8E automation API. Provide { domain, action, args }. Domains: system, media, input, debug, dev, artifacts.",
+      description: "Grouped bridge over the jsA8E automation API. Provide { domain, action, args }. Domains: system, media, input, debug, dev, artifacts, printer.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
         properties: {
-          domain: { type: "string", enum: ["system", "media", "input", "debug", "dev", "artifacts"] },
+          domain: { type: "string", enum: ["system", "media", "input", "debug", "dev", "artifacts", "printer"] },
           action: { type: "string" },
           args: { type: "object", additionalProperties: true, description: "Arguments forwarded to the selected jsA8E method." },
         },
@@ -371,6 +371,17 @@ function createMcpSession(runtime, options) {
           case "collectArtifacts": return api.artifacts.collectArtifacts(payload);
           case "captureFailureState": return api.artifacts.captureFailureState(payload);
           default: throw protocolError(-32602, "Unknown artifacts action: " + String(action), { action: action });
+        }
+      case "printer":
+        switch (action) {
+          case "getText": return api.printer.getText();
+          case "getHtml": return api.printer.getHtml(payload);
+          case "getLines": return api.printer.getLines();
+          case "getLineCount": return api.printer.getLineCount();
+          case "clear": return api.printer.clear();
+          case "getModel": return api.printer.getModel();
+          case "setModel": return api.printer.setModel(payload.model);
+          default: throw protocolError(-32602, "Unknown printer action: " + String(action), { action: action });
         }
       default:
         throw protocolError(-32602, "Unknown domain: " + String(domain), { domain: domain });

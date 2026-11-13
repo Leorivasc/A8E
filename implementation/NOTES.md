@@ -1,5 +1,32 @@
 # NOTES.md
 
+- 2026-11-13 (jsA8E: raw view removed, printer on MCP, disk on the SIO contract):
+  (1) The temporary raw frame view is gone (`frame` event, `toRaw`, the raw
+  button); the Atari Writer / Last Word tests that it was kept for passed. (2) New
+  `printer` domain in the automation API (`api.printer`: `getText`, `getHtml`,
+  `getLines`, `getLineCount`, `clear`, `getModel`, `setModel`) and in the MCP
+  server (`call_automation` domain `printer`, documented in `MCP.md`). The paper is
+  attached when the automation API attaches to the app, so a script sees what was
+  printed before its first call; `printer_paper.js` is loaded by `headless.js`
+  and got `getLines()`. `capabilities.printer` reports it. Covered by the stub
+  test in `mcp_server.test.js` and by `mcp_server_stdio.test.js`, which now also
+  boots BASIC on a fresh server, does an `LPRINT` and reads it back through MCP
+  (model switch, clear, error on an unknown model). (3) The disk drive
+  (`$31`-`$38`) is now a device of the generic SIO contract instead of a private
+  handler: the contract gained `{silent}` (no answer, the disk POLL),
+  `{reply, burst}` (disk STATUS: ACK, C, data and checksum in one SERIN burst),
+  `{receive, sector}` with `onData(bytes, host, {cmd, sector})` returning
+  true / false / `{nak}`, `nakOnBadCommandChecksum` (the AHRM 5.10 first-byte race
+  NAK, which was a disk special case inside the bus) and `host.io` for the media
+  state. No behavior change: new `tests/sio_disk_device.test.js` replays 90 steps
+  (all commands on single, double and 512 byte drives, bad data and command
+  checksums, out of range, no disk) and compares the SERIN stream, phase
+  boundaries, media and observer events with a golden trace recorded from the old
+  handler (`tests/fixtures/sio_disk_device.golden.json`); the existing SIO tests
+  (`pokey_sio_contract`, `_burst`, `_disk_observer`) and the full
+  `test:automation` pass, lint clean. Not run: `test:vbxe:full`, native `ctest`
+  (no C changes), real disk software beyond the tests.
+
 - 2026-11-13 (jsA8E: printer 1029 model and graphics on the paper): new `"1029"`
   model in `sio_printer.js` (AHRM 9.8, checked against Altirra `printer.cpp`):
   `$40`/`$45`, any AUX1 with a 40 byte frame, fixed status `[0,0,$14,$29]`, Status

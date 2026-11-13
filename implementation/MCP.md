@@ -18,7 +18,7 @@ flowchart LR
   Core["Emulator core<br/>(Node vm context,<br/>no worker, no rendering)"]
 
   Client -- "one JSON message per line" --> Server
-  Server -- "api.system / media / input /<br/>debug / dev / artifacts" --> Headless
+  Server -- "api.system / media / input /<br/>debug / dev / artifacts / printer" --> Headless
   Headless --> Core
 ```
 
@@ -151,7 +151,7 @@ The single entry point for everything else.
 { "domain": "debug", "action": "readRange", "args": { "start": 1536, "length": 2 } }
 ```
 
-`domain` is one of `system`, `media`, `input`, `debug`, `dev`, `artifacts`.
+`domain` is one of `system`, `media`, `input`, `debug`, `dev`, `artifacts`, `printer`.
 `action` is the method name. `args` is an object (default `{}`); the keys the
 server understands for each action are listed below. Unknown domains or actions
 produce a protocol error (`-32602`).
@@ -245,6 +245,26 @@ on the client side.
 |---|---|
 | `captureScreenshot` | options (`encoding`, ...) |
 | `collectArtifacts`, `captureFailureState` | options (memory `ranges`, `traceTailLimit`, `screenshot`, ...) |
+
+#### `printer`
+
+What the emulated Atari printed through P: (SIO printer, see `PRINTER.md`). The
+server collects the pages from the start, so text printed before the first
+`printer` call is there.
+
+| Action | Arguments | Returns |
+|---|---|---|
+| `getText` | none | The paper as plain text (one line per printed line; bit image lines show as `[bit image, N columns]`) |
+| `getHtml` | `title` (optional) | A printable HTML page with wide text, underline and bit images (SVG) |
+| `getLines` | none | The printed lines: `text`, `sideways`, `columns`, and for the 1025/1029 `cpi`, `lpi`, `shortLine`, `runs`, `dots` |
+| `getLineCount` | none | Number of lines on the paper |
+| `clear` | none | Tears off the paper (`true`) |
+| `getModel` | none | `"1025"` (default), `"1029"` or `"820"` |
+| `setModel` | `model` (`820`, `1025` or `1029`) | The model now in use; anything else is an error result |
+
+The model decides how the same bytes are printed: the 820 prints each 40 byte
+frame as a line, the 1025 and 1029 join frames into 80 column lines (the 1029
+also understands underline, wide characters and bit image graphics).
 
 ### Binary inputs
 
@@ -367,8 +387,9 @@ If you do not need the protocol, call `createHeadlessAutomation` from
 tool listing, argument mapping, binary inputs, screenshot shaping and error
 paths. It does not boot the emulator; `tests/mcp_server_stdio.test.js` (also in
 `test:automation`, skipped when the ROMs are missing) spawns the real server
-with the real ROMs and checks the standard handshake, answer order and a
-default `buildAndRun` of a never-returning program. The automation API itself
+with the real ROMs and checks the standard handshake, answer order, a
+default `buildAndRun` of a never-returning program, and the printer domain
+(`LPRINT` from BASIC read back with `printer.getText`). The automation API itself
 is covered by `tests/headless_automation.test.js` and the boot tests.
 
 ## Security

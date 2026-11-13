@@ -44,6 +44,15 @@ function makeRuntime() {
           return { written: true };
         },
       },
+      printer: {
+        getText: async function () { calls.push(['printer.getText']); return 'HELLO\n'; },
+        getHtml: async function (options) { calls.push(['printer.getHtml', options || null]); return '<html></html>'; },
+        getLines: async function () { calls.push(['printer.getLines']); return [{ text: 'HELLO' }]; },
+        getLineCount: async function () { calls.push(['printer.getLineCount']); return 1; },
+        clear: async function () { calls.push(['printer.clear']); return true; },
+        getModel: async function () { calls.push(['printer.getModel']); return '1025'; },
+        setModel: async function (model) { calls.push(['printer.setModel', model]); return model; },
+      },
       artifacts: {
         captureScreenshot: async function () { calls.push(['artifacts.captureScreenshot']); return { mimeType: 'image/png', width: 2, height: 1, base64: 'AAAA' }; },
       },
@@ -158,6 +167,18 @@ async function main() {
     assert.equal(screenshot.result.content[0].type, 'image');
     assert.equal(screenshot.result.content[0].mimeType, 'image/png');
     assert.equal(stub.calls[9][0], 'artifacts.captureScreenshot');
+
+    const printerText = await session.handlePayload({ jsonrpc: '2.0', id: 40, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'printer', action: 'getText', args: {} } } });
+    assert.equal(printerText.result.structuredContent.result, 'HELLO\n');
+    const printerModel = await session.handlePayload({ jsonrpc: '2.0', id: 41, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'printer', action: 'setModel', args: { model: '1029' } } } });
+    assert.equal(printerModel.result.structuredContent.result, '1029');
+    await session.handlePayload({ jsonrpc: '2.0', id: 42, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'printer', action: 'getHtml', args: { title: 'T' } } } });
+    await session.handlePayload({ jsonrpc: '2.0', id: 43, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'printer', action: 'clear', args: {} } } });
+    assert.ok(stub.calls.some(function (c) { return c[0] === 'printer.setModel' && c[1] === '1029'; }));
+    assert.ok(stub.calls.some(function (c) { return c[0] === 'printer.getHtml' && c[1] && c[1].title === 'T'; }));
+    assert.ok(stub.calls.some(function (c) { return c[0] === 'printer.clear'; }));
+    const printerBad = await session.handlePayload({ jsonrpc: '2.0', id: 44, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'printer', action: 'nope', args: {} } } });
+    assert.equal(printerBad.error.code, -32602);
 
     const unknownDomain = await session.handlePayload({ jsonrpc: '2.0', id: 13, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'missing', action: 'noop', args: {} } } });
     assert.equal(unknownDomain.error.code, -32602);

@@ -29,19 +29,31 @@ OS P: handler  ->  SIO bus (pokey_sio.js)  ->  device (sio_printer.js)
 
 ## Device contract
 
-`registerDevice(device)` in `pokey_sio.js` (`device.deviceIds` lists the IDs):
+`registerDevice(device)` in `pokey_sio.js` (`device.deviceIds` lists the IDs).
+The printers and the disk drive both sit on it:
 
 | Member | Meaning |
 |---|---|
-| `onCommand({cmd, aux1, aux2}, host)` | Returns `null` (NAK), `{complete:true}` (ACK, C), `{reply: Uint8Array}` (ACK, C, data + checksum) or `{receive: n}` (ACK, then a data frame of `n` bytes) |
-| `onData(bytes, host)` | After a good data frame; return `false` to answer Error instead of Complete |
+| `onCommand({device, cmd, aux1, aux2}, host)` | Returns `null` (NAK), `{complete:true}` (ACK, C), `{reply}` (ACK, then C + data + checksum as a second phase), `{reply, burst:true}` (ACK, C, data, checksum in one burst: disk STATUS), `{receive: n, sector}` (ACK, then a data frame of `n` bytes), `{ignore:true}` (act as an absent device) or `{silent:true}` (answer nothing) |
+| `onData(bytes, host, {cmd, sector})` | After a good data frame; `true` = Complete, `false` = Error, `{nak:true}` = NAK |
 | `onDataError(host)` | Optional; the bus answers NAK to a bad data checksum |
+| `nakOnBadCommandChecksum(frame, host)` | Optional; `true` makes the bus NAK a command frame addressed to the device with a bad checksum (the XL/XE OS first-byte race, AHRM 5.10); otherwise it stays silent |
 | `host.notify(event)` | Sends an event out through `io.sioDeviceEventObserver` |
+| `host.settings` | Live application settings (`io.sioDeviceSettings`, e.g. `printerModel`) |
+| `host.io` | The machine I/O state, for a device that owns emulated media (the disk drive) |
 
 Events reach the application as `{ device, event }` through
 `app.onSioDeviceEvent(listener)` (main thread: direct; worker: a
-`sioDeviceEvent` message). The disk drive still uses its own handler; moving it
-to this contract is open work.
+`sioDeviceEvent` message).
+
+The disk drive (`$31`-`$38`) moved onto this contract without any change of
+behavior: `tests/sio_disk_device.test.js` drives every disk command through the
+real bus and compares the whole SERIN byte stream, the response phase boundaries,
+the media and the observer events with a golden trace recorded from the previous
+handler.
+
+Printer access from scripts and agents: the `printer` domain of the automation
+API and of the MCP server (`MCP.md`).
 
 ## Models
 
@@ -94,9 +106,5 @@ case in `printer_paper.js`; the bus does not change.
 - 1020 model (vectors); drawing text as dots with the 1029 font so mixed lines overlap.
 - Native C core (`Pokey.c` has the disks hard-wired; it needs the same registry).
 - Short-line centering, density and spacing are not drawn; out-of-paper errors are not modelled.
-- A TEMPORARY `frame` event and the `raw` button of the panel show the
-  untranslated data frames (marked `TEMPORARY (raw-frame experiment)`); remove
-  them once the 1029 is done.
 - Sideways lines are shown in reading order and tagged, not rotated.
 - Printer state (last orientation, error flags) is not stored in snapshots.
-- Not exposed through the automation API / MCP yet.
