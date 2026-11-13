@@ -70,6 +70,11 @@ async function main() {
     assert.equal(init.result.capabilities.tools.listChanged, false);
     assert.equal(init.result.serverInfo.version, 'v1.3.0');
 
+    assert.equal(await session.handlePayload({ jsonrpc: '2.0', method: 'notifications/initialized' }), null);
+    assert.equal(await session.handlePayload({ jsonrpc: '2.0', method: 'notifications/unknown' }), null);
+    const ping = await session.handlePayload({ jsonrpc: '2.0', id: 100, method: 'ping' });
+    assert.deepEqual(ping, { jsonrpc: '2.0', id: 100, result: {} });
+
     const list = await session.handlePayload({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     assert.ok(list.result.tools.some(function (tool) { return tool.name === 'call_automation'; }));
 

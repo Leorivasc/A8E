@@ -381,7 +381,8 @@ function createMcpSession(runtime, options) {
       initialized = true;
       return { jsonrpc: "2.0", id: message.id, result: { protocolVersion: requestedVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "jsA8E MCP", version: runtimeVersion }, instructions: buildInstructions() } };
     }
-    if (message.method === "initialized") return null;
+    if (message.method === "initialized" || message.method === "notifications/initialized") return null;
+    if (message.method === "ping") return { jsonrpc: "2.0", id: message.id, result: {} };
     if (message.method === "shutdown") {
       await dispose();
       return { jsonrpc: "2.0", id: message.id, result: {} };
@@ -438,10 +439,10 @@ function createMcpSession(runtime, options) {
     return Promise.resolve().then(function () { return handleRequest(payload); }).then(function (response) {
       return response === null || response === undefined ? null : response;
     }).catch(function (err) {
+      if (!isRequest) return null;
       if (err && err.isProtocolError) {
         return { jsonrpc: "2.0", id: requestId, error: { code: err.code, message: err.message, data: sanitizeValue(err.data) } };
       }
-      if (!isRequest) return null;
       return { jsonrpc: "2.0", id: requestId, result: errorResult(payload.method || "unknown", payload.params && payload.params.action ? String(payload.params.action) : null, err) };
     });
   }

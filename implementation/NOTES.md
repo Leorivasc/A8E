@@ -1,5 +1,15 @@
 # NOTES.md
 
+- 2026-11-13 (jsA8E: MCP standard handshake): `mcp_server.js` now accepts the
+  standard `notifications/initialized` (besides the bare `initialized`) and
+  answers `ping` with an empty result, also before `initialize`. A message
+  without `id` (a notification) no longer gets any reply, including protocol
+  errors such as an unknown method, as JSON-RPC requires; before, a standard
+  client received an error with `id: null` right after the handshake.
+  `tests/mcp_server.test.js` covers both notifications and `ping`; the test and
+  `npm run lint` pass. `MCP.md` updated. Items 1, 2, 4 and 5 of the 2026-11-10
+  findings remain open.
+
 - 2026-11-11 (jsA8E: console keys fit on mobile): on phones the five console keys
   (about 380 px wide) overflowed the screen and HELP was cut off on the left.
   `style.css` now has a `max-width: 780px` block (the layout's mobile breakpoint):

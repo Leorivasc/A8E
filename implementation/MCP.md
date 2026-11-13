@@ -124,11 +124,11 @@ Two behaviors that matter for client authors:
   answers can come back **out of order**. Match answers by `id` and, for
   anything stateful (for example boot, then wait, then read), send the next
   request only after the previous answer arrived.
-- **Not implemented:** `ping`, `resources/*`, `prompts/*`, cancellation and
-  progress notifications. The standard MCP notification
-  `notifications/initialized` is not recognised either (only the bare
-  `initialized` is), so a client that sends it receives a harmless
-  `-32601` error with `id: null`; ignore it.
+- **Not implemented:** `resources/*`, `prompts/*`, cancellation and progress
+  notifications. `ping` answers an empty result, and both
+  `notifications/initialized` and the bare `initialized` are accepted. A
+  notification (a message without `id`) never gets a reply, even when its
+  method is unknown.
 
 ## Tools
 
