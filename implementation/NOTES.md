@@ -1,5 +1,27 @@
 # NOTES.md
 
+- 2026-11-13 (jsA8E: MCP findings 1, 2, 4 and 5 closed): (4) the real cause of
+  the `buildAndRun` hang was in `js/core/debugger.js`: `executeSingleInstruction`
+  waited for the instruction counter to equal `previous + 1`, but one
+  `CPU.run` call can retire two (an interrupt entry counts as one), so the
+  equality was skipped and the loop spun with no limit check until the 32-bit
+  counter wrapped. It now tests "at least one instruction retired". Two more
+  defects showed up once it returned: the tight-loop detector looked only at
+  PCs, so the OS cold-start delay loop (`DEY/BNE` at `$C2AD`) was reported as a
+  stuck program (it now also requires a repeated register state, so counting
+  loops no longer match), and the boot guards (500k instructions, 4M cycles)
+  were below what a cold boot needs (entry at about 937k instructions, 3.7M
+  cycles); `xex.js` now uses 5M and 20M. (1) ROM lookup tries the repository
+  root then `jsA8E/` (the ROMs are in `jsA8E/`) and warns on stderr when no OS
+  ROM is found. (2) Lines are processed through a queue, so answers come back in
+  request order; shutdown waits for it. (5) New
+  `tests/mcp_server_stdio.test.js` (in `test:automation`, skipped without ROMs)
+  runs the real server and emulator: handshake, order, default `buildAndRun`
+  of `JMP *` (without the debugger fix it never returns). `test:automation`
+  and lint pass. `test:vbxe` stops at `vbxe_blitter_attrmap_phase_boot` with
+  and without these changes (not investigated). Behavior change: concurrent
+  clients no longer run requests in parallel.
+
 - 2026-11-13 (jsA8E: MCP standard handshake): `mcp_server.js` now accepts the
   standard `notifications/initialized` (besides the bare `initialized`) and
   answers `ping` with an empty result, also before `initialize`. A message

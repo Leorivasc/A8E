@@ -30,6 +30,7 @@ Related files:
 | `headless.js` | Browser-less runtime the server drives (also usable directly from Node) |
 | `js/app/automation_api.js`, `js/app/automation/*.js` | The automation API itself |
 | `tests/mcp_server.test.js` | Protocol and argument-mapping tests (uses a stub runtime) |
+| `tests/mcp_server_stdio.test.js` | End-to-end test over stdio with the real emulator and ROMs |
 
 ## Starting the server
 
@@ -67,8 +68,8 @@ alive after disposal, which is only useful for tests).
 The emulator needs ROMs that the repository does not ship. For each ROM the
 server uses, in order: the command-line option, the environment variable
 (`JSA8E_OS_ROM`, `JSA8E_BASIC_ROM`), then `ATARIXL.ROM` / `ATARIBAS.ROM` in the
-**repository root** (not in `jsA8E/`). If your ROMs live in `jsA8E/`, pass
-`--os-rom` and `--basic-rom`, otherwise the machine starts without ROMs
+repository root, then in `jsA8E/`. If none is found the server writes a warning
+to stderr and the machine starts without ROMs
 (`getSystemState().roms.osLoaded` is `false`) and nothing boots. ROMs can also
 be loaded later with `media.loadOsRom` / `media.loadBasicRom`.
 
@@ -117,13 +118,11 @@ Anything else is answered with `-32601 Unknown method`. Calls other than
 `initialize` before initialization fail with `-32002`. Malformed JSON gets
 `-32700` with `id: null`.
 
-Two behaviors that matter for client authors:
+Behaviors that matter for client authors:
 
-- **Requests run concurrently.** The server does not queue lines. If you send a
-  second request before the first answer arrives, both run at once and the
-  answers can come back **out of order**. Match answers by `id` and, for
-  anything stateful (for example boot, then wait, then read), send the next
-  request only after the previous answer arrived.
+- **Requests run one at a time.** The server queues the lines it reads and
+  answers them in request order, so a request sent while a long one (a boot,
+  a wait) is still running is answered after it. Notifications get no answer.
 - **Not implemented:** `resources/*`, `prompts/*`, cancellation and progress
   notifications. `ping` answers an empty result, and both
   `notifications/initialized` and the bare `initialized` are accepted. A
@@ -326,13 +325,16 @@ Replies are shown without the `jsonrpc` wrapper fields.
 ### `awaitEntry` and cold boots
 
 `dev.runXex` and `dev.buildAndRun` default to `awaitEntry: true`: they run the
-emulator inside the call until the XEX entry point is reached. A cold boot of
-the real OS ROM can take longer than the default guard (four million cycles),
-and in testing a plain `buildAndRun` of a program that never returns control
-did not complete. For anything beyond trivial programs, pass
-`"awaitEntry": false` and then synchronise explicitly with `system.waitForFrames`,
-`debug.setBreakpoints` followed by `debug.waitForBreakpoint`, or
-`debug.waitForMemory`. The repository's own boot tests use the same pattern.
+emulator inside the call until the XEX entry point is reached. The guards are
+5 million instructions and 20 million cycles (`maxBootInstructions`,
+`maxBootCycles`); a cold boot through the XEX loader reaches the entry in about
+3.7 million cycles. Tight-loop detection (`detectTightLoop`) only fires for a
+loop that repeats the same register state, so the OS delay loops of the cold
+start do not trip it. A program that never returns control after its entry,
+such as `JMP *`, returns normally once the entry is reached. Use
+`"awaitEntry": false` and synchronise with `system.waitForFrames`,
+`debug.setBreakpoints` plus `debug.waitForBreakpoint`, or `debug.waitForMemory`
+when you do not want the call to wait for the boot.
 
 ## Using it from Node
 
@@ -363,9 +365,11 @@ If you do not need the protocol, call `createHeadlessAutomation` from
 `tests/mcp_server.test.js` (part of `npm run test:automation`) drives
 `createMcpSession` with a **stub runtime**. It checks the protocol handshake,
 tool listing, argument mapping, binary inputs, screenshot shaping and error
-paths. It does not boot the emulator, so it will not catch a regression in the
-automation API itself; `tests/headless_automation.test.js` and the boot tests
-cover that side.
+paths. It does not boot the emulator; `tests/mcp_server_stdio.test.js` (also in
+`test:automation`, skipped when the ROMs are missing) spawns the real server
+with the real ROMs and checks the standard handshake, answer order and a
+default `buildAndRun` of a never-returning program. The automation API itself
+is covered by `tests/headless_automation.test.js` and the boot tests.
 
 ## Security
 
