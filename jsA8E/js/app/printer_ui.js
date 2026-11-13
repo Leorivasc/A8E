@@ -130,11 +130,8 @@
       }
     }
 
-    let showRaw = false; // TEMPORARY (raw-frame experiment)
-
     function refresh() {
-      if (showRaw) view.textContent = paper.toRaw();
-      else view.innerHTML = paper.toHtmlBody();
+      view.innerHTML = paper.toHtmlBody();
       view.scrollTop = view.scrollHeight;
       count.textContent = paper.getLineCount() + " lines";
     }
@@ -200,10 +197,6 @@
       state.floating = !isFloating();
       saveState(state);
       applyMode();
-    });
-    panel.querySelector('[data-printer="raw"]').addEventListener("click", function () {
-      showRaw = !showRaw;
-      refresh();
     });
     panel.querySelector('[data-printer="text"]').addEventListener("click", function () {
       download("printer.txt", "text/plain;charset=utf-8", paper.toText());

@@ -493,13 +493,6 @@
         return active.onCommand(frame, host);
       },
       onData: function (bytes, host) {
-        // TEMPORARY (raw-frame experiment): the untranslated data frame.
-        host.notify({
-          type: "frame",
-          raw: Array.from(bytes, function (b) {
-            return (b < 16 ? "0" : "") + b.toString(16);
-          }).join(" "),
-        });
         return active.onData(bytes, host);
       },
       onDataError: function (host) {

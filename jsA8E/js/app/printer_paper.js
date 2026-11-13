@@ -17,18 +17,9 @@
   function createPaper(options) {
     const maxLines = Math.max(1, (options && options.maxLines) | 0 || 20000);
     let lines = [];
-    let frames = []; // TEMPORARY (raw-frame experiment): data frames as hex
     const listeners = new Set();
 
     function add(event) {
-      if (event && event.type === "frame") {
-        frames.push(String(event.raw || ""));
-        if (frames.length > maxLines) frames = frames.slice(frames.length - maxLines);
-        listeners.forEach(function (listener) {
-          listener(lines.length);
-        });
-        return;
-      }
       if (!event || event.type !== "line") return;
       lines.push({
         text: String(event.text || ""),
@@ -49,7 +40,6 @@
 
     function clear() {
       lines = [];
-      frames = [];
       listeners.forEach(function (listener) {
         listener(0);
       });
@@ -106,15 +96,6 @@
       return lines.map(lineToHtml).join("");
     }
 
-    // TEMPORARY (raw-frame experiment): one data frame per row, hex bytes.
-    function toRaw() {
-      return frames
-        .map(function (raw, index) {
-          return String(index + 1).padStart(3, "0") + ": " + raw;
-        })
-        .join("\n");
-    }
-
     // A standalone page. Browsers print it to paper or PDF as is. Sideways
     // lines (820 orientation S) keep their reading order and are tagged.
     function toHtml(title) {
@@ -141,8 +122,11 @@
       clear: clear,
       toText: toText,
       toHtmlBody: toHtmlBody,
-      toRaw: toRaw,
       toHtml: toHtml,
+      // A copy of the printed lines (text and attributes), oldest first.
+      getLines: function () {
+        return JSON.parse(JSON.stringify(lines));
+      },
       getLineCount: function () {
         return lines.length;
       },
