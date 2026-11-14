@@ -4679,6 +4679,17 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   AHRM POKEY phase trace remains available independently through its existing
   opt-in mechanism.
 
+## 2026-11-14 Documentation sync for the printer and SIO contract
+
+- `implementation/DIAGRAM.mermaid`: added the SIO device node (disks and
+  printers on the contract) and the printer paper/panel node, with the event
+  path core -> proxy -> paper -> automation API. `PRINTER.md` now draws its
+  layers as a mermaid flowchart.
+- `CORE.md`, `UI.md`, `WORKER.md`, `AUTOMATION.md` (both), `jsA8E/README.md`
+  and `CHANGELOG.md` describe the SIO device contract, the printer panel, the
+  `sioDeviceEvent`/`setPrinterModel` worker messages and the `printer`
+  automation domain. Documentation only; no code changed.
+
 ## Legal / License TODO
 
 Pending legal and licensing review recorded on 2026-09-30. These items are

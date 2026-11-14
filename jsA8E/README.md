@@ -351,6 +351,8 @@ Full guide: [implementation/MCP.md](../implementation/MCP.md).
 
 For Codex-style MCP clients, `mcp_server.js` exposes the same headless runtime through a local stdio bridge. Start it with `npm run mcp` from `jsA8E/`. It keeps the server surface small and maps grouped automation actions through `get_capabilities`, `get_system_state`, and `call_automation`.
 
+The `printer` domain (`getText`, `getHtml`, `getLines`, `getLineCount`, `clear`, `getModel`, `setModel`) reads what the emulated SIO printer printed.
+
 Binary inputs use base64 strings or local file paths, and screenshot results return an MCP image content block plus base64 data in `structuredContent`.
 
 ### Browser-less Node bootstrap

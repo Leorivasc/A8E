@@ -9,13 +9,16 @@ does not have it yet.
 
 ## Layers
 
-```text
-OS P: handler  ->  SIO bus (pokey_sio.js)  ->  device (sio_printer.js)
-                                                   | page events
-                                                   v
-                      app.onSioDeviceEvent  ->  paper (printer_paper.js)  ->  .txt / .html
-                      (worker postMessage)       ^
-                                                 printer_ui.js (button + panel, docked or floating)
+```mermaid
+flowchart LR
+  OS["OS P: handler<br/>(ROM, CIO)"] --> Bus["SIO bus<br/>pokey_sio.js<br/>registerDevice"]
+  Bus --> Disk["disk drives<br/>$31-$38"]
+  Bus --> Printer["printer<br/>sio_printer.js<br/>820 / 1025 / 1029"]
+  Printer -- "page events<br/>io.sioDeviceEventObserver" --> App["app.onSioDeviceEvent<br/>(worker: sioDeviceEvent message)"]
+  App --> Paper["paper<br/>printer_paper.js"]
+  Paper --> Out[".txt / .html"]
+  Paper --> UI["printer_ui.js<br/>button + panel (docked or floating)"]
+  Paper --> API["automation API / MCP<br/>printer domain"]
 ```
 
 - **Bus** (`js/core/pokey_sio.js`): owns the command frame, ACK/NAK, the data
