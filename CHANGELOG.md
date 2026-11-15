@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- jsA8E: printer (P:). The Atari 820 / generic SIO printer on device `$40` prints what BASIC `LPRINT` and `OPEN #1,8,0,"P:"` send. A printer button appears after the first line and opens the paper, with save as `.txt` or `.html` and print. Models 1025 (80 columns, default), 1029 (dot graphics, underline, wide text) and 820 are selectable in the panel. SIO peripherals, including the disk drives, plug into the bus through a generic device contract, and the printer is available to scripts and MCP clients through the `printer` automation domain (`implementation/PRINTER.md`).
+- jsA8E: on-screen console keys (HELP, START, SELECT, OPTION, RESET) in the top right of the emulator screen. Hidden by default, they fade in on hover (or on a touch of the top strip on touch screens). They are slanted like the 65XE keys, yellow like the D1: disk indicator and orange while pressed, and drive the same F1-F5 keys as the on-screen keyboard.
 - Native A8E: first stage of the VBXE device (`--vbxe[=fx1.20|fx1.24|fx1.26]`,
   `--vbxe-d7`): registers, 512 KiB VRAM, MEMAC A/B for CPU, ANTIC and
   instruction fetch, blitter with collision code and completion IRQ.
@@ -26,8 +28,18 @@ All notable changes to this project will be documented in this file.
   diagnostics.
 - Browser headless automation and MCP coverage for grouped lifecycle, media,
   debugger, HostFS, assembler, snapshot, artifact, and memory-profile flows.
+- jsA8E optional remote Disk Library sync over WebDAV (tested against
+  Nextcloud): workspace or whole-library scope, content-addressed blobs,
+  ETag-guarded publishing, non-destructive merge, tombstoned deletions (remote
+  deletions go to the local Trash), folder renames and entry moves, automatic
+  ETag polling with an "Update" indicator and idle sync, an opt-in remembered
+  password, and a manual remote cleanup of unreferenced blobs. The native A8E
+  has no WebDAV client yet (see `implementation/OnlineDrive.md`).
 
 ### Documentation
+- `implementation/MCP.md`: guide to the MCP server (`mcp_server.js`): startup options,
+  ROM lookup, protocol behavior and limits, argument mapping for every
+  action, results and errors, security notes, and a worked session.
 - VBXE is documented as experimental and opt-in. The roadmap now holds the list
   of known differences from Altirra 4.40, unaudited areas, validation gaps and
   test-infrastructure issues (`implementation/VBXE_ROADMAP.md`, "Known issues
@@ -35,6 +47,8 @@ All notable changes to this project will be documented in this file.
   lacks VBXE.
 
 ### Fixed
+- jsA8E remote sync: a new browser no longer fails with "The remote is missing blobs/<hash>.atr" for an XEX disk that another browser had converted. A blob is now found by its hash under either type (`.atr` or `.xex`), still verified by SHA-256, which also repairs remotes already in that state.
+- jsA8E: ADC and SBC in decimal mode no longer take an extra cycle. That is 65C02 behavior (AHRM 3.2, 3.6); the NMOS 6502 of the Atari 800XL takes the base cycles. The 6502 MIPS Benchmark 1.3 reported "Integer arithmetic" at 0.240 (86%) instead of 0.261 (94%) as on real hardware, Altirra and the native A8E. Decimal loops ran about 9% slower.
 - jsA8E VBXE: MEMAC A windows above $D800 (for example $E000 with the OS ROM
   off) are now routed, so Commando's terrain map is copied and the player is
   blocked by palms, rocks and the bridge as in A8E.
@@ -56,6 +70,9 @@ All notable changes to this project will be documented in this file.
   `vbxe_blitter_midline_start`.
 
 ### Changed
+- jsA8E MCP server: file arguments are confined to `--cwd` by default
+  (`--allow-any-path` lifts it) and `--no-network` disables the URL loading
+  actions.
 - Faster VBXE paths for software that toggles MEMAC windows or uses attribute
   maps on every line: MEMAC B remapping is decided per window, the attribute
   map is looked up once per cell run, and decoded cells are kept on the row

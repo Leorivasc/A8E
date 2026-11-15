@@ -44,6 +44,15 @@ function makeRuntime() {
           return { written: true };
         },
       },
+      printer: {
+        getText: async function () { calls.push(['printer.getText']); return 'HELLO\n'; },
+        getHtml: async function (options) { calls.push(['printer.getHtml', options || null]); return '<html></html>'; },
+        getLines: async function () { calls.push(['printer.getLines']); return [{ text: 'HELLO' }]; },
+        getLineCount: async function () { calls.push(['printer.getLineCount']); return 1; },
+        clear: async function () { calls.push(['printer.clear']); return true; },
+        getModel: async function () { calls.push(['printer.getModel']); return '1025'; },
+        setModel: async function (model) { calls.push(['printer.setModel', model]); return model; },
+      },
       artifacts: {
         captureScreenshot: async function () { calls.push(['artifacts.captureScreenshot']); return { mimeType: 'image/png', width: 2, height: 1, base64: 'AAAA' }; },
       },
@@ -69,6 +78,11 @@ async function main() {
     assert.equal(init.result.protocolVersion, '2025-11-25');
     assert.equal(init.result.capabilities.tools.listChanged, false);
     assert.equal(init.result.serverInfo.version, 'v1.3.0');
+
+    assert.equal(await session.handlePayload({ jsonrpc: '2.0', method: 'notifications/initialized' }), null);
+    assert.equal(await session.handlePayload({ jsonrpc: '2.0', method: 'notifications/unknown' }), null);
+    const ping = await session.handlePayload({ jsonrpc: '2.0', id: 100, method: 'ping' });
+    assert.deepEqual(ping, { jsonrpc: '2.0', id: 100, result: {} });
 
     const list = await session.handlePayload({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     assert.ok(list.result.tools.some(function (tool) { return tool.name === 'call_automation'; }));
@@ -154,8 +168,78 @@ async function main() {
     assert.equal(screenshot.result.content[0].mimeType, 'image/png');
     assert.equal(stub.calls[9][0], 'artifacts.captureScreenshot');
 
+    const printerText = await session.handlePayload({ jsonrpc: '2.0', id: 40, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'printer', action: 'getText', args: {} } } });
+    assert.equal(printerText.result.structuredContent.result, 'HELLO\n');
+    const printerModel = await session.handlePayload({ jsonrpc: '2.0', id: 41, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'printer', action: 'setModel', args: { model: '1029' } } } });
+    assert.equal(printerModel.result.structuredContent.result, '1029');
+    await session.handlePayload({ jsonrpc: '2.0', id: 42, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'printer', action: 'getHtml', args: { title: 'T' } } } });
+    await session.handlePayload({ jsonrpc: '2.0', id: 43, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'printer', action: 'clear', args: {} } } });
+    assert.ok(stub.calls.some(function (c) { return c[0] === 'printer.setModel' && c[1] === '1029'; }));
+    assert.ok(stub.calls.some(function (c) { return c[0] === 'printer.getHtml' && c[1] && c[1].title === 'T'; }));
+    assert.ok(stub.calls.some(function (c) { return c[0] === 'printer.clear'; }));
+    const printerBad = await session.handlePayload({ jsonrpc: '2.0', id: 44, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'printer', action: 'nope', args: {} } } });
+    assert.equal(printerBad.error.code, -32602);
+
     const unknownDomain = await session.handlePayload({ jsonrpc: '2.0', id: 13, method: 'tools/call', params: { name: 'call_automation', arguments: { domain: 'missing', action: 'noop', args: {} } } });
     assert.equal(unknownDomain.error.code, -32602);
+
+    // Path confinement: relative escapes, absolute paths and symlinks that
+    // lead out of the working directory are refused; nothing reaches the runtime.
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jsa8e-mcp-outside-'));
+    fs.writeFileSync(path.join(outsideDir, 'SECRET.BIN'), 'secret');
+    fs.symlinkSync(outsideDir, path.join(tempDir, 'LINK'));
+    fs.mkdirSync(path.join(tempDir, 'SUB'));
+    fs.writeFileSync(path.join(tempDir, 'SUB', 'IN.BIN'), 'ok');
+    const callsBefore = stub.calls.length;
+    async function hostWrite(id, args, targetSession) {
+      return (targetSession || session).handlePayload({
+        jsonrpc: '2.0', id: id, method: 'tools/call',
+        params: { name: 'call_automation', arguments: { domain: 'dev', action: 'writeHostFile', args: Object.assign({ name: 'X.BIN' }, args) } },
+      });
+    }
+    for (const bad of ['../x', path.join(outsideDir, 'SECRET.BIN'), 'LINK/SECRET.BIN', 'SUB/../../x']) {
+      const refused = await hostWrite(20, { path: bad });
+      assert.equal(refused.error.code, -32602, bad);
+      assert.match(refused.error.message, /outside the working directory/, bad);
+    }
+    assert.equal(stub.calls.length, callsBefore);
+    const inside = await hostWrite(21, { path: 'SUB/IN.BIN' });
+    assert.equal(inside.result.structuredContent.result.written, true);
+    const insideAbs = await hostWrite(22, { path: path.join(tempDir, 'SUB', 'IN.BIN') });
+    assert.equal(insideAbs.result.structuredContent.result.written, true);
+    const sourceOutside = await session.handlePayload({
+      jsonrpc: '2.0', id: 23, method: 'tools/call',
+      params: { name: 'call_automation', arguments: { domain: 'dev', action: 'assembleSource', args: { path: '../x.asm' } } },
+    });
+    assert.equal(sourceOutside.error.code, -32602);
+
+    const open = createMcpSession(stub.runtime, { cwd: tempDir, confinePaths: false });
+    await open.handlePayload({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+    const allowed = await hostWrite(24, { path: path.join(outsideDir, 'SECRET.BIN') }, open);
+    assert.equal(allowed.result.structuredContent.result.written, true);
+
+    // Network switch: every URL action is refused, local actions still work.
+    const offline = createMcpSession(stub.runtime, { cwd: tempDir, allowNetwork: false });
+    await offline.handlePayload({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+    const urlCalls = [['media', 'loadRomFromUrl'], ['media', 'loadOsRomFromUrl'], ['media', 'loadBasicRomFromUrl'], ['media', 'mountDiskFromUrl'], ['dev', 'runXexFromUrl']];
+    for (const pair of urlCalls) {
+      const blocked = await offline.handlePayload({
+        jsonrpc: '2.0', id: 25, method: 'tools/call',
+        params: { name: 'call_automation', arguments: { domain: pair[0], action: pair[1], args: { url: 'http://127.0.0.1/x' } } },
+      });
+      assert.equal(blocked.error.code, -32602, pair[1]);
+      assert.match(blocked.error.message, /disabled/, pair[1]);
+    }
+    const localOk = await hostWrite(26, { base64: 'AAAA' }, offline);
+    assert.equal(localOk.result.structuredContent.result.written, true);
+
+    const cli = require('../mcp_server').parseArgs(['node', 'mcp_server.js', '--allow-any-path', '--no-network']);
+    assert.equal(cli.confinePaths, false);
+    assert.equal(cli.allowNetwork, false);
+    const defaults = require('../mcp_server').parseArgs(['node', 'mcp_server.js']);
+    assert.equal(defaults.confinePaths, true);
+    assert.equal(defaults.allowNetwork, true);
+    fs.rmSync(outsideDir, { recursive: true, force: true });
 
     await session.dispose();
     assert.equal(stub.calls[stub.calls.length - 1][0], 'dispose');

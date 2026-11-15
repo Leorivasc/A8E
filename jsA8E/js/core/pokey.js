@@ -1167,10 +1167,10 @@
       if (!io.pokeyPotCharge) io.pokeyPotCharge = new Uint8Array(8);
       if (io.pokeyPotScanActive) {
         for (let i = 0; i < 8; i++)
-          io.pokeyPotCharge[i] = Math.min(255, io.pokeyPotCharge[i] + (io.pokeyPotCounter & 0xff));
+          {io.pokeyPotCharge[i] = Math.min(255, io.pokeyPotCharge[i] + (io.pokeyPotCounter & 0xff));}
       } else if (!pokeyPotFastScanEnabled(ctx)) {
         if (ctx.cycleCounter < (io.pokeyPotChargeLastCycle || 0))
-          io.pokeyPotChargeLastCycle = ctx.cycleCounter;
+          {io.pokeyPotChargeLastCycle = ctx.cycleCounter;}
         const shifts = Math.floor((ctx.cycleCounter - (io.pokeyPotChargeLastCycle || 0)) / 16);
         for (let i = 0; i < 8; i++) io.pokeyPotCharge[i] = shifts >= 8 ? 0 : io.pokeyPotCharge[i] >> shifts;
       }
@@ -1365,7 +1365,7 @@
 
     function pokeySerialOutputClockTimerExpired(ctx, timer) {
       if (pokeySerialOutputClockTimer(ctx) === timer)
-        ctx.ioData.serialOutputClockHigh = !ctx.ioData.serialOutputClockHigh;
+        {ctx.ioData.serialOutputClockHigh = !ctx.ioData.serialOutputClockHigh;}
       pokeyTraceEvent(ctx, "TIMER_CLOCK_EDGE", {
         timer: timer,
         timerCycle:
@@ -1419,7 +1419,7 @@
       io.pokeyTimerResetCycle = CYCLE_NEVER;
       ctx.ram[IO_IRQEN_IRQST] |= 0x07;
       if (io.serialOutputTransmissionDoneCycle === CYCLE_NEVER)
-        ctx.ram[IO_IRQEN_IRQST] &= ~0x08;
+        {ctx.ram[IO_IRQEN_IRQST] &= ~0x08;}
       pokeyTraceEvent(ctx, "TIMER_RESET_APPLY", {
         scheduledCycle: Number.isFinite(resetCycle) ? resetCycle : null,
         actualCycle: ctx.cycleCounter,

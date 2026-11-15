@@ -280,7 +280,7 @@
     const destinationNibble = high ? destination >>> 4 : destination & 0x0f;
     if (state.blitCollisionCode === 0 && sourceNibble !== 0 &&
         nibbleCollisionEnabled(work.collisionMask, destinationNibble))
-      state.blitCollisionCode = high ? destination & 0xf0 : destination & 0x0f;
+      {state.blitCollisionCode = high ? destination & 0xf0 : destination & 0x0f;}
   }
 
   function applyBlitOperation(state, work, source, destination) {
@@ -467,8 +467,8 @@
           if (scheduled ? free < cycles : rem < cycles) break;
           const destinationAddress = (destinationRow + x * destinationXStep) & 0x7ffff;
           if (mode === 0) vram[destinationAddress] = source;
-          else vram[destinationAddress] = applyBlitOperation(
-            state, work, source, vram[destinationAddress] & 0xff);
+          else {vram[destinationAddress] = applyBlitOperation(
+            state, work, source, vram[destinationAddress] & 0xff);}
           rem -= cycles;
           free -= cycles;
           used += cycles;
@@ -1091,7 +1091,7 @@
     if (!video || !video.vbxeRgb) return;
     const atariBase = (scanline | 0) * 456 + 88;
     if (atariBase >= 0 && atariBase + 336 <= video.vbxeRgb.length)
-      video.vbxeRgb.fill(0, atariBase, atariBase + 336);
+      {video.vbxeRgb.fill(0, atariBase, atariBase + 336);}
     const target = hiresTarget(video, scanline);
     if (target) target.pixels.fill(0, target.rowBase, target.rowBase + target.width);
   }
@@ -1213,7 +1213,7 @@
       if (!line.overlayEnabled) {
         const legacyBase = (scanline | 0) * 456 + start;
         if (legacyBase >= 0 && legacyBase + width <= video.vbxeRgb.length)
-          video.vbxeRgb.fill(0, legacyBase, legacyBase + width);
+          {video.vbxeRgb.fill(0, legacyBase, legacyBase + width);}
       }
       if (!line.overlayEnabled || line.mode === "standard" || line.mode === "lores") {
         const target = hiresTarget(video, scanline, overlayNativeWidth(line));
@@ -1535,7 +1535,7 @@
       for (let group = 0; group < groups; group++) {
         const base = start + group * 8;
         for (let phase = 0; phase < 3 && group * 3 + phase < count; phase++)
-          reserveLocalSlot(schedule, base + phase * 2);
+          {reserveLocalSlot(schedule, base + phase * 2);}
       }
       return count;
     }

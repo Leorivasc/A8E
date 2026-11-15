@@ -3,8 +3,6 @@
 
   const SOURCE_EXTS = new Set(["ASM", "S", "SRC", "TXT", "INC", "MAC"]);
   const PANEL_MIN_HEIGHT = 340;
-  const PANEL_MAX_HEIGHT_RATIO = 1.0;
-  const PANEL_DEFAULT_EXTRA_HEIGHT = 120;
   const DEFAULT_SOURCE_TEMPLATE = [
     "; Atari 8-bit 6502 source",
     ".ORG $2000",

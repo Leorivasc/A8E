@@ -363,7 +363,6 @@
   const pokeySerialOutputClockTimerExpired =
     pokeyAudioApi.serialOutputClockTimerExpired;
   const pokeyTraceEvent = pokeyAudioApi.traceEvent;
-  const pokeyRestartTimers = pokeyAudioApi.restartTimers;
   const pokeyEnterInitialization = pokeyAudioApi.enterInitialization;
   const pokeyApplyTimerReset = pokeyAudioApi.applyTimerReset;
   const pokeyArmInactiveTimers = pokeyAudioApi.armInactiveTimers;
@@ -425,11 +424,6 @@
           IO_HPOSP3_M3PF: IO_HPOSP3_M3PF,
           IO_HSCROL: IO_HSCROL,
           IO_IRQEN_IRQST: IO_IRQEN_IRQST,
-          IRQ_TIMER_1: IRQ_TIMER_1,
-          IRQ_TIMER_2: IRQ_TIMER_2,
-          IRQ_TIMER_4: IRQ_TIMER_4,
-          IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE:
-            IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE,
           IO_NMIEN: IO_NMIEN,
           IO_NMIRES_NMIST: IO_NMIRES_NMIST,
           IO_PACTL: IO_PACTL,
@@ -460,7 +454,6 @@
           pokeyTraceEvent: pokeyTraceEvent,
           pokeyPotPrepareSkctlWrite: pokeyPotPrepareSkctlWrite,
           pokeyPotStartScan: pokeyPotStartScan,
-          pokeyRestartTimers: pokeyRestartTimers,
           pokeyEnterInitialization: pokeyEnterInitialization,
           pokeyArmInactiveTimers: pokeyArmInactiveTimers,
           pokeySyncLfsr17: pokeySyncLfsr17,
@@ -771,6 +764,41 @@
       onDiskActivity(opts.onDiskActivity);
     }
 
+    // Events from SIO peripherals (the printer's page lines). Same fan-out as
+    // the disk activity observers: outside the SIO response path.
+    const sioDeviceEventListeners = new Set();
+
+    function notifySioDeviceEvent(message) {
+      sioDeviceEventListeners.forEach(function (listener) {
+        try {
+          listener(message || null);
+        } catch {
+          // Observers must never affect emulated behavior.
+        }
+      });
+    }
+
+    // Settings the SIO peripherals read live (shared with the machine's I/O
+    // state, so they survive resets).
+    const sioDeviceSettings = { printerModel: "1025" };
+
+    function setPrinterModel(model) {
+      sioDeviceSettings.printerModel =
+        model === "820" || model === "1029" ? model : "1025";
+    }
+
+    function onSioDeviceEvent(listener) {
+      if (typeof listener !== "function") return function () {};
+      sioDeviceEventListeners.add(listener);
+      return function () {
+        sioDeviceEventListeners.delete(listener);
+      };
+    }
+
+    if (opts && typeof opts.onSioDeviceEvent === "function") {
+      onSioDeviceEvent(opts.onSioDeviceEvent);
+    }
+
     function onDiskMediaChanged(imageIndex, deviceSlot) {
       if (diskLibrary && typeof diskLibrary.onDiskMediaChanged === "function") {
         diskLibrary.onDiskMediaChanged(imageIndex | 0, deviceSlot | 0);
@@ -915,6 +943,8 @@
       pokeyAudioSetTurbo: pokeyAudioSetTurbo,
       onDiskMediaChanged: onDiskMediaChanged,
       onDiskActivity: notifyDiskActivity,
+      onSioDeviceEvent: notifySioDeviceEvent,
+      sioDeviceSettings: sioDeviceSettings,
       memoryExpansion: memoryExpansion,
       createVbxeState: function () {
         return vbxeApi.createState(vbxeConfig, video.paletteRgb);
@@ -1629,6 +1659,9 @@
       diskLibrary: diskLibrary,
       getDiskLibrary: function () { return diskLibrary; },
       onDiskActivity: onDiskActivity,
+      onSioDeviceEvent: onSioDeviceEvent,
+      setPrinterModel: setPrinterModel,
+      getPrinterModel: function () { return sioDeviceSettings.printerModel; },
       hDevice: hDevice,
       hasOsRom: hasOsRom,
       hasBasicRom: hasBasicRom,

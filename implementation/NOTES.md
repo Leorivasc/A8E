@@ -1,5 +1,246 @@
 # NOTES.md
 
+- 2026-11-13 (jsA8E: raw view removed, printer on MCP, disk on the SIO contract):
+  (1) The temporary raw frame view is gone (`frame` event, `toRaw`, the raw
+  button); the Atari Writer / Last Word tests that it was kept for passed. (2) New
+  `printer` domain in the automation API (`api.printer`: `getText`, `getHtml`,
+  `getLines`, `getLineCount`, `clear`, `getModel`, `setModel`) and in the MCP
+  server (`call_automation` domain `printer`, documented in `MCP.md`). The paper is
+  attached when the automation API attaches to the app, so a script sees what was
+  printed before its first call; `printer_paper.js` is loaded by `headless.js`
+  and got `getLines()`. `capabilities.printer` reports it. Covered by the stub
+  test in `mcp_server.test.js` and by `mcp_server_stdio.test.js`, which now also
+  boots BASIC on a fresh server, does an `LPRINT` and reads it back through MCP
+  (model switch, clear, error on an unknown model). (3) The disk drive
+  (`$31`-`$38`) is now a device of the generic SIO contract instead of a private
+  handler: the contract gained `{silent}` (no answer, the disk POLL),
+  `{reply, burst}` (disk STATUS: ACK, C, data and checksum in one SERIN burst),
+  `{receive, sector}` with `onData(bytes, host, {cmd, sector})` returning
+  true / false / `{nak}`, `nakOnBadCommandChecksum` (the AHRM 5.10 first-byte race
+  NAK, which was a disk special case inside the bus) and `host.io` for the media
+  state. No behavior change: new `tests/sio_disk_device.test.js` replays 90 steps
+  (all commands on single, double and 512 byte drives, bad data and command
+  checksums, out of range, no disk) and compares the SERIN stream, phase
+  boundaries, media and observer events with a golden trace recorded from the old
+  handler (`tests/fixtures/sio_disk_device.golden.json`); the existing SIO tests
+  (`pokey_sio_contract`, `_burst`, `_disk_observer`) and the full
+  `test:automation` pass, lint clean. Not run: `test:vbxe:full`, native `ctest`
+  (no C changes), real disk software beyond the tests.
+
+- 2026-11-13 (jsA8E: printer 1029 model and graphics on the paper): new `"1029"`
+  model in `sio_printer.js` (AHRM 9.8, checked against Altirra `printer.cpp`):
+  `$40`/`$45`, any AUX1 with a 40 byte frame, fixed status `[0,0,$14,$29]`, Status
+  resets all state, escapes anywhere and across frames (CTRL+N/O wide, CTRL+Y/Z
+  underline, 6/9 lpi, CTRL+W/X international, CTRL+A bit image with a 16-bit MSB
+  length), bit 7 on an escape code not recognized, ESC ESC = ESC, ESC EOL = EOL, 480
+  dot column lines (5+1 columns per character, 10+2 wide; a character that does not
+  fit moves to the next line), ASCII `$20-$7F` with `$7F` as a block, line spacing
+  taken when the line ends, an exactly full line plus EOL prints no blank line.
+  Where AHRM and Altirra differ I followed the AHRM: bit image is ESC `$01`
+  (Altirra tests `$41`), the normal set is plain ASCII (Altirra blanks `$60`,
+  `$7B`, `$7D-$7F`), and bit 7 on the ESC code is not accepted. 1025 European
+  mode now also maps `$7D-$7F` to the arrows. The paper keeps the line events'
+  `runs` and `dots`; the panel and the saved HTML render wide text, underline and
+  bit images (SVG), plain text gets a `[bit image, N columns]` marker; the panel
+  now shows the HTML view (everything escaped). Selector gained "1029".
+  Tests: `sio_printer_device` (1029: status, IDs, joined frames, ASCII set,
+  escapes split across frames, EOL/underline, ESC ESC / unknown / bit 7 / ESC EOL,
+  international, bit image content and zero length, full lines, wide overflow,
+  clamped bit image, Status reset), `printer_paper` (runs, SVG orientation,
+  placeholder), `printer_lprint` (1029 on the real ROM); `test:automation` and
+  lint pass. A screenshot of the panel (headless Chromium, minimal page) showed
+  wide text, underline and a bit image. Not done: 1020, drawing text as dots (so a
+  line with text and graphics shows them one under the other), out-of-paper
+  errors, Polish firmware, running real 1029 software. The temporary raw view is
+  still there.
+
+- 2026-11-13 (jsA8E: printer 1025 model, default): Atari Writer prints lines of
+  a 10 space left margin plus text (confirmed from the raw frames: real `$20`
+  bytes, `$9B` + spaces padding from the OS after each EOL, six blank lines as
+  top margin). The OS P: handler cuts those lines into 40 byte frames and the 820
+  model printed each frame as a separate line, so one line came out as two, the
+  second without the margin. New 1025 model in `sio_printer.js` (AHRM 9.6; checked
+  against Altirra `printer.cpp`): data frames are spliced into one line until an
+  EOL or a full line, 80/40/132 columns by density, text after an EOL ignored,
+  ESC CTRL+T/O/N, ESC L/S, ESC 6/8, ESC CTRL+W/X, an exactly full line plus EOL
+  prints no blank line, Status resets the settings, answers on `$40` and `$42`,
+  NAK for any AUX1 but `$4E`. Bus contract additions: the frame carries the
+  device ID, `{ignore:true}` makes a device act as absent (the absent-device
+  path was factored into `absentDeviceCommand`), `host.settings`
+  (`io.sioDeviceSettings`, live and shared across resets). Model selector in the
+  printer panel (`app.setPrinterModel`, worker message, `localStorage`
+  `a8e.printerModel`); default 1025, 820 kept for 40-column / sideways use.
+  Tests: `sio_printer_device` now covers both models (splicing with the real Atari
+  Writer shape, blank line, full line, escapes, short line, European characters,
+  Status reset, `$42` only on the 1025, run-time model switch) and
+  `printer_lprint` checks a long LPRINT line with margin on the real ROM;
+  `test:automation` and lint pass; the selector was exercised on a minimal page
+  in headless Chromium. The temporary raw view stays (now a `frame` event, one
+  row per data frame) until the 1029. Not done: 1029 / 1020, drawing of density,
+  spacing and short-line centering, out-of-paper errors, running Atari Writer or
+  Last Word themselves.
+
+- 2026-11-13 (jsA8E: printer P:, branch `Printer`): new generic SIO device
+  contract in `pokey_sio.js` (`registerDevice`; the device returns NAK / complete
+  / reply / receive-n and the bus owns ACK, data frame, checksum and C/E; command
+  frames with a bad checksum never reach a device). On it, `js/core/sio_printer.js`
+  implements the 820 / generic printer on `$40` per AHRM 9.3 (Write `$57` with
+  AUX1 `$4E`/`$53`, 40/29 bytes, character mapping, sideways right to left;
+  Status `$53` = flags, last AUX1, `$06`, `$00`). Output leaves as page events
+  (`io.sioDeviceEventObserver` -> `app.onSioDeviceEvent`, with the worker
+  `sioDeviceEvent` message and the `app_proxy` fan-out). `js/app/printer_paper.js`
+  collects them and renders text or a printable HTML page; `printer_ui.js` adds a
+  button (hidden until the first line) and a panel with .txt / .html / print /
+  clear. Tests: `sio_printer_device` (bus level: ACK/NAK, status, sideways, bad
+  data checksum, silent bad command frame), `printer_paper`, `printer_lprint`
+  (real OS ROM: `LPRINT` and `OPEN/PRINT #1/CLOSE` reach the paper); all in
+  `test:automation`, lint clean. The page loads in headless Chromium without
+  errors; the button/panel and the worker message path were NOT exercised in a
+  browser. Not done: disk drive still uses its own handler, 1025/1029/1020,
+  SVG output, native C core, snapshots, automation/MCP exposure; see
+  `implementation/PRINTER.md`. The printer panel is now docked as the last
+  tool panel (after the disk library, HostFS, assembler and snapshots; `order: 10`)
+  or floats anywhere in the browser window (`position: fixed`, moved to `<body>`,
+  dragged by its title bar and clamped to the viewport); the dock button in the
+  title bar switches, and mode and floating position are kept in
+  `localStorage` (`a8e.printerPanel`). At 980 px or narrower, where the tool
+  column is a full-screen sheet, it always floats. Dock/float, drag, clamping and
+  the stored position were checked in headless Chromium on a page built from the
+  real panel markup and `style.css`; not checked inside the full emulator page,
+  on a touch device, or on mobile.
+
+- 2026-11-13 (jsA8E: MCP findings 1, 2, 4 and 5 closed): (4) the real cause of
+  the `buildAndRun` hang was in `js/core/debugger.js`: `executeSingleInstruction`
+  waited for the instruction counter to equal `previous + 1`, but one
+  `CPU.run` call can retire two (an interrupt entry counts as one), so the
+  equality was skipped and the loop spun with no limit check until the 32-bit
+  counter wrapped. It now tests "at least one instruction retired". Two more
+  defects showed up once it returned: the tight-loop detector looked only at
+  PCs, so the OS cold-start delay loop (`DEY/BNE` at `$C2AD`) was reported as a
+  stuck program (it now also requires a repeated register state, so counting
+  loops no longer match), and the boot guards (500k instructions, 4M cycles)
+  were below what a cold boot needs (entry at about 937k instructions, 3.7M
+  cycles); `xex.js` now uses 5M and 20M. (1) ROM lookup tries the repository
+  root then `jsA8E/` (the ROMs are in `jsA8E/`) and warns on stderr when no OS
+  ROM is found. (2) Lines are processed through a queue, so answers come back in
+  request order; shutdown waits for it. (5) New
+  `tests/mcp_server_stdio.test.js` (in `test:automation`, skipped without ROMs)
+  runs the real server and emulator: handshake, order, default `buildAndRun`
+  of `JMP *` (without the debugger fix it never returns). `test:automation`
+  and lint pass. `test:vbxe` stops at `vbxe_blitter_attrmap_phase_boot` with
+  and without these changes (not investigated). Behavior change: concurrent
+  clients no longer run requests in parallel.
+
+- 2026-11-13 (jsA8E: MCP standard handshake): `mcp_server.js` now accepts the
+  standard `notifications/initialized` (besides the bare `initialized`) and
+  answers `ping` with an empty result, also before `initialize`. A message
+  without `id` (a notification) no longer gets any reply, including protocol
+  errors such as an unknown method, as JSON-RPC requires; before, a standard
+  client received an error with `id: null` right after the handshake.
+  `tests/mcp_server.test.js` covers both notifications and `ping`; the test and
+  `npm run lint` pass. `MCP.md` updated. Items 1, 2, 4 and 5 of the 2026-11-10
+  findings remain open.
+
+- 2026-11-11 (jsA8E: console keys fit on mobile): on phones the five console keys
+  (about 380 px wide) overflowed the screen and HELP was cut off on the left.
+  `style.css` now has a `max-width: 780px` block (the layout's mobile breakpoint):
+  the bar spans 92% of the screen width, centered, and the keys share it equally
+  (`flex: 1 1 0`) at 34 px high, so it scales with the screen and stays
+  finger-sized. Desktop is unchanged. Checked with headless Chromium screenshots
+  at 360 and 412 px; not checked on a physical phone.
+- 2026-11-11 (jsA8E: remote sync, converted XEX blob extension): a third browser
+  failed with "The remote is missing blobs/<sha>.atr" although `blobs/<sha>.xex`
+  was on the server. Cause: an XEX that was run is kept as an ATR runtime image
+  (`runtimeBytes`), so the library exports it as `format: "atr"` while its
+  revisions still hold the original XEX bytes; `makeManifest` names those
+  revision blobs with the entry type, giving `blobs/<sha>.atr`. The first browser
+  had uploaded the same bytes as `.xex`, and publish tracks remote blobs by hash,
+  so nobody re-uploaded it under the new name. Fix in `remote_library.js`
+  (`downloadBlob`): when the named blob is missing, the same hash under the other
+  type (`atr`/`xex`, shared `BLOB_TYPES`, also used by the cleanup) is tried; the
+  SHA-256 check still applies. This also heals remotes already in that state.
+  New `tests/remote_library_xex_blobs.test.js` (three browsers, XEX converted by
+  the second; fails without the fix with the reported message) and a
+  `convertXex` option in `tests/remote_test_support.js`. Not changed: a
+  converted XEX still appears as `.ATR` in other browsers, and the manifest
+  still names the revision `.atr`; only the lookup became tolerant.
+- 2026-11-11 (jsA8E: on-screen console keys overlay): new `js/app/console_keys_ui.js`
+  (loaded from `index.html`, initialised in `ui.js` like the disk activity
+  indicator), markup `#consoleKeys` inside `.screenOverlay`, styles at the end of
+  `style.css`. Five slanted keys (HELP, START, SELECT, OPTION, RESET) at the top
+  right of the screen, hidden by default, shown while the pointer is over the top
+  strip (56 px) and faded out on leave; on touch a first tap on the strip reveals
+  them (hidden again after 3 s) and does not press a key. A key is held while the
+  pointer is down (`onKeyDown`/`onKeyUp` with F1-F5 and SDL syms 282/285/284/283/286,
+  the same ones the virtual keyboard sends) and takes the write-activity orange
+  (`#ff9d2e`) while pressed; idle keys use the read-activity yellow (`#ffe04b`).
+  `tests/console_keys_ui.test.js` (in `test:automation`) covers hidden-by-default,
+  hover, press/release, staying visible while held, and the touch rules; rendering
+  checked with a headless Chromium screenshot. Not checked: a real touch device.
+- 2026-11-11 (jsA8E: no extra cycle for decimal ADC/SBC): the 6502 MIPS
+  Benchmark 1.3 scored jsA8E at 0.240 (86%) on "Integer arithmetic", while real
+  hardware, Altirra and the native A8E score 0.261 (94%). Cause: `adcValue` and
+  `sbcValue` in `js/core/cpu.js` added one cycle when the D flag was set. AHRM 3.2
+  and 3.6 say that extra cycle exists only on the 65C02; the NMOS 6502 does not
+  take it (the native `6502.c` never did). That test runs 18 decimal ADC/SBC per
+  203-cycle iteration, so the error was about 9%. Removed the cycle, and the
+  `cycleCounter--` in `opISC`/`opRRA` that only cancelled it, so their net timing
+  is unchanged. `cpu_undocumented_opcodes.test.js` now expects 2 cycles for
+  `ADC #`/`SBC #` in decimal mode (it asserted 3, from the fake6502 reference,
+  which models the 65C02). Verified by running the benchmark XEX headless: before
+  0.240 / 86% (average 92%), after 0.261 / 94% (average 94%), other lines
+  unchanged. `test:automation` and lint pass. The 2026-03-26 note on
+  "RRA/ISC decimal-cycle cancellation" no longer applies.
+- 2026-11-10 (jsA8E: MCP server restrictions): file arguments (`path`, `file`,
+  `sourcePath`) are now confined to `--cwd` by default: the path is resolved,
+  checked by name and again on its real path (symbolic links), and refused with
+  `-32602` if it leaves the directory; `--allow-any-path` / `confinePaths: false`
+  lifts it. New `--no-network` / `allowNetwork: false` refuses the five `*FromUrl`
+  actions. Before this, an agent could load any readable local file or fetch any
+  URL and read it back through the emulator. `resolvePath` takes a `confine`
+  flag and `readBinaryInput` takes a resolver. `tests/mcp_server.test.js` covers
+  `..`, absolute paths, a symlink out, paths inside, the opt-out, every URL
+  action blocked and the CLI flags; a real stdio run confirmed `/etc/hostname`
+  is refused by default and accepted with `--allow-any-path`. Not covered:
+  limits on sizes and run time (a blocking program still blocks the process),
+  and the `bwrap` recipe in `implementation/MCP.md` was not run. Behavior
+  change: callers that passed paths outside `--cwd` now need `--allow-any-path`.
+- 2026-11-10 (jsA8E: MCP server documentation): `mcp_server.js` was only described
+  in two sentences. New `implementation/MCP.md` (linked from `AUTOMATION.md`, `jsA8E/README.md`,
+  the root `README.md` and `CHANGELOG.md`) documents startup options, ROM lookup,
+  the protocol and its limits, the per-action argument mapping, binary inputs,
+  results and errors, programmatic use, testing and security. The examples come
+  from real sessions. Findings recorded there, not changed: (1) the server
+  looks for `ATARIXL.ROM`/`ATARIBAS.ROM` in the repository root, not in
+  `jsA8E/`, so without `--os-rom` the machine starts with no ROMs; (2) requests
+  are handled concurrently and answers can arrive out of order; (3) the
+  standard `notifications/initialized` is not recognised (only `initialized`)
+  and `ping` is not implemented, so a standard client gets an error reply with
+  `id: null`; (4) `buildAndRun` with the default `awaitEntry: true` did not
+  return for a tight-loop program on the real ROM (use `awaitEntry: false`);
+  (5) `tests/mcp_server.test.js` uses a stub runtime, so it checks the mapping
+  but never boots the emulator.
+- 2026-11-10 (jsA8E: cleanup pass, no behavior change): removed dead code found
+  by ESLint and a manual sweep: `drawPlayerSpan`, `drawMissileSpan`, `playerStep`
+  and `missileWidth` (`gtia.js`, superseded by the span queue), `zeroPageAddress`
+  (`memory.js`), `deleteRecord` (`disk_library.js`), the unused IRQ constants and
+  `pokeyRestartTimers` that `atari.js` passed to `io.js`, two unused panel
+  constants in `assembler_ui.js`, the write-only `mobilePanelSyncing` flag in
+  `ui.js`, a stale local in `antic.js` and `library_package.js`, and unused
+  `catch (err)` bindings. `no-case-declarations` in `io.js` (SKCTL write) fixed
+  with a block; `eslint --fix` added braces to single-line `if`/`for` bodies
+  (formatting only). `npm run lint` now reports zero errors. Eleven passing
+  tests that no npm script ran (`pokey_pot_cpu_dispatch`, `pokey_pot_io_path`,
+  `antic_vscrol_timing`, `ahrm07_pmg_{xex,boot}`, `ahrm08_pokey_{xex,matrix_xex,
+  stage2_xex}`, `ahrm10_priority_collision_boot`,
+  `vbxe_blitter_short_attrmap_timing_{asm,boot}`) are now in `test:automation`
+  and `test:vbxe:full`. AHRM review: this cleanup removes only code with no
+  caller, so no hardware behavior changes; the core changes made after the
+  2026-11-04 AHRM review are VBXE hooks (PIA IRQ and PORTB remap, citing AHRM
+  5.7 and 12.4) and the gamepad, which only drives PORTA/TRIG0 active-low bits.
+  Docs: root `README.md` and `CHANGELOG.md` now mention the remote library sync.
+  Verified: `test:automation` and `test:vbxe` pass, lint clean. Not run: native
+  `ctest` (no C changes) and `test:vbxe:full`.
 - 2026-11-07 (A8E native: gamepad support): the native build now has the same
   feature. New `A8E/Gamepad.c/.h` (in `A8E_CORE_SOURCES`) uses the SDL joystick
   API, not SDL_GameController, so plain USB joysticks work without a mapping
@@ -51,6 +292,95 @@
   ArrowRight press (keyboard, also via the gamepad path) was ignored once while
   later ones worked; left, up and down did not show it. ESLint could not run
   (no `node_modules`); `node --check` passes.
+- 2026-11-11 (jsA8E: remote sync hardening, post-merge): (1) hash cache:
+  `getManifest()` passes `hashOfRevision` (WeakMap, revisions are immutable) to
+  `makeManifest({revisionHash})`; `readBlob` and the tombstone hashes no longer
+  cache the current bytes, which sector writes mutate in place (this fixed a
+  latent stale-hash bug). (2) `client.head()` returns `lastModified`,
+  `client.deleteFile()`, `sync.collectGarbage()` and the "Clean up remote" button
+  (age >= 7 days, never touches blobs referenced remotely or locally; needs
+  `DELETE` in CORS). (3) Opt-in "Remember the password" (unencrypted
+  localStorage) with automatic reconnection on load; rejected stored passwords
+  are discarded. (4) Gamepad sampling counts as activity for the idle sync.
+  (5) "Unknown worker request" now explains the stale-cache cause. Tests:
+  GC cases in `remote_library_tombstones.test.js`. Native client is blocked on
+  the HTTPS/TLS dependency decision (see `OnlineDrive.md`).
+- 2026-11-10 (jsA8E: remote renames and moves, Phase 2b): entries carry a
+  persisted `metaModified` (set by `moveFile`, name-changing `replaceFile`,
+  `restoreTrash`; manifest field `metaModifiedAt`, validated as optional).
+  `library.applyMetadata()` (core + proxy + worker + parity test) applies remote
+  moves/renames only when newer, never creating duplicate names, and reports
+  `newer` values so the sync republishes them. Remote folders already known
+  locally are passed to the importer under their local name (avoids `-import`
+  duplicates). Native A8E still lacks fast-forward, tombstones and metadata merge.
+  Test: `tests/remote_library_metadata.test.js`.
+- 2026-11-10 (jsA8E: automatic remote sync, Phase 3): `client.head()` and
+  `sync.checkRemote()` (HEAD + ETag compare, both scopes). `remote_sync_ui.js`
+  polls every 60 s and on focus/visibility, shows "Update" when the remote moved,
+  and runs the pending sync after 5 min without keyboard/pointer input; opt-out
+  checkbox `.remote-auto` in the dialog (saved as `auto`). A vetoed merge is never
+  retried automatically. Gamepad activity is not detected. Password is still memory
+  only. Tests: `checkRemote` assertions in `remote_library.test.js`.
+- 2026-11-09 (jsA8E: remote deletions, Phase 2b tombstones): `deleteFile` /
+  `deleteFolder` record tombstones in the IndexedDB `metadata` store (no schema
+  bump); `restoreTrash` removes them and bumps `modified`. Core API
+  `getTombstones`/`applyTombstones`/`dropTombstones` (proxy + worker + parity
+  test), `getManifest()` emits `tombstones`, the sync fingerprint includes them.
+  A tombstone only covers an entry whose contents it listed and whose `modified`
+  predates the deletion, so a later edit/move/restore always wins; remote
+  deletions go to the local trash, never purge. Tombstones expire after 90 days.
+  Also: empty remote folders now merge. Renames/moves still do not propagate.
+  Native A8E has no tombstones yet (parity debt). Test:
+  `tests/remote_library_tombstones.test.js`.
+- 2026-11-08 (jsA8E: remote full-library sync, Phase 2a): new mode "Whole
+  library" next to the workspace MVP. `js/app/remote_library.js` keeps
+  `library.json` + `blobs/<sha256>.<type>` on the WebDAV folder, transfers only
+  the blobs the other side lacks (SHA-256 verified on download, `HEAD` then
+  `PUT If-None-Match: *` on upload, manifest guarded by `If-Match`), imports in
+  <=48 MiB batches through the existing `importPackage`, and does not sync
+  mounts. Needs `MKCOL` in the server's CORS methods (creates `blobs/` once).
+  New library APIs `getManifest()`/`readBlob(sha)` in `disk_library.js`,
+  `app_proxy.js` and `emulator_worker.js`; the parity test now also scans the
+  remote modules. Core fix found while testing: `planImport` treated every
+  same-id/different-hash entry as a conflict, so a plain "edit in A, sync in B"
+  produced a `(1)` copy even though the revision graph said B's copy was an
+  ancestor. It now fast-forwards (adds the new revisions, advances the working
+  content and keeps the drive) when the local content is a retained ancestor of
+  the imported entry, ignores imported content that is already a local
+  revision, and keeps copies only for diverged branches. NOT mirrored in native
+  A8E yet (parity debt). Tests: `remote_library.test.js` (shared fixtures in
+  `remote_test_support.js`: pull, incremental upload/download counts, revisions,
+  concurrent edits, vetoed first merge, corrupted blob), `remote_workspace`
+  updated (fast-forward keeps D1, merging side keeps both variants), proxy test
+  covers the new messages. Not yet validated against Nextcloud; the worker
+  handlers themselves have no automated test. ESLint could not run.
+- 2026-11-08 (jsA8E: remote workspace sync MVP, branch `OnlineDrive`): added
+  optional manual synchronization of the mounted workspace with a WebDAV
+  folder. `js/app/remote_workspace.js` (fetch client + sync coordinator, no
+  DOM) keeps one `workspace.a8e` plus `.a8e-remote.json`, guards every write
+  with ETag `If-Match` / `If-None-Match: *`, and merges remote content through
+  the existing non-destructive `previewImport`/`importPackage` (it only uses the
+  public library API, so worker and main-thread paths both work and
+  `emulator_worker.js`/`app_proxy.js` are untouched). `js/app/remote_sync_ui.js`
+  adds the title-bar control, the connection dialog and the LED (reuses
+  `assets/leds.png`, also as a badge on the top-bar and mobile Disks buttons).
+  The password stays in memory; only URL/user/repoId/ETag/fingerprint go to
+  localStorage. `tests/remote_workspace.test.js` (in `test:automation`) runs two
+  independent libraries against an in-process ETag-aware server: auth failure,
+  foreign folder, missing-ETag diagnosis, publish, no-op sync, pull, sequential
+  edits, concurrent edits (412 -> merge -> republish, both variants kept) and a
+  vetoed first merge. Chromium headless smoke test: page loads, control and
+  badges initialize, no console errors. Verified by the author against a real
+  Nextcloud with jsA8E served from the same server (Firefox + Chromium: pull,
+  push, collisions kept as `(1)`); a first failed attempt was a wrong URL. The
+  status text now says when the remote is empty and nothing is mounted instead
+  of a bare "up to date". Findings:
+  `libraryVersion` only increments on import, not on local edits, so pending
+  changes are detected with a manifest fingerprint instead; `replaceFile`
+  unmounts a mounted entry (tests remount it). Tombstones, the incremental
+  `library.json` + `blobs/` repository, automatic sync and native parity are
+  designed in `OnlineDrive.md` but not implemented. ESLint could not run (no
+  `node_modules`); `node --check` passes.
 - 2026-11-06 (jsA8E: Disk Library parity with and without the worker): the
   library UI talks to either the core `disk_library.js` (main thread) or the
   proxy in `app_proxy.js` (worker). Comparing both APIs showed that the proxy
@@ -4348,6 +4678,29 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   state after the timing contract was covered by regressions. The supported
   AHRM POKEY phase trace remains available independently through its existing
   opt-in mechanism.
+
+## 2026-11-14 Documentation sync for the printer and SIO contract
+
+- `implementation/DIAGRAM.mermaid`: added the SIO device node (disks and
+  printers on the contract) and the printer paper/panel node, with the event
+  path core -> proxy -> paper -> automation API. `PRINTER.md` now draws its
+  layers as a mermaid flowchart.
+- `CORE.md`, `UI.md`, `WORKER.md`, `AUTOMATION.md` (both), `jsA8E/README.md`
+  and `CHANGELOG.md` describe the SIO device contract, the printer panel, the
+  `sioDeviceEvent`/`setPrinterModel` worker messages and the `printer`
+  automation domain. Documentation only; no code changed.
+
+## 2026-11-15 Printer button in the mobile view
+
+- On narrow screens the toolbar buttons live in the "Tools" sheet
+  (`mobileToolsGrid`), a fixed list in `index.html`; the printer had no entry,
+  so it could not be opened on a phone. Added a `data-mobile-proxy="btnPrinter"`
+  entry (hidden until the first print, like the toolbar button) and
+  `printer_ui.js` now takes it as `mobileButton` and keeps both buttons in step.
+  A `[hidden]` rule keeps the grid's `display` from showing it early.
+- Checked in headless Chromium at 390 px with the real page: hidden before
+  printing, visible in the sheet after a line arrives, tapping it closes the
+  sheet and opens the floating panel with the text.
 
 ## Legal / License TODO
 

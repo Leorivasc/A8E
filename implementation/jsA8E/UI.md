@@ -4,6 +4,13 @@
 
 - Files: `jsA8E/index.html`, `jsA8E/style.css`, `jsA8E/js/app/ui.js`, `jsA8E/js/app/gamepad.js`, `jsA8E/js/app/hostfs_ui.js`, `jsA8E/js/app/assembler_ui.js`, `jsA8E/js/app/snapshot_ui.js`, `jsA8E/js/core/assembler_core.js`, `jsA8E/js/core/assembler/shared.js`, `jsA8E/js/core/assembler/lexer.js`, `jsA8E/js/core/assembler/preprocessor.js`, `jsA8E/js/core/assembler/parser.js`, `jsA8E/js/core/assembler/object_writer.js`, `jsA8E/js/core/assembler/assembler.js`, `jsA8E/js/app/a8e.js`, `jsA8E/js/app/version.js`
 - Purpose: provide browser controls and status for emulator operation.
+- Printer panel: `js/app/printer_ui.js` adds `#btnPrinter` (hidden until the
+  first print) and `#printerPanel`, the last panel of `.layoutTools`. The panel
+  docks beside the other tool panels or floats and drags anywhere in the
+  viewport. It has a model selector (1025, 1029, 820; persisted in
+  `localStorage` and applied with `app.setPrinterModel`) and save `.txt`,
+  save `.html`, print and clear actions. Paper comes from
+  `js/app/printer_paper.js`; see [PRINTER.md](../PRINTER.md).
 - Status: updated on 2026-10-29 (`implemented`, including optional VBXE FX
   1.26 configuration).
 - 2026-11-07: physical gamepad support. `jsA8E/js/app/gamepad.js`

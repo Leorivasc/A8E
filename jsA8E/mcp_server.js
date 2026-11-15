@@ -8,9 +8,16 @@ const { createHeadlessAutomation } = require("./headless");
 const runtimeVersion = require("./version.json").version;
 
 const DEFAULT_WORKSPACE_CWD = path.resolve(__dirname, "..");
-const DEFAULT_OS_ROM = path.resolve(DEFAULT_WORKSPACE_CWD, "ATARIXL.ROM");
-const DEFAULT_BASIC_ROM = path.resolve(DEFAULT_WORKSPACE_CWD, "ATARIBAS.ROM");
+const ROM_SEARCH_DIRS = [DEFAULT_WORKSPACE_CWD, __dirname];
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+
+function findDefaultRom(name) {
+  for (const dir of ROM_SEARCH_DIRS) {
+    const candidate = path.resolve(dir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
 function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -25,9 +32,23 @@ function toBuffer(value) {
   throw new TypeError("Unsupported binary input");
 }
 
-function resolvePath(cwd, inputPath) {
+// Resolves a path argument against the working directory. When `confine` is
+// set, anything that lands outside that directory is refused, both by name
+// and after following symbolic links.
+function resolvePath(cwd, inputPath, confine) {
   const base = cwd && typeof cwd === "string" ? cwd : DEFAULT_WORKSPACE_CWD;
-  return path.isAbsolute(inputPath) ? inputPath : path.resolve(base, inputPath);
+  const full = path.isAbsolute(inputPath) ? path.normalize(inputPath) : path.resolve(base, inputPath);
+  if (!confine) return full;
+  const outside = function (root, target) {
+    const rel = path.relative(root, target);
+    return rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+  };
+  const root = path.resolve(base);
+  if (outside(root, full)) throw protocolError(-32602, "Path is outside the working directory: " + String(inputPath));
+  // A symbolic link inside the directory must not lead out of it.
+  const realFull = fs.existsSync(full) ? fs.realpathSync(full) : full;
+  if (outside(fs.realpathSync(root), realFull)) throw protocolError(-32602, "Path is outside the working directory: " + String(inputPath));
+  return realFull;
 }
 
 function omitKeys(source, keys) {
@@ -39,10 +60,10 @@ function omitKeys(source, keys) {
   return out;
 }
 
-function readBinaryInput(args, cwd) {
+function readBinaryInput(args, resolveInput) {
   if (!args || typeof args !== "object") return null;
-  if (typeof args.path === "string" && args.path.length > 0) return fs.readFileSync(resolvePath(cwd, args.path));
-  if (typeof args.file === "string" && args.file.length > 0) return fs.readFileSync(resolvePath(cwd, args.file));
+  if (typeof args.path === "string" && args.path.length > 0) return fs.readFileSync(resolveInput(args.path));
+  if (typeof args.file === "string" && args.file.length > 0) return fs.readFileSync(resolveInput(args.file));
   if (typeof args.base64 === "string") return Buffer.from(args.base64, "base64");
   if (typeof args.dataBase64 === "string") return Buffer.from(args.dataBase64, "base64");
   if (typeof args.bytesBase64 === "string") return Buffer.from(args.bytesBase64, "base64");
@@ -157,12 +178,12 @@ function buildTools() {
     {
       name: "call_automation",
       title: "Call jsA8E Automation",
-      description: "Grouped bridge over the jsA8E automation API. Provide { domain, action, args }. Domains: system, media, input, debug, dev, artifacts.",
+      description: "Grouped bridge over the jsA8E automation API. Provide { domain, action, args }. Domains: system, media, input, debug, dev, artifacts, printer.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
         properties: {
-          domain: { type: "string", enum: ["system", "media", "input", "debug", "dev", "artifacts"] },
+          domain: { type: "string", enum: ["system", "media", "input", "debug", "dev", "artifacts", "printer"] },
           action: { type: "string" },
           args: { type: "object", additionalProperties: true, description: "Arguments forwarded to the selected jsA8E method." },
         },
@@ -185,6 +206,12 @@ function createMcpSession(runtime, options) {
   if (!runtime || !runtime.api) throw new Error("A runtime with an attached automation API is required");
   const api = runtime.api;
   const cwd = options && typeof options.cwd === "string" ? options.cwd : DEFAULT_WORKSPACE_CWD;
+  const confine = !options || options.confinePaths !== false;
+  const allowNetwork = !options || options.allowNetwork !== false;
+  const resolveInput = function (inputPath) { return resolvePath(cwd, inputPath, confine); };
+  const requireNetwork = function (action) {
+    if (!allowNetwork) throw protocolError(-32602, "URL loading is disabled (--no-network): " + action);
+  };
   const tools = buildTools();
   const toolMap = new Map(tools.map(function (tool) { return [tool.name, tool]; }));
   let disposed = false;
@@ -201,7 +228,7 @@ function createMcpSession(runtime, options) {
           case "boot": return api.system.boot(payload);
           case "saveSnapshot": return api.system.saveSnapshot(payload);
           case "loadSnapshot": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "system.loadSnapshot requires binary data");
             return api.system.loadSnapshot(binary, omitKeys(payload, ["path", "file", "base64", "dataBase64", "bytesBase64", "buffer", "bytes", "data"]));
           }
@@ -218,32 +245,32 @@ function createMcpSession(runtime, options) {
           case "loadRom": {
             const kind = payload.kind;
             if (kind !== "os" && kind !== "basic") throw protocolError(-32602, 'media.loadRom requires kind = "os" or "basic"');
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "media.loadRom requires binary data");
             return api.media.loadRom(kind, binary);
           }
           case "loadOsRom": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "media.loadOsRom requires binary data");
             return api.media.loadOsRom(binary);
           }
           case "loadBasicRom": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "media.loadBasicRom requires binary data");
             return api.media.loadBasicRom(binary);
           }
-          case "loadRomFromUrl": return api.media.loadRomFromUrl(payload.url, omitKeys(payload, ["url"]));
-          case "loadOsRomFromUrl": return api.media.loadOsRomFromUrl(payload.url, omitKeys(payload, ["url"]));
-          case "loadBasicRomFromUrl": return api.media.loadBasicRomFromUrl(payload.url, omitKeys(payload, ["url"]));
+          case "loadRomFromUrl": requireNetwork("loadRomFromUrl"); return api.media.loadRomFromUrl(payload.url, omitKeys(payload, ["url"]));
+          case "loadOsRomFromUrl": requireNetwork("loadOsRomFromUrl"); return api.media.loadOsRomFromUrl(payload.url, omitKeys(payload, ["url"]));
+          case "loadBasicRomFromUrl": requireNetwork("loadBasicRomFromUrl"); return api.media.loadBasicRomFromUrl(payload.url, omitKeys(payload, ["url"]));
           case "mountDisk": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "media.mountDisk requires binary data");
             const nameOrOptions = payload.nameOrOptions !== undefined ? payload.nameOrOptions : (payload.name !== undefined || payload.slot !== undefined ? { name: payload.name, slot: payload.slot } : undefined);
             return api.media.mountDisk(binary, nameOrOptions, payload.slot);
           }
-          case "mountDiskFromUrl": return api.media.mountDiskFromUrl(payload.url, omitKeys(payload, ["url"]));
+          case "mountDiskFromUrl": requireNetwork("mountDiskFromUrl"); return api.media.mountDiskFromUrl(payload.url, omitKeys(payload, ["url"]));
           case "loadDisk": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "media.loadDisk requires binary data");
             return api.media.loadDisk(binary, omitKeys(payload, ["path", "file", "base64", "dataBase64", "bytesBase64", "buffer", "bytes", "data"]));
           }
@@ -284,7 +311,7 @@ function createMcpSession(runtime, options) {
           case "readWordSigned": return api.debug.readWordSigned(payload.address, omitKeys(payload, ["address"]));
           case "writeMemory": return api.debug.writeMemory(payload.address, payload.value);
           case "writeRange": {
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "debug.writeRange requires binary data");
             return api.debug.writeRange(payload.start, binary);
           }
@@ -304,7 +331,7 @@ function createMcpSession(runtime, options) {
           case "writeHostFile": {
             const options = omitKeys(payload, ["name", "text", "base64", "dataBase64", "bytesBase64", "buffer", "bytes", "data", "path", "file"]);
             if (payload.text !== undefined) return api.dev.writeHostFile(payload.name, { text: String(payload.text) }, options);
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (!binary) throw protocolError(-32602, "dev.writeHostFile requires text or binary data");
             return api.dev.writeHostFile(payload.name, binary, options);
           }
@@ -316,15 +343,15 @@ function createMcpSession(runtime, options) {
           case "waitForHostFsFile": return api.dev.waitForHostFsFile(payload.name, omitKeys(payload, ["name"]));
           case "assembleSource": {
             const spec = omitKeys(payload, ["path", "file", "sourcePath"]);
-            if (payload.path || payload.file || payload.sourcePath) spec.text = fs.readFileSync(resolvePath(cwd, payload.path || payload.file || payload.sourcePath), "utf8");
+            if (payload.path || payload.file || payload.sourcePath) spec.text = fs.readFileSync(resolveInput(payload.path || payload.file || payload.sourcePath), "utf8");
             return api.dev.assembleSource(spec);
           }
           case "assembleHostFile": return api.dev.assembleHostFile(payload.name, omitKeys(payload, ["name"]));
           case "getLastBuildResult": return api.dev.getLastBuildResult(payload);
-          case "runXexFromUrl": return api.dev.runXexFromUrl(payload.url, omitKeys(payload, ["url"]));
+          case "runXexFromUrl": requireNetwork("runXexFromUrl"); return api.dev.runXexFromUrl(payload.url, omitKeys(payload, ["url"]));
           case "runXex": {
             const spec = omitKeys(payload, ["path", "file", "base64", "dataBase64", "bytesBase64", "buffer", "bytes", "data"]);
-            const binary = readBinaryInput(payload, cwd);
+            const binary = readBinaryInput(payload, resolveInput);
             if (binary) spec.buffer = binary;
             return api.dev.runXex(spec);
           }
@@ -332,7 +359,7 @@ function createMcpSession(runtime, options) {
             const source = payload.text !== undefined ? String(payload.text) : payload.source;
             if (source === undefined && !(payload.path || payload.file || payload.sourcePath)) throw protocolError(-32602, "dev.buildAndRun requires source text or a path");
             const spec = omitKeys(payload, ["path", "file", "sourcePath", "text", "source"]);
-            if (payload.path || payload.file || payload.sourcePath) spec.text = fs.readFileSync(resolvePath(cwd, payload.path || payload.file || payload.sourcePath), "utf8");
+            if (payload.path || payload.file || payload.sourcePath) spec.text = fs.readFileSync(resolveInput(payload.path || payload.file || payload.sourcePath), "utf8");
             return api.dev.buildAndRun(spec.text !== undefined ? spec.text : source, spec);
           }
           case "sym": return api.dev.sym(payload.name, payload.fallback);
@@ -344,6 +371,17 @@ function createMcpSession(runtime, options) {
           case "collectArtifacts": return api.artifacts.collectArtifacts(payload);
           case "captureFailureState": return api.artifacts.captureFailureState(payload);
           default: throw protocolError(-32602, "Unknown artifacts action: " + String(action), { action: action });
+        }
+      case "printer":
+        switch (action) {
+          case "getText": return api.printer.getText();
+          case "getHtml": return api.printer.getHtml(payload);
+          case "getLines": return api.printer.getLines();
+          case "getLineCount": return api.printer.getLineCount();
+          case "clear": return api.printer.clear();
+          case "getModel": return api.printer.getModel();
+          case "setModel": return api.printer.setModel(payload.model);
+          default: throw protocolError(-32602, "Unknown printer action: " + String(action), { action: action });
         }
       default:
         throw protocolError(-32602, "Unknown domain: " + String(domain), { domain: domain });
@@ -361,7 +399,8 @@ function createMcpSession(runtime, options) {
       initialized = true;
       return { jsonrpc: "2.0", id: message.id, result: { protocolVersion: requestedVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "jsA8E MCP", version: runtimeVersion }, instructions: buildInstructions() } };
     }
-    if (message.method === "initialized") return null;
+    if (message.method === "initialized" || message.method === "notifications/initialized") return null;
+    if (message.method === "ping") return { jsonrpc: "2.0", id: message.id, result: {} };
     if (message.method === "shutdown") {
       await dispose();
       return { jsonrpc: "2.0", id: message.id, result: {} };
@@ -418,10 +457,10 @@ function createMcpSession(runtime, options) {
     return Promise.resolve().then(function () { return handleRequest(payload); }).then(function (response) {
       return response === null || response === undefined ? null : response;
     }).catch(function (err) {
+      if (!isRequest) return null;
       if (err && err.isProtocolError) {
         return { jsonrpc: "2.0", id: requestId, error: { code: err.code, message: err.message, data: sanitizeValue(err.data) } };
       }
-      if (!isRequest) return null;
       return { jsonrpc: "2.0", id: requestId, result: errorResult(payload.method || "unknown", payload.params && payload.params.action ? String(payload.params.action) : null, err) };
     });
   }
@@ -448,7 +487,7 @@ async function createMcpServer(options) {
 }
 
 function parseArgs(argv) {
-  const args = { cwd: DEFAULT_WORKSPACE_CWD, turbo: true, skipRendering: true, frameDelayMs: 0, audioEnabled: false, sioTurbo: true, optionOnStart: false, keyboardMappingMode: "translated" };
+  const args = { cwd: DEFAULT_WORKSPACE_CWD, turbo: true, skipRendering: true, frameDelayMs: 0, audioEnabled: false, sioTurbo: true, optionOnStart: false, keyboardMappingMode: "translated", confinePaths: true, allowNetwork: true };
   for (let i = 2; i < argv.length; i++) {
     const token = argv[i];
     if (token === "--cwd" && i + 1 < argv.length) args.cwd = path.resolve(argv[++i]);
@@ -461,6 +500,8 @@ function parseArgs(argv) {
     else if (token === "--audio-enabled") args.audioEnabled = true;
     else if (token === "--no-audio") args.audioEnabled = false;
     else if (token === "--no-sio-turbo") args.sioTurbo = false;
+    else if (token === "--allow-any-path") args.confinePaths = false;
+    else if (token === "--no-network") args.allowNetwork = false;
     else if (token === "--option-on-start") args.optionOnStart = true;
     else if (token === "--keyboard-mapping-mode" && i + 1 < argv.length) args.keyboardMappingMode = String(argv[++i]);
     else if (token === "--frame-delay-ms" && i + 1 < argv.length) args.frameDelayMs = Number(argv[++i]);
@@ -471,11 +512,12 @@ function parseArgs(argv) {
 async function main() {
   const cli = parseArgs(process.argv);
   const roms = {};
-  const osRom = cli.osRom || process.env.JSA8E_OS_ROM || (fs.existsSync(DEFAULT_OS_ROM) ? DEFAULT_OS_ROM : null);
-  const basicRom = cli.basicRom || process.env.JSA8E_BASIC_ROM || (fs.existsSync(DEFAULT_BASIC_ROM) ? DEFAULT_BASIC_ROM : null);
+  const osRom = cli.osRom || process.env.JSA8E_OS_ROM || findDefaultRom("ATARIXL.ROM");
+  const basicRom = cli.basicRom || process.env.JSA8E_BASIC_ROM || findDefaultRom("ATARIBAS.ROM");
   if (osRom) roms.os = osRom;
   if (basicRom) roms.basic = basicRom;
-  const runtime = await createMcpServer({ cwd: cli.cwd, turbo: cli.turbo, skipRendering: cli.skipRendering, frameDelayMs: cli.frameDelayMs, audioEnabled: cli.audioEnabled, sioTurbo: cli.sioTurbo, optionOnStart: cli.optionOnStart, keyboardMappingMode: cli.keyboardMappingMode, roms: Object.keys(roms).length ? roms : undefined });
+  if (!osRom) process.stderr.write("jsA8E MCP: no OS ROM found (use --os-rom or JSA8E_OS_ROM); the machine starts without ROMs\n");
+  const runtime = await createMcpServer({ cwd: cli.cwd, turbo: cli.turbo, skipRendering: cli.skipRendering, frameDelayMs: cli.frameDelayMs, audioEnabled: cli.audioEnabled, sioTurbo: cli.sioTurbo, optionOnStart: cli.optionOnStart, keyboardMappingMode: cli.keyboardMappingMode, confinePaths: cli.confinePaths, allowNetwork: cli.allowNetwork, roms: Object.keys(roms).length ? roms : undefined });
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 
   async function writeResponse(payload) {
@@ -486,6 +528,7 @@ async function main() {
     });
   }
 
+  let queue = Promise.resolve();
   rl.on("line", function (line) {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -496,7 +539,8 @@ async function main() {
       process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }) + "\n");
       return;
     }
-    runtime.handlePayload(payload).then(writeResponse).catch(function (err) {
+    // Requests run one at a time so answers come back in request order.
+    queue = queue.then(function () { return runtime.handlePayload(payload); }).then(writeResponse).catch(function (err) {
       process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: payload && Object.prototype.hasOwnProperty.call(payload, "id") ? payload.id : null, error: { code: -32603, message: err && err.message ? String(err.message) : "Internal error" } }) + "\n");
     });
   });
@@ -507,7 +551,7 @@ async function main() {
   }
 
   rl.on("close", function () {
-    runtime.dispose().finally(function () {
+    queue.then(function () { return runtime.dispose(); }).finally(function () {
       if (!process.env.JSA8E_MCP_NO_EXIT) process.exit(0);
     });
   });

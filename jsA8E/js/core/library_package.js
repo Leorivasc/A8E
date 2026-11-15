@@ -3,7 +3,6 @@
 
   const FORMAT = "a8e-library-export";
   const SCHEMA_VERSION = 1;
-  const HASH_LENGTH = 64;
   const DEFAULT_MAX_PACKAGE_BYTES = 256 * 1024 * 1024;
   const DEFAULT_MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
   const DEFAULT_MAX_PAYLOAD_BYTES = 64 * 1024 * 1024;
@@ -224,6 +223,7 @@
       if (!Number.isInteger(entry.size) || entry.size < 0) fail("invalid entry size");
       if (!/^[0-9a-f]{64}$/.test(entry.sha256) || entry.sha256 !== entry.path.substring(6, 70)) fail("invalid entry sha256");
       if (!validTime(entry.createdAt) || !validTime(entry.modifiedAt)) fail("invalid entry timestamp");
+      if (entry.metaModifiedAt !== undefined && !validTime(entry.metaModifiedAt)) fail("invalid entry metadata timestamp");
       if (entry.mountedSlot !== undefined && (!Number.isInteger(entry.mountedSlot) || entry.mountedSlot < -1 || entry.mountedSlot > 7)) fail("invalid mountedSlot");
       if (entry.folderId !== undefined && !folderIds.has(entry.folderId)) fail("invalid entry folder");
       if (entry.revisions !== undefined) {
@@ -275,10 +275,14 @@
         mountedSlot: typeof record.mountedSlot === "number" ? record.mountedSlot | 0 : -1,
         folderId: record.folderId || "root",
       };
+      // Optional: when the folder/name last changed (drives metadata merge).
+      if (record.metaModified) result.metaModifiedAt = new Date(record.metaModified).toISOString();
       if (Array.isArray(record.revisions) && record.revisions.length) {
         result.revisions = record.revisions.map(function (revision) {
           const revisionBytes = cloneBytes(revision.bytes);
-          const revisionHash = sha256(revisionBytes);
+          const revisionHash = typeof config.revisionHash === "function"
+            ? config.revisionHash(revision.bytes)
+            : sha256(revisionBytes);
           return {
             id: String(revision.id || "revision-" + revisionHash.substring(0, 12)),
             path: "blobs/" + revisionHash + "." + type,
@@ -477,6 +481,52 @@
         return;
       }
 
+      if (sameId) {
+        // Descendant / ancestor detection through the revision graph: when the
+        // local content is a retained revision of the imported entry, the
+        // import is a fast-forward (no conflict copy); when the imported
+        // content is already a retained local revision, it is older history.
+        const importedRevisions = item.revisions || [];
+        const descends = importedRevisions.some(function (revision) {
+          return revision.manifest.sha256 === sameId.sha256;
+        });
+        const knownLocal = (sameId.revisions || []).some(function (revision) {
+          return sha256(revision.bytes) === hash;
+        });
+        if (knownLocal && !descends) {
+          resolvedIds.set(manifest.id, sameId.id);
+          summary.duplicates++;
+          return;
+        }
+        if (descends) {
+          const knownIds = new Set((sameId.revisions || []).map(function (revision) { return revision.id; }));
+          const missing = importedRevisions.filter(function (revision) {
+            return !knownIds.has(revision.manifest.id);
+          }).map(function (revision) {
+            return {
+              id: revision.manifest.id,
+              bytes: cloneBytes(revision.bytes),
+              created: Date.parse(revision.manifest.createdAt),
+              modified: Date.parse(revision.manifest.modifiedAt),
+              parentId: revision.manifest.parentId || null,
+            };
+          });
+          const tip = importedRevisions.filter(function (revision) {
+            return revision.manifest.sha256 === hash;
+          }).pop();
+          resolvedIds.set(manifest.id, sameId.id);
+          historyUpdates.push({
+            id: sameId.id,
+            revisions: missing,
+            preferredRevisionId: manifest.preferredRevisionId || (tip && tip.manifest.id) || null,
+            fastForward: true,
+          });
+          summary.fastForwarded = (summary.fastForwarded || 0) + 1;
+          summary.revisions += missing.length;
+          return;
+        }
+      }
+
       let id = manifest.id;
       let name = manifest.name;
       if (sameId) {
@@ -503,6 +553,7 @@
         bytes: cloneBytes(item.bytes),
         created: Date.parse(manifest.createdAt),
         modified: Date.parse(manifest.modifiedAt),
+        metaModified: Date.parse(manifest.metaModifiedAt || "") || 0,
         mountedSlot: typeof manifest.mountedSlot === "number" ? manifest.mountedSlot : -1,
         folderId: targetFolderId,
         sha256: hash,
@@ -568,7 +619,6 @@
     (records || []).forEach(function (record, index) {
       reportProgress(config, "export", completed, total, record.name);
       const bytes = cloneBytes(record.bytes);
-      const type = manifest.library[index].type;
       const path = manifest.library[index].path;
       if (!seen.has(path)) {
         seen.add(path);
@@ -616,7 +666,7 @@
       enforcePackageLimits(entries, manifestBytes, config);
       let manifest;
       try { manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes)); }
-      catch (err) { fail("library.json is not valid UTF-8 JSON"); }
+      catch { fail("library.json is not valid UTF-8 JSON"); }
       validateManifest(manifest);
       const result = [];
       const total = manifest.library.reduce(function (count, entry) {

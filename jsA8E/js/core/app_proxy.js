@@ -51,6 +51,11 @@
     diskLibraryDownload: 30000,
     diskLibraryExport: 60000,
     diskLibraryInspect: 60000,
+    diskLibraryManifest: 60000,
+    diskLibraryReadBlob: 30000,
+    diskLibraryApplyTombstones: 60000,
+    diskLibraryDropTombstones: 30000,
+    diskLibraryApplyMetadata: 30000,
     diskLibraryCancel: 5000,
     diskLibraryRenameFolder: 15000,
     diskLibrarySelectRevision: 15000,
@@ -1143,6 +1148,36 @@
       );
     }
 
+    function getManifest() {
+      return sendRequest("diskLibraryManifest", {}, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryManifest });
+    }
+
+    function getTombstones() {
+      return sendRequest("diskLibraryTombstones", {}, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryDropTombstones });
+    }
+
+    function applyTombstones(list) {
+      return sendRequest("diskLibraryApplyTombstones", { tombstones: list || [] }, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryApplyTombstones });
+    }
+
+    function applyMetadata(remote) {
+      return sendRequest("diskLibraryApplyMetadata", { metadata: remote || {} }, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryApplyMetadata });
+    }
+
+    function dropTombstones(ids) {
+      return sendRequest("diskLibraryDropTombstones", { ids: ids || [] }, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryDropTombstones });
+    }
+
+    function readBlob(hash) {
+      return sendRequest("diskLibraryReadBlob", { hash: String(hash || "") }, null,
+        { timeoutMs: REQUEST_TIMEOUT_MS.diskLibraryReadBlob });
+    }
+
     function getStorageEstimate() {
       return sendRequest("diskLibraryStorageEstimate");
     }
@@ -1321,6 +1356,12 @@
         purgeTrashBefore: purgeTrashBefore,
         exportPackage: exportPackage,
         exportWorkspacePackage: exportWorkspacePackage,
+        getManifest: getManifest,
+        readBlob: readBlob,
+        getTombstones: getTombstones,
+        applyTombstones: applyTombstones,
+        dropTombstones: dropTombstones,
+        applyMetadata: applyMetadata,
         renameFolder: renameFolder,
         listRevisions: listRevisions,
         selectRevision: selectRevision,
@@ -1348,6 +1389,8 @@
     const debugListeners = new Set();
     const memoryAccessListeners = new Set();
     const diskActivityListeners = new Set();
+    const sioDeviceEventListeners = new Set();
+    let printerModel = "1025";
     const diskLibraryProxy = createDiskLibraryProxy(sendRequest);
     let keyboardMappingMode =
       opts && opts.keyboardMappingMode === "original"
@@ -1452,6 +1495,16 @@
           fn(next);
         } catch {
           // ignore listener errors
+        }
+      });
+    }
+
+    function emitSioDeviceEvent(message) {
+      sioDeviceEventListeners.forEach(function (listener) {
+        try {
+          listener(message);
+        } catch {
+          // UI listeners must not affect worker communication.
         }
       });
     }
@@ -1683,6 +1736,11 @@
         return;
       }
 
+      if (data.type === "sioDeviceEvent") {
+        emitSioDeviceEvent({ device: data.device | 0, event: data.event || null });
+        return;
+      }
+
       if (data.type === "diskActivity") {
         emitDiskActivity(data.activity || null);
         return;
@@ -1829,6 +1887,13 @@
       },
       getVbxeConfig: function () {
         return Object.assign({}, state.vbxe);
+      },
+      setPrinterModel: function (model) {
+        printerModel = model === "820" || model === "1029" ? model : "1025";
+        sendCommand("setPrinterModel", { model: printerModel });
+      },
+      getPrinterModel: function () {
+        return printerModel;
       },
       setKeyboardMappingMode: function (mode) {
         keyboardMappingMode = mode === "original" ? "original" : "translated";
@@ -2046,6 +2111,13 @@
         return diskLibraryProxy.api;
       },
       diskLibrary: diskLibraryProxy.api,
+      onSioDeviceEvent: function (listener) {
+        if (typeof listener !== "function") return function () {};
+        sioDeviceEventListeners.add(listener);
+        return function () {
+          sioDeviceEventListeners.delete(listener);
+        };
+      },
       onDiskActivity: function (listener) {
         if (typeof listener !== "function") return function () {};
         diskActivityListeners.add(listener);

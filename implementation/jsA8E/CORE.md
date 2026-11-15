@@ -2,7 +2,7 @@
 
 > Hardware emulation reference: Before implementing any Atari 800 XL PAL/NTSC hardware emulation, use the [AHRM](/AHRM/index.md) as reference.
 
-- Files: `jsA8E/js/core/cpu.js`, `jsA8E/js/core/cpu_tables.js`, `jsA8E/js/core/antic.js`, `jsA8E/js/core/gtia.js`, `jsA8E/js/core/pokey.js`, `jsA8E/js/core/pokey_sio.js`, `jsA8E/js/core/vbxe.js`, `jsA8E/js/core/memory.js`, `jsA8E/js/core/io.js`, `jsA8E/js/core/atari.js`, `jsA8E/js/core/hw.js`, `jsA8E/js/core/playfield/playfield.js`, `jsA8E/js/core/playfield/renderer_base.js`, `jsA8E/js/core/state.js`, `jsA8E/js/core/snapshot_codec.js`
+- Files: `jsA8E/js/core/cpu.js`, `jsA8E/js/core/cpu_tables.js`, `jsA8E/js/core/antic.js`, `jsA8E/js/core/gtia.js`, `jsA8E/js/core/pokey.js`, `jsA8E/js/core/pokey_sio.js`, `jsA8E/js/core/sio_printer.js`, `jsA8E/js/core/vbxe.js`, `jsA8E/js/core/memory.js`, `jsA8E/js/core/io.js`, `jsA8E/js/core/atari.js`, `jsA8E/js/core/hw.js`, `jsA8E/js/core/playfield/playfield.js`, `jsA8E/js/core/playfield/renderer_base.js`, `jsA8E/js/core/state.js`, `jsA8E/js/core/snapshot_codec.js`
 - Purpose: mirror Atari hardware behavior in JavaScript with timing-compatible execution.
 - Status: updated on 2026-10-29 (`implemented`; AHRM-07 probe-validated and
   initial optional VBXE FX 1.26 subset implemented).
@@ -24,6 +24,17 @@ its priority metadata for composition. A second per-pixel contributor plane
   priority and collisions. See [`VBXE.md`](../VBXE.md) for the technical
   contract and [`VBXE_ROADMAP.md`](../VBXE_ROADMAP.md) for the staged work,
   diagrams, and exit criteria.
+
+## SIO Device Contract
+
+`pokey_sio.js` owns the SIO bus (command frame, ACK/NAK, data frame, checksum,
+Complete/Error) and routes frames to devices registered with
+`registerDevice(device)`. The disk drives (`$31`-`$38`) and the printers
+(`$40`/`$42`/`$45`, `sio_printer.js`) both use it; devices can emit events
+through `host.notify` (`io.sioDeviceEventObserver`) and read live settings from
+`host.settings` (`io.sioDeviceSettings`). The contract and the printer models
+are described in [PRINTER.md](../PRINTER.md); `tests/sio_disk_device.test.js`
+guards the disk behavior against a golden trace.
 
 ## Clock Domains
 

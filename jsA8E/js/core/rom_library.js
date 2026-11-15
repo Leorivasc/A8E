@@ -112,7 +112,7 @@
             let tx;
             try {
               tx = db.transaction(STORE_NAME, "readonly");
-            } catch (err) {
+            } catch {
               resolve(null);
               return;
             }
@@ -137,7 +137,7 @@
             let tx;
             try {
               tx = db.transaction(STORE_NAME, "readonly");
-            } catch (err) {
+            } catch {
               resolve([]);
               return;
             }

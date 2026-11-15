@@ -39,6 +39,8 @@ For browser-less Node usage, `jsA8E/headless.js` exports `createHeadlessAutomati
 
 ## MCP Bridge
 
+See [MCP.md](../implementation/MCP.md) for the full guide (startup options, ROM lookup, protocol behavior, the argument mapping for every action, results and errors, and examples).
+
 For Codex-style MCP clients, `mcp_server.js` exposes the same headless runtime through a local stdio bridge. The server advertises three tools: `get_capabilities`, `get_system_state`, and `call_automation`.
 
 `call_automation` accepts `{ domain, action, args }`. The supported domains are `system`, `media`, `input`, `debug`, `dev`, and `artifacts`. Actions mirror the grouped jsA8E methods documented below. Binary inputs should use base64 strings or local file paths, and `artifacts.captureScreenshot` returns an MCP image content block plus base64 data in `structuredContent`.
@@ -223,6 +225,20 @@ Important `runXex(...)` options:
 - entry handling: `entryPc`, `expectedEntryPc`
 - boot guards: Controls for the `awaitEntry` phase. `maxBootInstructions`, `maxBootCycles` (accepts unit strings, e.g. `"2s"`, `"50frames"`), `detectTightLoop`, `tightLoopWindow`, `tightLoopMinInstructions`, `tightLoopUniquePcLimit`
 - misc: `saveHostFile`, `sourceUrl`
+
+### `printer.*`
+
+The emulated SIO printer (820, 1025 or 1029; default 1025). The paper is
+attached together with the API, so text printed before the first call is kept.
+
+- `getText()`: the printed paper as plain text.
+- `getHtml()`: the paper as a printable HTML page.
+- `getLines()`: the lines with their attributes (columns, cpi/lpi, runs, dots).
+- `getLineCount()`: number of lines on the paper.
+- `clear()`: empties the paper.
+- `getModel()` / `setModel(model)`: reads or selects `"820"`, `"1025"` or `"1029"`.
+
+See [implementation/PRINTER.md](../implementation/PRINTER.md).
 
 ### `artifacts.*`
 

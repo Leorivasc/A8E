@@ -180,7 +180,7 @@ function testIscDecimal() {
   assert.equal(ctx.cpu.a, 0x99, "ISC decimal mode should store the adjusted SBC result");
   assert.equal(ctx.ram[0x0040], 0x01, "ISC should increment memory before subtracting");
   assert.equal(ctx.cpu.pc, 0x2002, "ISC should consume its zero-page operand");
-  assert.equal(ctx.cycleCounter, 5, "ISC should cancel the decimal-mode SBC cycle");
+  assert.equal(ctx.cycleCounter, 5, "ISC decimal mode keeps its base timing");
   assertFlag(ctx.cpu.ps, FLAG_C, false, "ISC decimal mode should clear carry when the subtraction borrows");
   assertFlag(ctx.cpu.ps, FLAG_Z, false, "ISC decimal mode should keep Z from the binary result");
   assertFlag(ctx.cpu.ps, FLAG_N, true, "ISC decimal mode should keep N from the binary result");
@@ -281,7 +281,7 @@ function testDecimalAdc() {
   });
 
   assert.equal(ctx.cpu.a, 0x00, "ADC decimal mode should store the adjusted result");
-  assert.equal(ctx.cycleCounter, 3, "ADC decimal mode should take the extra cycle");
+  assert.equal(ctx.cycleCounter, 2, "ADC decimal mode takes no extra cycle on the NMOS 6502 (AHRM 3.2)");
   assertFlag(ctx.cpu.ps, FLAG_C, true, "ADC decimal mode should set carry for 0x99 + 0x01");
   assertFlag(ctx.cpu.ps, FLAG_Z, false, "ADC decimal mode should keep Z from the intermediate binary result");
   assertFlag(ctx.cpu.ps, FLAG_N, true, "ADC decimal mode should keep N from the intermediate binary result");
@@ -295,7 +295,7 @@ function testDecimalSbc() {
   });
 
   assert.equal(ctx.cpu.a, 0x99, "SBC decimal mode should store the adjusted result");
-  assert.equal(ctx.cycleCounter, 3, "SBC decimal mode should take the extra cycle");
+  assert.equal(ctx.cycleCounter, 2, "SBC decimal mode takes no extra cycle on the NMOS 6502 (AHRM 3.2)");
   assertFlag(ctx.cpu.ps, FLAG_C, false, "SBC decimal mode should clear carry when the subtraction borrows");
   assertFlag(ctx.cpu.ps, FLAG_Z, false, "SBC decimal mode should keep Z from the intermediate binary result");
   assertFlag(ctx.cpu.ps, FLAG_N, true, "SBC decimal mode should keep N from the intermediate binary result");

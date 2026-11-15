@@ -369,13 +369,13 @@
         const runOptions = {
           maxInstructions: Math.max(
             1,
-            raw.maxBootInstructions | 0 || raw.maxInstructions | 0 || 500000,
+            raw.maxBootInstructions | 0 || raw.maxInstructions | 0 || 5000000,
           ),
           maxCycles: Math.max(
             1,
             parseCycleDuration(raw.maxBootCycles) ||
               parseCycleDuration(raw.maxCycles) ||
-              4000000,
+              20000000,
           ),
           detectTightLoop: raw.detectTightLoop !== false,
           tightLoopWindow: Math.max(1, raw.tightLoopWindow | 0 || 32),

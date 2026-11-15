@@ -928,6 +928,7 @@
         typeof app.saveSnapshot === "function" &&
         typeof app.loadSnapshot === "function",
       groupedApi: true,
+      printer: typeof app.setPrinterModel === "function",
       events: true,
       faultReporting: true,
       resetPortBOverride: typeof app.reset === "function",
@@ -1247,6 +1248,9 @@
       lastPauseSignature = "";
       bindAppListeners();
       if (currentApp) {
+        // Start collecting printed pages now, so the printer domain sees
+        // everything printed since the app was attached.
+        if (window.A8EPrinterPaper) window.A8EPrinterPaper.attach(currentApp);
         if (readyResolve) readyResolve(api);
         readyResolve = null;
         readyPromise = Promise.resolve(api);
@@ -2162,6 +2166,50 @@
     captureScreenshot: api.captureScreenshot,
     collectArtifacts: api.collectArtifacts,
     captureFailureState: api.captureFailureState,
+  };
+
+  // The printer (P:): what the emulated Atari printed, and the model selector.
+  async function printerPaper() {
+    const app = await getApp();
+    const paper = window.A8EPrinterPaper ? window.A8EPrinterPaper.attach(app) : null;
+    if (!paper) throw new Error("The printer is not available in this runtime");
+    return { app: app, paper: paper };
+  }
+
+  api.printer = {
+    getText: async function () {
+      return (await printerPaper()).paper.toText();
+    },
+    getHtml: async function (options) {
+      const title = options && options.title ? String(options.title) : undefined;
+      return (await printerPaper()).paper.toHtml(title);
+    },
+    getLines: async function () {
+      return (await printerPaper()).paper.getLines();
+    },
+    getLineCount: async function () {
+      return (await printerPaper()).paper.getLineCount();
+    },
+    clear: async function () {
+      (await printerPaper()).paper.clear();
+      return true;
+    },
+    getModel: async function () {
+      const app = (await printerPaper()).app;
+      return typeof app.getPrinterModel === "function" ? app.getPrinterModel() : "1025";
+    },
+    setModel: async function (model) {
+      const app = (await printerPaper()).app;
+      if (typeof app.setPrinterModel !== "function") {
+        throw new Error("This runtime cannot change the printer model");
+      }
+      const requested = String(model);
+      if (["820", "1025", "1029"].indexOf(requested) < 0) {
+        throw new Error("Unknown printer model: " + requested + " (use 820, 1025 or 1029)");
+      }
+      app.setPrinterModel(requested);
+      return requested;
+    },
   };
 
   window.A8EAutomation = api;

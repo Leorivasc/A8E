@@ -24,6 +24,7 @@ const SCRIPT_PATHS = [
   "js/core/assembler_core.js",
   "js/core/cpu.js",
   "js/core/disk_image.js",
+  "js/core/sio_printer.js",
   "js/core/pokey_sio.js",
   "js/core/pokey.js",
   "js/audio/runtime.js",
@@ -55,6 +56,7 @@ const SCRIPT_PATHS = [
   "js/app/automation/artifacts.js",
   "js/app/automation/xex.js",
   "js/app/automation/build.js",
+  "js/app/printer_paper.js",
   "js/app/automation_api.js",
 ];
 

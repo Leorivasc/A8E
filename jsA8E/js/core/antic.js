@@ -238,7 +238,6 @@
 
     function fetchLine(ctx) {
       const io = ctx.ioData;
-      const ram = ctx.ram;
       const sram = ctx.sram;
 
       if (io.video.currentDisplayLine === LAST_VISIBLE_LINE + 1)
@@ -491,9 +490,9 @@
               xdlLine.anticGtiaMode = (sram[IO_PRIOR] >>> 6) & 0x03;
             }
             if (vbxeRenderXdlLine)
-              vbxeRenderXdlLine(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
+              {vbxeRenderXdlLine(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);}
             if (xdlLine && vbxeApplyPlayfieldAttributes)
-              vbxeApplyPlayfieldAttributes(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);
+              {vbxeApplyPlayfieldAttributes(io.vbxe, io.videoOut, io.video.currentDisplayLine, xdlLine);}
             io.drawLine.vbxeLine = xdlLine;
             io.drawLine.vbxeScanline = io.video.currentDisplayLine;
           }
@@ -547,7 +546,7 @@
 
       if (masterEff >= io.pokeyTimerResetCycle) {
         if (typeof pokeyApplyTimerReset === "function")
-          pokeyApplyTimerReset(ctx);
+          {pokeyApplyTimerReset(ctx);}
       }
 
       if (beamEff >= io.dliCycle) {
@@ -599,7 +598,7 @@
           ? pokeySerialOutputTransmissionDone(ctx, masterEff)
           : false;
         if (typeof pokeyTraceEvent === "function")
-          pokeyTraceEvent(ctx, "TRANSMISSION_DONE", { eventCycle: masterEff });
+          {pokeyTraceEvent(ctx, "TRANSMISSION_DONE", { eventCycle: masterEff });}
         if (!hasQueuedByte) {
           ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE;
           if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_TRANSMISSION_DONE)
@@ -616,9 +615,9 @@
 
       if (masterEff >= io.serialOutputNeedDataCycle) {
         if (typeof pokeySerialOutputDataNeeded === "function")
-          pokeySerialOutputDataNeeded(ctx);
+          {pokeySerialOutputDataNeeded(ctx);}
         if (typeof pokeyTraceEvent === "function")
-          pokeyTraceEvent(ctx, "DATA_NEEDED", { eventCycle: masterEff });
+          {pokeyTraceEvent(ctx, "DATA_NEEDED", { eventCycle: masterEff });}
         // AHRM 5.7: all latched sources except XMTDONE remain inactive
         // in IRQST while masked by IRQEN.
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_OUTPUT_DATA_NEEDED)
@@ -631,7 +630,7 @@
 
       if (masterEff >= io.serialInputDataReadyCycle) {
         if (typeof pokeySerialInputReady === "function")
-          pokeySerialInputReady(ctx);
+          {pokeySerialInputReady(ctx);}
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY)
           {ram[IO_IRQEN_IRQST] &= ~IRQ_SERIAL_INPUT_DATA_READY;}
         if (sram[IO_IRQEN_IRQST] & IRQ_SERIAL_INPUT_DATA_READY) CPU.irq(ctx);

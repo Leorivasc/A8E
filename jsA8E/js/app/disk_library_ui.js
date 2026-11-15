@@ -179,10 +179,10 @@
       if (masterChk) masterChk.disabled = trashMode;
       if (selectAllBtn) selectAllBtn.disabled = trashMode;
       if (selectNoneBtn) selectNoneBtn.disabled = trashMode;
-      if (purgeTrashBtn) purgeTrashBtn.disabled = !trashMode ||
-        typeof library.listTrash !== "function" || library.listTrash().length === 0;
-      if (purgeOldTrashBtn) purgeOldTrashBtn.disabled = !trashMode ||
-        typeof library.listTrash !== "function" || library.listTrash().length === 0;
+      if (purgeTrashBtn) {purgeTrashBtn.disabled = !trashMode ||
+        typeof library.listTrash !== "function" || library.listTrash().length === 0;}
+      if (purgeOldTrashBtn) {purgeOldTrashBtn.disabled = !trashMode ||
+        typeof library.listTrash !== "function" || library.listTrash().length === 0;}
       if (trashBtn) {
         trashBtn.title = trashMode ? "Return to library" : "Open recoverable trash";
         trashBtn.setAttribute("aria-label", trashBtn.title);
