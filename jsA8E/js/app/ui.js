@@ -3527,6 +3527,7 @@
         app: app,
         button: document.getElementById("btnPrinter"),
         panel: document.getElementById("printerPanel"),
+        mobileButton: document.querySelector('[data-mobile-proxy="btnPrinter"]'),
       });
     }
 

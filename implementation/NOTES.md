@@ -4690,6 +4690,18 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   `sioDeviceEvent`/`setPrinterModel` worker messages and the `printer`
   automation domain. Documentation only; no code changed.
 
+## 2026-11-15 Printer button in the mobile view
+
+- On narrow screens the toolbar buttons live in the "Tools" sheet
+  (`mobileToolsGrid`), a fixed list in `index.html`; the printer had no entry,
+  so it could not be opened on a phone. Added a `data-mobile-proxy="btnPrinter"`
+  entry (hidden until the first print, like the toolbar button) and
+  `printer_ui.js` now takes it as `mobileButton` and keeps both buttons in step.
+  A `[hidden]` rule keeps the grid's `display` from showing it early.
+- Checked in headless Chromium at 390 px with the real page: hidden before
+  printing, visible in the sheet after a line arrives, tapping it closes the
+  sheet and opens the floating panel with the text.
+
 ## Legal / License TODO
 
 Pending legal and licensing review recorded on 2026-09-30. These items are
