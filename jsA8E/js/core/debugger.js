@@ -473,11 +473,15 @@
         const ctx = machine.ctx;
         const startCycleCounter = ctx.cycleCounter >>> 0;
         const startInstructionCounter = ctx.instructionCounter >>> 0;
-        const targetInstruction =
-          ((ctx.instructionCounter | 0) + 1) >>> 0;
+        // One CPU.run call can retire more than one instruction (an
+        // interrupt entry counts as one), so test "at least one" rather than
+        // equality with the next counter value.
+        const instructionDone = function () {
+          return (((ctx.instructionCounter | 0) - (startInstructionCounter | 0)) | 0) > 0;
+        };
         let safetyCounter = 0;
         clearLastStopState();
-        while ((ctx.instructionCounter | 0) !== targetInstruction) {
+        while (!instructionDone()) {
           const beforeCycles = ctx.cycleCounter | 0;
           try {
             CPU.run(ctx, (ctx.cycleCounter | 0) + 1);
@@ -494,7 +498,7 @@
                 ((ctx.cycleCounter >>> 0) - startCycleCounter) >>> 0,
             };
           }
-          if ((ctx.instructionCounter | 0) === targetInstruction) {
+          if (instructionDone()) {
             return {
               ok: true,
               executedInstructions:
@@ -656,6 +660,7 @@
           4,
         );
         const tightLoopHistory = [];
+        const tightLoopStates = [];
         const ctx = machine.ctx;
         const startCycleCounter = ctx.cycleCounter >>> 0;
         const startInstructionCounter = ctx.instructionCounter >>> 0;
@@ -732,14 +737,29 @@
           }
           if (detectTightLoop) {
             tightLoopHistory.push(currentPc & 0xffff);
-            if (tightLoopHistory.length > tightLoopWindow) tightLoopHistory.shift();
+            const regs = ctx.cpu;
+            tightLoopStates.push(
+              (currentPc & 0xffff) * 0x1000000 +
+                (((regs.a & 0xff) << 16) | ((regs.x & 0xff) << 8) | (regs.y & 0xff)),
+            );
+            if (tightLoopHistory.length > tightLoopWindow) {
+              tightLoopHistory.shift();
+              tightLoopStates.shift();
+            }
             if (
               tightLoopHistory.length >= tightLoopWindow &&
               (((ctx.instructionCounter >>> 0) - startInstructionCounter) >>> 0) >=
                 tightLoopMinInstructions
             ) {
               const summary = summarizeTightLoopHistory(tightLoopHistory);
-              if (summary.uniquePcCount <= tightLoopUniquePcLimit) {
+              // A loop that is really stuck repeats the same register state at
+              // each of its addresses; a counting delay loop (DEY/BNE in the
+              // OS cold start) keeps changing X/Y and is making progress.
+              const uniqueStates = new Set(tightLoopStates).size;
+              if (
+                summary.uniquePcCount <= tightLoopUniquePcLimit &&
+                uniqueStates <= tightLoopUniquePcLimit
+              ) {
                 return {
                   ok: false,
                   reason: "tight_loop",

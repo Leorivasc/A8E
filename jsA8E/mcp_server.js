@@ -8,9 +8,16 @@ const { createHeadlessAutomation } = require("./headless");
 const runtimeVersion = require("./version.json").version;
 
 const DEFAULT_WORKSPACE_CWD = path.resolve(__dirname, "..");
-const DEFAULT_OS_ROM = path.resolve(DEFAULT_WORKSPACE_CWD, "ATARIXL.ROM");
-const DEFAULT_BASIC_ROM = path.resolve(DEFAULT_WORKSPACE_CWD, "ATARIBAS.ROM");
+const ROM_SEARCH_DIRS = [DEFAULT_WORKSPACE_CWD, __dirname];
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+
+function findDefaultRom(name) {
+  for (const dir of ROM_SEARCH_DIRS) {
+    const candidate = path.resolve(dir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
 function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -171,12 +178,12 @@ function buildTools() {
     {
       name: "call_automation",
       title: "Call jsA8E Automation",
-      description: "Grouped bridge over the jsA8E automation API. Provide { domain, action, args }. Domains: system, media, input, debug, dev, artifacts.",
+      description: "Grouped bridge over the jsA8E automation API. Provide { domain, action, args }. Domains: system, media, input, debug, dev, artifacts, printer.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
         properties: {
-          domain: { type: "string", enum: ["system", "media", "input", "debug", "dev", "artifacts"] },
+          domain: { type: "string", enum: ["system", "media", "input", "debug", "dev", "artifacts", "printer"] },
           action: { type: "string" },
           args: { type: "object", additionalProperties: true, description: "Arguments forwarded to the selected jsA8E method." },
         },
@@ -365,6 +372,17 @@ function createMcpSession(runtime, options) {
           case "captureFailureState": return api.artifacts.captureFailureState(payload);
           default: throw protocolError(-32602, "Unknown artifacts action: " + String(action), { action: action });
         }
+      case "printer":
+        switch (action) {
+          case "getText": return api.printer.getText();
+          case "getHtml": return api.printer.getHtml(payload);
+          case "getLines": return api.printer.getLines();
+          case "getLineCount": return api.printer.getLineCount();
+          case "clear": return api.printer.clear();
+          case "getModel": return api.printer.getModel();
+          case "setModel": return api.printer.setModel(payload.model);
+          default: throw protocolError(-32602, "Unknown printer action: " + String(action), { action: action });
+        }
       default:
         throw protocolError(-32602, "Unknown domain: " + String(domain), { domain: domain });
     }
@@ -381,7 +399,8 @@ function createMcpSession(runtime, options) {
       initialized = true;
       return { jsonrpc: "2.0", id: message.id, result: { protocolVersion: requestedVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "jsA8E MCP", version: runtimeVersion }, instructions: buildInstructions() } };
     }
-    if (message.method === "initialized") return null;
+    if (message.method === "initialized" || message.method === "notifications/initialized") return null;
+    if (message.method === "ping") return { jsonrpc: "2.0", id: message.id, result: {} };
     if (message.method === "shutdown") {
       await dispose();
       return { jsonrpc: "2.0", id: message.id, result: {} };
@@ -438,10 +457,10 @@ function createMcpSession(runtime, options) {
     return Promise.resolve().then(function () { return handleRequest(payload); }).then(function (response) {
       return response === null || response === undefined ? null : response;
     }).catch(function (err) {
+      if (!isRequest) return null;
       if (err && err.isProtocolError) {
         return { jsonrpc: "2.0", id: requestId, error: { code: err.code, message: err.message, data: sanitizeValue(err.data) } };
       }
-      if (!isRequest) return null;
       return { jsonrpc: "2.0", id: requestId, result: errorResult(payload.method || "unknown", payload.params && payload.params.action ? String(payload.params.action) : null, err) };
     });
   }
@@ -493,10 +512,11 @@ function parseArgs(argv) {
 async function main() {
   const cli = parseArgs(process.argv);
   const roms = {};
-  const osRom = cli.osRom || process.env.JSA8E_OS_ROM || (fs.existsSync(DEFAULT_OS_ROM) ? DEFAULT_OS_ROM : null);
-  const basicRom = cli.basicRom || process.env.JSA8E_BASIC_ROM || (fs.existsSync(DEFAULT_BASIC_ROM) ? DEFAULT_BASIC_ROM : null);
+  const osRom = cli.osRom || process.env.JSA8E_OS_ROM || findDefaultRom("ATARIXL.ROM");
+  const basicRom = cli.basicRom || process.env.JSA8E_BASIC_ROM || findDefaultRom("ATARIBAS.ROM");
   if (osRom) roms.os = osRom;
   if (basicRom) roms.basic = basicRom;
+  if (!osRom) process.stderr.write("jsA8E MCP: no OS ROM found (use --os-rom or JSA8E_OS_ROM); the machine starts without ROMs\n");
   const runtime = await createMcpServer({ cwd: cli.cwd, turbo: cli.turbo, skipRendering: cli.skipRendering, frameDelayMs: cli.frameDelayMs, audioEnabled: cli.audioEnabled, sioTurbo: cli.sioTurbo, optionOnStart: cli.optionOnStart, keyboardMappingMode: cli.keyboardMappingMode, confinePaths: cli.confinePaths, allowNetwork: cli.allowNetwork, roms: Object.keys(roms).length ? roms : undefined });
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 
@@ -508,6 +528,7 @@ async function main() {
     });
   }
 
+  let queue = Promise.resolve();
   rl.on("line", function (line) {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -518,7 +539,8 @@ async function main() {
       process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }) + "\n");
       return;
     }
-    runtime.handlePayload(payload).then(writeResponse).catch(function (err) {
+    // Requests run one at a time so answers come back in request order.
+    queue = queue.then(function () { return runtime.handlePayload(payload); }).then(writeResponse).catch(function (err) {
       process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: payload && Object.prototype.hasOwnProperty.call(payload, "id") ? payload.id : null, error: { code: -32603, message: err && err.message ? String(err.message) : "Internal error" } }) + "\n");
     });
   });
@@ -529,7 +551,7 @@ async function main() {
   }
 
   rl.on("close", function () {
-    runtime.dispose().finally(function () {
+    queue.then(function () { return runtime.dispose(); }).finally(function () {
       if (!process.env.JSA8E_MCP_NO_EXIT) process.exit(0);
     });
   });

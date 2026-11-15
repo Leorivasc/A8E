@@ -341,6 +341,7 @@
       "js/core/cpu.js",
       "js/render/gl.js",
       "js/core/disk_image.js",
+      "js/core/sio_printer.js",
       "js/core/pokey_sio.js",
       "js/core/pokey.js",
       "js/audio/runtime.js",
@@ -464,6 +465,15 @@
       folders: typeof diskLibrary.listAllFolders === "function" ? diskLibrary.listAllFolders() : [],
       trash: typeof diskLibrary.listTrash === "function" ? diskLibrary.listTrash() : [],
       revisions: collectDiskLibraryRevisions(diskLibrary),
+    });
+  }
+
+  function postSioDeviceEvent(message) {
+    if (!message || typeof message !== "object") return;
+    self.postMessage({
+      type: "sioDeviceEvent",
+      device: message.device | 0,
+      event: message.event || null,
     });
   }
 
@@ -655,6 +665,7 @@
           queueDebugState(state, force);
         },
         onDiskActivity: postDiskActivity,
+        onSioDeviceEvent: postSioDeviceEvent,
         keyboardMappingMode:
           msg.keyboardMappingMode === "original" ? "original" : "translated",
       });
@@ -681,6 +692,7 @@
           queueDebugState(state, force);
         },
         onDiskActivity: postDiskActivity,
+        onSioDeviceEvent: postSioDeviceEvent,
         keyboardMappingMode:
           msg.keyboardMappingMode === "original" ? "original" : "translated",
       });
@@ -804,6 +816,10 @@
         break;
       case "setOptionOnStart":
         app.setOptionOnStart(!!data.value);
+        break;
+      case "setPrinterModel":
+        if (app.setPrinterModel) app.setPrinterModel(data.model);
+        shouldPostState = false;
         break;
       case "setKeyboardMappingMode":
         if (app.setKeyboardMappingMode) {

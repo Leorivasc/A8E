@@ -764,6 +764,41 @@
       onDiskActivity(opts.onDiskActivity);
     }
 
+    // Events from SIO peripherals (the printer's page lines). Same fan-out as
+    // the disk activity observers: outside the SIO response path.
+    const sioDeviceEventListeners = new Set();
+
+    function notifySioDeviceEvent(message) {
+      sioDeviceEventListeners.forEach(function (listener) {
+        try {
+          listener(message || null);
+        } catch {
+          // Observers must never affect emulated behavior.
+        }
+      });
+    }
+
+    // Settings the SIO peripherals read live (shared with the machine's I/O
+    // state, so they survive resets).
+    const sioDeviceSettings = { printerModel: "1025" };
+
+    function setPrinterModel(model) {
+      sioDeviceSettings.printerModel =
+        model === "820" || model === "1029" ? model : "1025";
+    }
+
+    function onSioDeviceEvent(listener) {
+      if (typeof listener !== "function") return function () {};
+      sioDeviceEventListeners.add(listener);
+      return function () {
+        sioDeviceEventListeners.delete(listener);
+      };
+    }
+
+    if (opts && typeof opts.onSioDeviceEvent === "function") {
+      onSioDeviceEvent(opts.onSioDeviceEvent);
+    }
+
     function onDiskMediaChanged(imageIndex, deviceSlot) {
       if (diskLibrary && typeof diskLibrary.onDiskMediaChanged === "function") {
         diskLibrary.onDiskMediaChanged(imageIndex | 0, deviceSlot | 0);
@@ -908,6 +943,8 @@
       pokeyAudioSetTurbo: pokeyAudioSetTurbo,
       onDiskMediaChanged: onDiskMediaChanged,
       onDiskActivity: notifyDiskActivity,
+      onSioDeviceEvent: notifySioDeviceEvent,
+      sioDeviceSettings: sioDeviceSettings,
       memoryExpansion: memoryExpansion,
       createVbxeState: function () {
         return vbxeApi.createState(vbxeConfig, video.paletteRgb);
@@ -1622,6 +1659,9 @@
       diskLibrary: diskLibrary,
       getDiskLibrary: function () { return diskLibrary; },
       onDiskActivity: onDiskActivity,
+      onSioDeviceEvent: onSioDeviceEvent,
+      setPrinterModel: setPrinterModel,
+      getPrinterModel: function () { return sioDeviceSettings.printerModel; },
       hDevice: hDevice,
       hasOsRom: hasOsRom,
       hasBasicRom: hasBasicRom,

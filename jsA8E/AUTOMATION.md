@@ -226,6 +226,20 @@ Important `runXex(...)` options:
 - boot guards: Controls for the `awaitEntry` phase. `maxBootInstructions`, `maxBootCycles` (accepts unit strings, e.g. `"2s"`, `"50frames"`), `detectTightLoop`, `tightLoopWindow`, `tightLoopMinInstructions`, `tightLoopUniquePcLimit`
 - misc: `saveHostFile`, `sourceUrl`
 
+### `printer.*`
+
+The emulated SIO printer (820, 1025 or 1029; default 1025). The paper is
+attached together with the API, so text printed before the first call is kept.
+
+- `getText()`: the printed paper as plain text.
+- `getHtml()`: the paper as a printable HTML page.
+- `getLines()`: the lines with their attributes (columns, cpi/lpi, runs, dots).
+- `getLineCount()`: number of lines on the paper.
+- `clear()`: empties the paper.
+- `getModel()` / `setModel(model)`: reads or selects `"820"`, `"1025"` or `"1029"`.
+
+See [implementation/PRINTER.md](../implementation/PRINTER.md).
+
 ### `artifacts.*`
 
 | Method | Purpose / key options |

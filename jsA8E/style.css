@@ -4522,3 +4522,84 @@ canvas.crtEnabled {
     letter-spacing: 0;
   }
 }
+
+/* Printer paper viewer: docked as the last tool panel, or floating over the page */
+.printerPanel {
+  width: 100%;
+  border: 1px solid var(--sub-panel-border);
+  border-radius: 6px;
+  background: var(--sub-panel-bg);
+  font-size: var(--fs-sm);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  align-self: stretch;
+  max-height: 60vh;
+}
+.layoutTools > .printerPanel {
+  order: 10;
+}
+.printerPanel[hidden] {
+  display: none;
+}
+.printerPanel.floating {
+  position: fixed;
+  z-index: 240;
+  width: min(560px, calc(100vw - 16px));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+.printerBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--sub-panel-header-bg);
+  border-bottom: 1px solid var(--sub-panel-border);
+  user-select: none;
+}
+.printerPanel.floating .printerBar {
+  cursor: move;
+  touch-action: none;
+}
+.printerIcon {
+  color: var(--accent);
+}
+.printerTitle {
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text);
+}
+.printerBarSpacer {
+  flex: 1;
+}
+.printerCount {
+  white-space: nowrap;
+  color: var(--muted);
+}
+.printerPaper {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  background: #fbfaf5;
+  color: #111;
+  font: 13px/1.25 "Courier New", monospace;
+  min-height: 80px;
+}
+.printerModel {
+  max-width: 120px;
+  font-size: inherit;
+}
+.printerPaper .ul {
+  text-decoration: underline;
+}
+.printerPaper .wide {
+  display: inline-block;
+  transform: scaleX(2);
+  transform-origin: left;
+}
+.printerPaper .sideways {
+  font-style: italic;
+}
+.printerPaper .dots {
+  display: block;
+}

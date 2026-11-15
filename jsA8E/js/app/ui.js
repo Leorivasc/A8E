@@ -3522,6 +3522,14 @@
       });
     }
 
+    if (window.A8EPrinterUI && app) {
+      window.A8EPrinterUI.init({
+        app: app,
+        button: document.getElementById("btnPrinter"),
+        panel: document.getElementById("printerPanel"),
+      });
+    }
+
     if (window.A8EDiskActivityUI && app) {
       window.A8EDiskActivityUI.init({
         app: app,

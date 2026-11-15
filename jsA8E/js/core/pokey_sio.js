@@ -501,10 +501,152 @@
       }
     }
 
-    function diskDevice(devId) {
-      function onCommandFrame(ctx, now, cmd, aux1, aux2) {
+    const sioDeviceHandlers = Object.create(null);
+    const sioDevices = Object.create(null);
+
+    // Generic SIO device contract (AHRM 9.1). A device only describes what the
+    // command means; the bus owns ACK/NAK, the data frame, its checksum and
+    // the Complete/Error byte.
+    //
+    //   device.onCommand({ device, cmd, aux1, aux2 }, host) returns one of
+    //     { ignore: true }              not for this device: act as if absent
+    //     { silent: true }              answer nothing at all
+    //     null / { nak: true }          NAK the command
+    //     { complete: true }            ACK, Complete
+    //     { reply: Uint8Array }         ACK, then Complete + data + checksum
+    //                                   (two response phases)
+    //     { reply, burst: true }        ACK, Complete, data, checksum as one
+    //                                   burst (disk STATUS)
+    //     { receive: length, sector }   ACK, then read `length` bytes; `sector`
+    //                                   is handed back to onData
+    //   device.onData(bytes, host, pending) after a good data frame, with
+    //                                   pending = { cmd, sector }; return true
+    //                                   (Complete), false (Error) or
+    //                                   { nak: true } (NAK)
+    //   device.nakOnBadCommandChecksum(frame, host)
+    //                                   optional: true makes the bus NAK a
+    //                                   command frame addressed to this device
+    //                                   that has a bad checksum (the XL/XE OS
+    //                                   first-byte race, AHRM 5.10); otherwise
+    //                                   such a frame stays silent
+    //   device.onDataError(host)        optional, after a bad data checksum
+    //                                   (the bus answers NAK)
+    //   host.notify(event)              hands an event to the application
+    //                                   layer (io.sioDeviceEventObserver)
+    //   host.settings                   application settings for devices
+    //                                   (io.sioDeviceSettings), e.g.
+    //                                   { printerModel: "820" }
+    //
+    // A device never sees the command line, POKEY or timing, and a command
+    // frame with a bad checksum never reaches it (AHRM 9.1: stay silent).
+    function createDeviceHost(io, devId) {
+      return {
+        // The machine I/O state, for a device that owns emulated media (the
+        // disk drive). A device without media does not need it.
+        io: io,
+        settings: io.sioDeviceSettings || {},
+        notify: function (event) {
+          if (typeof io.sioDeviceEventObserver !== "function") return;
+          try {
+            io.sioDeviceEventObserver({ device: devId & 0xff, event: event });
+          } catch {
+            // Observers must never affect emulated SIO behavior.
+          }
+        },
+      };
+    }
+
+    function genericDevice(devId, device) {
+      function onCommandFrame(ctx, now, cmd, aux1, aux2, frameDevice) {
         const io = ctx.ioData;
-        const buf = io.sioBuffer;
+        const response = device.onCommand(
+          { device: frameDevice & 0xff, cmd: cmd, aux1: aux1, aux2: aux2 },
+          createDeviceHost(io, devId),
+        );
+        if (response && response.ignore) {
+          absentDeviceCommand(ctx, now, cmd);
+          return;
+        }
+        if (response && response.silent) return;
+        if (!response || response.nak) {
+          queueDeviceNack(ctx, now);
+          return;
+        }
+        if (response.reply) {
+          const reply = response.reply;
+          if (reply.length === 0) {
+            queueAckComplete(ctx, now);
+            return;
+          }
+          io.sioBuffer.set(reply, 2);
+          if (response.burst) {
+            // ACK, Complete, data and checksum as one SERIN burst.
+            io.sioBuffer[0] = CHAR_ACK;
+            io.sioBuffer[1] = CHAR_COMPLETE;
+            io.sioBuffer[reply.length + 2] = sioChecksum(reply, reply.length);
+            queueSerinResponse(ctx, now, reply.length + 3);
+            return;
+          }
+          queueAckData(ctx, now, 2, reply.length);
+          return;
+        }
+        if (response.receive > 0) {
+          io.sioOutPhase = 1;
+          io.sioDataIndex = 0;
+          io.sioPendingDevice = devId & 0xff;
+          io.sioPendingCmd = cmd & 0xff;
+          io.sioPendingSector = (response.sector | 0) & 0xffff;
+          io.sioPendingBytes = response.receive | 0;
+          io.sioPendingWriteResult = 0;
+          queueSingleByteResponse(ctx, now, CHAR_ACK);
+          return;
+        }
+        queueAckComplete(ctx, now);
+      }
+
+      function onDataFrame(ctx, now, payloadOffset, payloadBytes, providedCrc) {
+        const io = ctx.ioData;
+        const host = createDeviceHost(io, devId);
+        const payload = io.sioBuffer.slice(payloadOffset, payloadOffset + payloadBytes);
+        if (sioChecksum(payload, payloadBytes) !== providedCrc) {
+          if (device.onDataError) device.onDataError(host);
+          queueDeviceNack(ctx, now);
+          return;
+        }
+        const result = device.onData
+          ? device.onData(payload, host, {
+              cmd: io.sioPendingCmd & 0xff,
+              sector: io.sioPendingSector & 0xffff,
+            })
+          : true;
+        if (result && result.nak) {
+          queueDeviceNack(ctx, now);
+          return;
+        }
+        io.sioPendingWriteResult = result !== false ? CHAR_COMPLETE : CHAR_ERROR;
+        queueSingleByteResponse(ctx, now, CHAR_ACK);
+      }
+
+      return { onCommandFrame: onCommandFrame, onDataFrame: onDataFrame };
+    }
+
+    function registerDevice(device) {
+      const ids = device.deviceIds || [];
+      for (let i = 0; i < ids.length; i++) {
+        sioDeviceHandlers[ids[i] & 0xff] = genericDevice(ids[i], device);
+        sioDevices[ids[i] & 0xff] = device;
+      }
+    }
+
+    // The disk drive (D1:-D8:, device IDs $31-$38) as a device of the generic
+    // SIO contract below. It owns the emulated media, which lives in the
+    // machine I/O state reached through host.io.
+    function diskDevice(devId) {
+      function onCommand(frame, host) {
+        const cmd = frame.cmd;
+        const aux1 = frame.aux1;
+        const aux2 = frame.aux2;
+        const io = host.io;
         const mounted = getMountedDiskForDevice(io, devId);
         const disk = mounted ? mounted.bytes : null;
         const diskSize = mounted ? mounted.size | 0 : 0;
@@ -514,30 +656,23 @@
           // READ SECTOR
           const sectorIndex = (aux1 | (aux2 << 8)) & 0xffff;
           const si = sectorBytesAndOffset(sectorIndex, sectorSize);
-          if (!canAccessSector(disk, diskSize, si)) {
-            queueDeviceNack(ctx, now);
-            return;
-          }
-          buf.set(disk.subarray(si.offset, si.offset + si.bytes), 2);
+          if (!canAccessSector(disk, diskSize, si)) return null;
           // The virtual drive completed a data read without an FDC error.
           // Report that result on a later STATUS request (AHRM 10.2).
           setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
-          queueAckData(ctx, now, 2, si.bytes);
           notifyDiskActivity(io, mounted, "read");
-          return;
+          return { reply: disk.slice(si.offset, si.offset + si.bytes) };
         }
 
         if (cmd === CMD_HIGH_SPEED_INDEX) {
           // AHRM 10.3: generic US Doubler divisor.
-          buf[2] = 0x0a;
-          queueAckData(ctx, now, 2, 1);
-          return;
+          return { reply: Uint8Array.of(0x0a) };
         }
 
         if (cmd === CMD_POLL) {
           // Type 3 poll/reset is a bus-wide protocol. This disk device does
           // not provide a downloadable handler, so it must stay silent.
-          return;
+          return { silent: true };
         }
 
         if (cmd === CMD_STATUS) {
@@ -547,43 +682,30 @@
           // its STATUS probe instead of treating the marker as a normal
           // status request; otherwise MyPicoDOS can select Turbo mode and
           // later reinterpret the marker as the high sector-number bit.
-          if (aux2 & 0x80) {
-            queueDeviceNack(ctx, now);
-            return;
-          }
-          if (!disk || !disk.length || disk[0] === 0) {
-            queueDeviceNack(ctx, now);
-            return;
-          }
-          writeAckComplete(buf);
+          if (aux2 & 0x80) return null;
+          if (!disk || !disk.length || disk[0] === 0) return null;
+          let density;
           if (sectorSize === DISK_SECTOR_SIZE_SINGLE) {
-            buf[2] = 0x10;
-            buf[3] = diskFdcStatus(io, mounted.deviceSlot);
-            // AHRM 10.2: this is the format timeout, not the normal
-            // command timeout. Keep it in the range used by real drives so
-            // DOS does not reuse an unrealistically short value for another
-            // drive's FORMAT command.
-            buf[4] = 0xe0;
-            buf[5] = 0x00;
+            density = 0x10;
           } else if (sectorSize === DISK_SECTOR_SIZE_LARGE) {
             // AHRM 10.1: 512-byte media does not use the DD boot-sector
             // exception. Use the TOMS-compatible 512-byte status marker.
-            buf[2] = 0x50;
-            buf[3] = diskFdcStatus(io, mounted.deviceSlot);
-            buf[4] = 0xe0;
-            buf[5] = 0x00;
+            density = 0x50;
           } else {
-            buf[2] = 0x30;
-            buf[3] = diskFdcStatus(io, mounted.deviceSlot);
-            buf[4] = 0xe0;
-            buf[5] = 0x00;
+            density = 0x30;
           }
-          // This checksum belongs to the status payload, not to a density
-          // template.  The latched FDC status is allowed to vary by command.
-          buf[6] = sioChecksum(buf.subarray(2, 6), 4);
-          queueSerinResponse(ctx, now, 7);
+          // AHRM 10.2: this is the format timeout, not the normal command
+          // timeout. Keep it in the range used by real drives so DOS does
+          // not reuse an unrealistically short value for another drive's
+          // FORMAT command.
           notifyDiskActivity(io, mounted, "status");
-          return;
+          // The status payload's checksum belongs to the payload, and the
+          // latched FDC status is allowed to vary by command. ACK, Complete,
+          // the four bytes and the checksum arrive as one burst.
+          return {
+            reply: Uint8Array.of(density, diskFdcStatus(io, mounted.deviceSlot), 0xe0, 0x00),
+            burst: true,
+          };
         }
 
         if (
@@ -594,100 +716,65 @@
           // WRITE / PUT / VERIFY SECTOR (expects a data frame).
           const sectorIndex2 = (aux1 | (aux2 << 8)) & 0xffff;
           const si2 = sectorBytesAndOffset(sectorIndex2, sectorSize);
-          if (!canAccessSector(disk, diskSize, si2)) {
-            queueDeviceNack(ctx, now);
-            return;
-          }
-
-          io.sioOutPhase = 1;
-          io.sioDataIndex = 0;
-          io.sioPendingDevice = devId & 0xff;
-          io.sioPendingCmd = cmd & 0xff;
-          io.sioPendingSector = sectorIndex2 & 0xffff;
-          io.sioPendingBytes = si2.bytes | 0;
-          io.sioPendingWriteResult = 0;
-          // ACK command frame; host will then send the data frame.
-          queueSingleByteResponse(ctx, now, CHAR_ACK);
-          return;
+          if (!canAccessSector(disk, diskSize, si2)) return null;
+          // ACK the command frame; the host then sends the data frame.
+          return { receive: si2.bytes | 0, sector: sectorIndex2 };
         }
 
         if (cmd === CMD_FORMAT) {
           // FORMAT: clear the data area and return the sector-sized bad-sector
           // list required by the disk protocol. An empty list is terminated
           // by $FFFF (AHRM 10.4, Format).
-          if (!disk || !diskSize || diskSize <= DISK_HEADER_SIZE) {
-            queueDeviceNack(ctx, now);
-            return;
-          }
+          if (!disk || !diskSize || diskSize <= DISK_HEADER_SIZE) return null;
           disk.fill(0, DISK_HEADER_SIZE);
-          buf.fill(0, 2, 2 + sectorSize);
-          buf[2] = 0xff;
-          buf[3] = 0xff;
-          buf[sectorSize + 2] = sioChecksum(
-            buf.subarray(2, sectorSize + 2),
-            sectorSize,
-          );
+          const badSectors = new Uint8Array(sectorSize);
+          badSectors[0] = 0xff;
+          badSectors[1] = 0xff;
           setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
           notifyDiskMediaChanged(io, mounted);
           notifyDiskActivity(io, mounted, "format");
-          queueAckData(ctx, now, 2, sectorSize);
-          return;
+          return { reply: badSectors };
         }
 
         if (cmd === CMD_MOTOR_ON) {
           // MOTOR ON: no-op, but ACK.
-          queueAckComplete(ctx, now);
-          return;
+          return { complete: true };
         }
 
         // Unsupported command.
-        queueDeviceNack(ctx, now);
+        return null;
       }
 
-      function onDataFrame(ctx, now, payloadOffset, payloadBytes, providedCrc) {
-        const io = ctx.ioData;
-        const buf = io.sioBuffer;
-        const cmd = io.sioPendingCmd & 0xff;
+      // After a good data frame. `pending` is what onCommand asked to receive.
+      function onData(payload, host, pending) {
+        const io = host.io;
+        const cmd = pending.cmd & 0xff;
         const mounted = getMountedDiskForDevice(io, devId);
         const disk = mounted ? mounted.bytes : null;
         const diskSize = mounted ? mounted.size | 0 : 0;
         const sectorSize = diskSectorSize(disk);
-        const si = sectorBytesAndOffset(io.sioPendingSector | 0, sectorSize);
-        const calculated = sioChecksum(
-          buf.subarray(payloadOffset, payloadOffset + payloadBytes),
-          payloadBytes,
-        );
+        const si = sectorBytesAndOffset(pending.sector | 0, sectorSize);
 
-        if (
-          calculated !== providedCrc ||
-          !canAccessSector(disk, diskSize, si) ||
-          si.bytes !== payloadBytes
-        ) {
-          queueDeviceNack(ctx, now);
-          return;
+        if (!canAccessSector(disk, diskSize, si) || si.bytes !== payload.length) {
+          return { nak: true };
         }
 
         if (cmd === CMD_VERIFY_SECTOR) {
           // VERIFY SECTOR: compare payload to current disk content.
           let ok = true;
           for (let vi = 0; vi < si.bytes; vi++) {
-            if (
-              (disk[si.offset + vi] & 0xff) !==
-              (buf[payloadOffset + vi] & 0xff)
-            ) {
+            if ((disk[si.offset + vi] & 0xff) !== (payload[vi] & 0xff)) {
               ok = false;
               break;
             }
           }
           setDiskFdcStatus(io, mounted.deviceSlot, ok ? 0xff : 0x00);
-          io.sioPendingWriteResult = ok ? CHAR_COMPLETE : CHAR_ERROR;
-          queueSingleByteResponse(ctx, now, CHAR_ACK);
           if (ok) notifyDiskActivity(io, mounted, "verify");
-          return;
+          return ok;
         }
 
         // WRITE / PUT: write sector payload.
-        disk.set(buf.subarray(payloadOffset, payloadOffset + si.bytes), si.offset);
+        disk.set(payload.subarray(0, si.bytes), si.offset);
         notifyDiskMediaChanged(io, mounted);
         notifyDiskActivity(io, mounted, "write");
         if (cmd === CMD_WRITE_SECTOR) {
@@ -697,38 +784,48 @@
           // final result.
           let verified = true;
           for (let vi = 0; vi < si.bytes; vi++) {
-            if (
-              (disk[si.offset + vi] & 0xff) !==
-              (buf[payloadOffset + vi] & 0xff)
-            ) {
+            if ((disk[si.offset + vi] & 0xff) !== (payload[vi] & 0xff)) {
               verified = false;
               break;
             }
           }
           setDiskFdcStatus(io, mounted.deviceSlot, verified ? 0xff : 0x00);
-          io.sioPendingWriteResult = verified ? CHAR_COMPLETE : CHAR_ERROR;
-          queueSingleByteResponse(ctx, now, CHAR_ACK);
-        } else {
-          setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
-          io.sioPendingWriteResult = CHAR_COMPLETE;
-          queueSingleByteResponse(ctx, now, CHAR_ACK);
+          return verified;
         }
+        setDiskFdcStatus(io, mounted.deviceSlot, 0xff);
+        return true;
+      }
+
+      // AHRM 9.1 keeps command frame checksum errors silent so devices cannot
+      // interfere with one another. AHRM 5.10 also documents the XL/XE OS
+      // first-byte race, where real disk drives answer an addressed, mounted
+      // disk with NAK so the OS can retry the command. Apply that
+      // compatibility rule only to an addressed virtual disk.
+      function nakOnBadCommandChecksum(frame, host) {
+        return !!getMountedDiskForDevice(host.io, devId);
       }
 
       return {
-        onCommandFrame: onCommandFrame,
-        onDataFrame: onDataFrame,
+        deviceIds: [devId],
+        onCommand: onCommand,
+        onData: onData,
+        nakOnBadCommandChecksum: nakOnBadCommandChecksum,
       };
     }
 
-    const sioDeviceHandlers = Object.create(null);
     for (
       let devId = DISK_DEVICE_ID_BASE;
       devId < DISK_DEVICE_ID_BASE + DISK_DEVICE_COUNT;
       devId++
     ) {
-      sioDeviceHandlers[devId] = diskDevice(devId);
+      registerDevice(diskDevice(devId));
     }
+
+    // Peripherals that are always present on the bus.
+    if (window.A8ESioPrinter && window.A8ESioPrinter.createDevice) {
+      registerDevice(window.A8ESioPrinter.createDevice());
+    }
+
     function seroutWrite(ctx, value, writeCycle) {
       const io = ctx.ioData;
       // I/O writes occur on the final bus cycle of a CPU instruction.  The
@@ -826,10 +923,19 @@
         const invalidAux2 = buf[3] & 0xff;
         const calculatedChecksum = sioChecksum(buf, 4);
         const providedChecksum = buf[4] & 0xff;
+        const addressed = sioDevices[invalidDevice];
         if (
-          invalidDevice >= DISK_DEVICE_ID_BASE &&
-          invalidDevice < DISK_DEVICE_ID_BASE + DISK_DEVICE_COUNT &&
-          getMountedDiskForDevice(io, invalidDevice)
+          addressed &&
+          addressed.nakOnBadCommandChecksum &&
+          addressed.nakOnBadCommandChecksum(
+            {
+              device: invalidDevice,
+              cmd: invalidCommand,
+              aux1: invalidAux1,
+              aux2: invalidAux2,
+            },
+            createDeviceHost(io, invalidDevice),
+          )
         ) {
           queueDeviceNack(ctx, now);
         }
@@ -873,19 +979,24 @@
       });
       const handler2 = sioDeviceHandlers[dev];
       if (handler2 && handler2.onCommandFrame) {
-        handler2.onCommandFrame(ctx, now, cmd2, aux1, aux2);
+        handler2.onCommandFrame(ctx, now, cmd2, aux1, aux2, dev);
       } else {
-        // $3F/$40 are SIO poll commands. An absent peripheral must not be
-        // turned into a disk NACK; the OS uses the resulting timeout.
-        if (cmd2 === CMD_HIGH_SPEED_INDEX || cmd2 === CMD_POLL) {
-          // A missing peripheral must remain electrically silent. The OS
-          // owns the timeout and completion state; SIO only records that the
-          // response phase is pending.
-          handleAbsentDevice(ctx);
-          return;
-        }
-        queueDeviceNack(ctx, now);
+        absentDeviceCommand(ctx, now, cmd2);
       }
+    }
+
+    // No device answers this command frame.
+    function absentDeviceCommand(ctx, now, cmd) {
+      // $3F/$40 are SIO poll commands. An absent peripheral must not be
+      // turned into a disk NACK; the OS uses the resulting timeout.
+      if (cmd === CMD_HIGH_SPEED_INDEX || cmd === CMD_POLL) {
+        // A missing peripheral must remain electrically silent. The OS
+        // owns the timeout and completion state; SIO only records that the
+        // response phase is pending.
+        handleAbsentDevice(ctx);
+        return;
+      }
+      queueDeviceNack(ctx, now);
     }
 
     function serinRead(ctx) {
@@ -920,6 +1031,7 @@
     }
 
     return {
+      registerDevice: registerDevice,
       seroutWrite: seroutWrite,
       sioCommandLineChanged: sioCommandLineChanged,
       serialOutputTransmitNow: serialOutputTransmitNow,

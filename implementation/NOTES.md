@@ -1,5 +1,146 @@
 # NOTES.md
 
+- 2026-11-13 (jsA8E: raw view removed, printer on MCP, disk on the SIO contract):
+  (1) The temporary raw frame view is gone (`frame` event, `toRaw`, the raw
+  button); the Atari Writer / Last Word tests that it was kept for passed. (2) New
+  `printer` domain in the automation API (`api.printer`: `getText`, `getHtml`,
+  `getLines`, `getLineCount`, `clear`, `getModel`, `setModel`) and in the MCP
+  server (`call_automation` domain `printer`, documented in `MCP.md`). The paper is
+  attached when the automation API attaches to the app, so a script sees what was
+  printed before its first call; `printer_paper.js` is loaded by `headless.js`
+  and got `getLines()`. `capabilities.printer` reports it. Covered by the stub
+  test in `mcp_server.test.js` and by `mcp_server_stdio.test.js`, which now also
+  boots BASIC on a fresh server, does an `LPRINT` and reads it back through MCP
+  (model switch, clear, error on an unknown model). (3) The disk drive
+  (`$31`-`$38`) is now a device of the generic SIO contract instead of a private
+  handler: the contract gained `{silent}` (no answer, the disk POLL),
+  `{reply, burst}` (disk STATUS: ACK, C, data and checksum in one SERIN burst),
+  `{receive, sector}` with `onData(bytes, host, {cmd, sector})` returning
+  true / false / `{nak}`, `nakOnBadCommandChecksum` (the AHRM 5.10 first-byte race
+  NAK, which was a disk special case inside the bus) and `host.io` for the media
+  state. No behavior change: new `tests/sio_disk_device.test.js` replays 90 steps
+  (all commands on single, double and 512 byte drives, bad data and command
+  checksums, out of range, no disk) and compares the SERIN stream, phase
+  boundaries, media and observer events with a golden trace recorded from the old
+  handler (`tests/fixtures/sio_disk_device.golden.json`); the existing SIO tests
+  (`pokey_sio_contract`, `_burst`, `_disk_observer`) and the full
+  `test:automation` pass, lint clean. Not run: `test:vbxe:full`, native `ctest`
+  (no C changes), real disk software beyond the tests.
+
+- 2026-11-13 (jsA8E: printer 1029 model and graphics on the paper): new `"1029"`
+  model in `sio_printer.js` (AHRM 9.8, checked against Altirra `printer.cpp`):
+  `$40`/`$45`, any AUX1 with a 40 byte frame, fixed status `[0,0,$14,$29]`, Status
+  resets all state, escapes anywhere and across frames (CTRL+N/O wide, CTRL+Y/Z
+  underline, 6/9 lpi, CTRL+W/X international, CTRL+A bit image with a 16-bit MSB
+  length), bit 7 on an escape code not recognized, ESC ESC = ESC, ESC EOL = EOL, 480
+  dot column lines (5+1 columns per character, 10+2 wide; a character that does not
+  fit moves to the next line), ASCII `$20-$7F` with `$7F` as a block, line spacing
+  taken when the line ends, an exactly full line plus EOL prints no blank line.
+  Where AHRM and Altirra differ I followed the AHRM: bit image is ESC `$01`
+  (Altirra tests `$41`), the normal set is plain ASCII (Altirra blanks `$60`,
+  `$7B`, `$7D-$7F`), and bit 7 on the ESC code is not accepted. 1025 European
+  mode now also maps `$7D-$7F` to the arrows. The paper keeps the line events'
+  `runs` and `dots`; the panel and the saved HTML render wide text, underline and
+  bit images (SVG), plain text gets a `[bit image, N columns]` marker; the panel
+  now shows the HTML view (everything escaped). Selector gained "1029".
+  Tests: `sio_printer_device` (1029: status, IDs, joined frames, ASCII set,
+  escapes split across frames, EOL/underline, ESC ESC / unknown / bit 7 / ESC EOL,
+  international, bit image content and zero length, full lines, wide overflow,
+  clamped bit image, Status reset), `printer_paper` (runs, SVG orientation,
+  placeholder), `printer_lprint` (1029 on the real ROM); `test:automation` and
+  lint pass. A screenshot of the panel (headless Chromium, minimal page) showed
+  wide text, underline and a bit image. Not done: 1020, drawing text as dots (so a
+  line with text and graphics shows them one under the other), out-of-paper
+  errors, Polish firmware, running real 1029 software. The temporary raw view is
+  still there.
+
+- 2026-11-13 (jsA8E: printer 1025 model, default): Atari Writer prints lines of
+  a 10 space left margin plus text (confirmed from the raw frames: real `$20`
+  bytes, `$9B` + spaces padding from the OS after each EOL, six blank lines as
+  top margin). The OS P: handler cuts those lines into 40 byte frames and the 820
+  model printed each frame as a separate line, so one line came out as two, the
+  second without the margin. New 1025 model in `sio_printer.js` (AHRM 9.6; checked
+  against Altirra `printer.cpp`): data frames are spliced into one line until an
+  EOL or a full line, 80/40/132 columns by density, text after an EOL ignored,
+  ESC CTRL+T/O/N, ESC L/S, ESC 6/8, ESC CTRL+W/X, an exactly full line plus EOL
+  prints no blank line, Status resets the settings, answers on `$40` and `$42`,
+  NAK for any AUX1 but `$4E`. Bus contract additions: the frame carries the
+  device ID, `{ignore:true}` makes a device act as absent (the absent-device
+  path was factored into `absentDeviceCommand`), `host.settings`
+  (`io.sioDeviceSettings`, live and shared across resets). Model selector in the
+  printer panel (`app.setPrinterModel`, worker message, `localStorage`
+  `a8e.printerModel`); default 1025, 820 kept for 40-column / sideways use.
+  Tests: `sio_printer_device` now covers both models (splicing with the real Atari
+  Writer shape, blank line, full line, escapes, short line, European characters,
+  Status reset, `$42` only on the 1025, run-time model switch) and
+  `printer_lprint` checks a long LPRINT line with margin on the real ROM;
+  `test:automation` and lint pass; the selector was exercised on a minimal page
+  in headless Chromium. The temporary raw view stays (now a `frame` event, one
+  row per data frame) until the 1029. Not done: 1029 / 1020, drawing of density,
+  spacing and short-line centering, out-of-paper errors, running Atari Writer or
+  Last Word themselves.
+
+- 2026-11-13 (jsA8E: printer P:, branch `Printer`): new generic SIO device
+  contract in `pokey_sio.js` (`registerDevice`; the device returns NAK / complete
+  / reply / receive-n and the bus owns ACK, data frame, checksum and C/E; command
+  frames with a bad checksum never reach a device). On it, `js/core/sio_printer.js`
+  implements the 820 / generic printer on `$40` per AHRM 9.3 (Write `$57` with
+  AUX1 `$4E`/`$53`, 40/29 bytes, character mapping, sideways right to left;
+  Status `$53` = flags, last AUX1, `$06`, `$00`). Output leaves as page events
+  (`io.sioDeviceEventObserver` -> `app.onSioDeviceEvent`, with the worker
+  `sioDeviceEvent` message and the `app_proxy` fan-out). `js/app/printer_paper.js`
+  collects them and renders text or a printable HTML page; `printer_ui.js` adds a
+  button (hidden until the first line) and a panel with .txt / .html / print /
+  clear. Tests: `sio_printer_device` (bus level: ACK/NAK, status, sideways, bad
+  data checksum, silent bad command frame), `printer_paper`, `printer_lprint`
+  (real OS ROM: `LPRINT` and `OPEN/PRINT #1/CLOSE` reach the paper); all in
+  `test:automation`, lint clean. The page loads in headless Chromium without
+  errors; the button/panel and the worker message path were NOT exercised in a
+  browser. Not done: disk drive still uses its own handler, 1025/1029/1020,
+  SVG output, native C core, snapshots, automation/MCP exposure; see
+  `implementation/PRINTER.md`. The printer panel is now docked as the last
+  tool panel (after the disk library, HostFS, assembler and snapshots; `order: 10`)
+  or floats anywhere in the browser window (`position: fixed`, moved to `<body>`,
+  dragged by its title bar and clamped to the viewport); the dock button in the
+  title bar switches, and mode and floating position are kept in
+  `localStorage` (`a8e.printerPanel`). At 980 px or narrower, where the tool
+  column is a full-screen sheet, it always floats. Dock/float, drag, clamping and
+  the stored position were checked in headless Chromium on a page built from the
+  real panel markup and `style.css`; not checked inside the full emulator page,
+  on a touch device, or on mobile.
+
+- 2026-11-13 (jsA8E: MCP findings 1, 2, 4 and 5 closed): (4) the real cause of
+  the `buildAndRun` hang was in `js/core/debugger.js`: `executeSingleInstruction`
+  waited for the instruction counter to equal `previous + 1`, but one
+  `CPU.run` call can retire two (an interrupt entry counts as one), so the
+  equality was skipped and the loop spun with no limit check until the 32-bit
+  counter wrapped. It now tests "at least one instruction retired". Two more
+  defects showed up once it returned: the tight-loop detector looked only at
+  PCs, so the OS cold-start delay loop (`DEY/BNE` at `$C2AD`) was reported as a
+  stuck program (it now also requires a repeated register state, so counting
+  loops no longer match), and the boot guards (500k instructions, 4M cycles)
+  were below what a cold boot needs (entry at about 937k instructions, 3.7M
+  cycles); `xex.js` now uses 5M and 20M. (1) ROM lookup tries the repository
+  root then `jsA8E/` (the ROMs are in `jsA8E/`) and warns on stderr when no OS
+  ROM is found. (2) Lines are processed through a queue, so answers come back in
+  request order; shutdown waits for it. (5) New
+  `tests/mcp_server_stdio.test.js` (in `test:automation`, skipped without ROMs)
+  runs the real server and emulator: handshake, order, default `buildAndRun`
+  of `JMP *` (without the debugger fix it never returns). `test:automation`
+  and lint pass. `test:vbxe` stops at `vbxe_blitter_attrmap_phase_boot` with
+  and without these changes (not investigated). Behavior change: concurrent
+  clients no longer run requests in parallel.
+
+- 2026-11-13 (jsA8E: MCP standard handshake): `mcp_server.js` now accepts the
+  standard `notifications/initialized` (besides the bare `initialized`) and
+  answers `ping` with an empty result, also before `initialize`. A message
+  without `id` (a notification) no longer gets any reply, including protocol
+  errors such as an unknown method, as JSON-RPC requires; before, a standard
+  client received an error with `id: null` right after the handshake.
+  `tests/mcp_server.test.js` covers both notifications and `ping`; the test and
+  `npm run lint` pass. `MCP.md` updated. Items 1, 2, 4 and 5 of the 2026-11-10
+  findings remain open.
+
 - 2026-11-11 (jsA8E: console keys fit on mobile): on phones the five console keys
   (about 380 px wide) overflowed the screen and HELP was cut off on the left.
   `style.css` now has a `max-width: 780px` block (the layout's mobile breakpoint):
@@ -4537,6 +4678,17 @@ The XEX loader's RUNAD check now reads both `$02E0` and `$02E1`. The three-byte 
   state after the timing contract was covered by regressions. The supported
   AHRM POKEY phase trace remains available independently through its existing
   opt-in mechanism.
+
+## 2026-11-14 Documentation sync for the printer and SIO contract
+
+- `implementation/DIAGRAM.mermaid`: added the SIO device node (disks and
+  printers on the contract) and the printer paper/panel node, with the event
+  path core -> proxy -> paper -> automation API. `PRINTER.md` now draws its
+  layers as a mermaid flowchart.
+- `CORE.md`, `UI.md`, `WORKER.md`, `AUTOMATION.md` (both), `jsA8E/README.md`
+  and `CHANGELOG.md` describe the SIO device contract, the printer panel, the
+  `sioDeviceEvent`/`setPrinterModel` worker messages and the `printer`
+  automation domain. Documentation only; no code changed.
 
 ## Legal / License TODO
 

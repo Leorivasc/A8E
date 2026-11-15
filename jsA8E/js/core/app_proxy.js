@@ -1389,6 +1389,8 @@
     const debugListeners = new Set();
     const memoryAccessListeners = new Set();
     const diskActivityListeners = new Set();
+    const sioDeviceEventListeners = new Set();
+    let printerModel = "1025";
     const diskLibraryProxy = createDiskLibraryProxy(sendRequest);
     let keyboardMappingMode =
       opts && opts.keyboardMappingMode === "original"
@@ -1493,6 +1495,16 @@
           fn(next);
         } catch {
           // ignore listener errors
+        }
+      });
+    }
+
+    function emitSioDeviceEvent(message) {
+      sioDeviceEventListeners.forEach(function (listener) {
+        try {
+          listener(message);
+        } catch {
+          // UI listeners must not affect worker communication.
         }
       });
     }
@@ -1724,6 +1736,11 @@
         return;
       }
 
+      if (data.type === "sioDeviceEvent") {
+        emitSioDeviceEvent({ device: data.device | 0, event: data.event || null });
+        return;
+      }
+
       if (data.type === "diskActivity") {
         emitDiskActivity(data.activity || null);
         return;
@@ -1870,6 +1887,13 @@
       },
       getVbxeConfig: function () {
         return Object.assign({}, state.vbxe);
+      },
+      setPrinterModel: function (model) {
+        printerModel = model === "820" || model === "1029" ? model : "1025";
+        sendCommand("setPrinterModel", { model: printerModel });
+      },
+      getPrinterModel: function () {
+        return printerModel;
       },
       setKeyboardMappingMode: function (mode) {
         keyboardMappingMode = mode === "original" ? "original" : "translated";
@@ -2087,6 +2111,13 @@
         return diskLibraryProxy.api;
       },
       diskLibrary: diskLibraryProxy.api,
+      onSioDeviceEvent: function (listener) {
+        if (typeof listener !== "function") return function () {};
+        sioDeviceEventListeners.add(listener);
+        return function () {
+          sioDeviceEventListeners.delete(listener);
+        };
+      },
       onDiskActivity: function (listener) {
         if (typeof listener !== "function") return function () {};
         diskActivityListeners.add(listener);
