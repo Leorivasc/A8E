@@ -52,6 +52,7 @@
     const app = config.app;
     const button = config.button;
     const panel = config.panel;
+    const mobileButton = config.mobileButton;
     const paper = window.A8EPrinterPaper ? window.A8EPrinterPaper.attach(app) : null;
     if (!paper || !button || !panel || panel.__a8ePrinterInit) return;
     panel.__a8ePrinterInit = true;
@@ -181,10 +182,17 @@
       if (!panel.hidden) applyMode();
     });
 
+    // The mobile tools sheet has its own copy of the button; both follow the
+    // same visibility.
+    function showButton(visible) {
+      button.hidden = !visible;
+      if (mobileButton) mobileButton.hidden = !visible;
+    }
+
     paper.onChange(function (lines) {
-      button.hidden = false;
+      showButton(true);
       if (!panel.hidden) refresh();
-      if (lines === 0 && panel.hidden) button.hidden = true;
+      if (lines === 0 && panel.hidden) showButton(false);
     });
 
     button.addEventListener("click", function () {

@@ -4196,6 +4196,10 @@ canvas.crtEnabled {
     text-align: center;
   }
 
+  .mobileToolsGrid button[hidden] {
+    display: none;
+  }
+
   .mobileToolsGrid button i {
     color: var(--accent);
     font-size: 18px;
